@@ -1,9 +1,17 @@
 # galata
 
-Flight dynamics, control-law design and simulation: trim an aircraft, linearise
-it, identify its modes, synthesise a control law, and verify the result in a
-nonlinear simulation — reproducibly, from a file you can read, with every number
-traceable to the routine that produced it.
+Flight dynamics, control-law design and simulation — reproducibly, from a file
+you can read, with every number traceable to the routine that produced it.
+
+Today it computes the atmosphere, integrates a nonlinear six-degree-of-freedom
+rigid body, and turns a linear aircraft model into a **labelled** modal table:
+short period, phugoid, Dutch roll, roll subsidence and spiral, identified by
+eigenvector participation rather than by frequency. Those results are checked
+against published NASA documents, and the disagreements are published too.
+
+Trim, linearisation, control synthesis and the nonlinear simulation loop are
+the point of the project and are **not built yet**. The status table below is
+the authority on what exists; the roadmap is the authority on what is intended.
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
@@ -12,22 +20,18 @@ C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
 ---
 
-## Status: 0.0.1 — skeleton
+## Status: 0.0.1 — pre-v0.1
 
-**This repository does not yet compute anything about an aircraft.** It contains
-the build system, the CI gates, the engineering decisions that constrain
-everything after it, and one library with one function in it.
-
-That is deliberate. The [charter](docs/CHARTER.md) requires that CI exist before
-the first feature and that no capability be documented before it works, so the
-gates are built first and the physics lands against them. What exists today:
+The [charter](docs/CHARTER.md) requires that CI exist before the first feature
+and that no capability be documented before it works, so the gates were built
+first and the physics has been landing against them. What exists today:
 
 | Surface | State |
 |---|---|
 | Build system (CMake + vcpkg, four platform/compiler combinations) | working |
 | CI: format, build, test, version consistency, SI boundary, doc links | working |
 | Version single-source-of-truth, with provenance in the build identification | working |
-| ADRs 0001–0005: ABI relationship, conventions, units, determinism, versioning | written |
+| ADRs 0001–0006: ABI relationship, conventions, units, determinism, versioning, EOM reference point | written |
 | Frames, quaternions, state vector, unit boundary (ADR-0002, ADR-0003) | implemented, property-tested |
 | U.S. Standard Atmosphere 1976, −5000 m to 86 km | implemented and **validated** against the published tables |
 | Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
@@ -35,6 +39,7 @@ gates are built first and the physics lands against them. What exists today:
 | YAML pipeline runner and the `galata` CLI | working |
 | One runnable example, checked by CI | working (two of them) |
 | Determinism: bit-identical repeat runs, cross-platform bound measured | working |
+| `trim.level`, `linearize.finitediff`, and a nonlinear aircraft model | **not built** — see [the roadmap](docs/ROADMAP.md) |
 | Everything else in §"What it will do" below | **not built** |
 
 The table above is maintained by hand and checked in review. The capability
