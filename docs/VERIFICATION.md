@@ -390,4 +390,4 @@ found and the lock should become a validation.
 
 ---
 
-Generated from galata 0.0.1 by `tools/validation/report_main.cpp`.
+Generated from galata 0.1.0 by `tools/validation/report_main.cpp`.

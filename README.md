@@ -23,11 +23,14 @@ C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
 ---
 
-## Status: 0.0.1 — pre-v0.1
+## Status: 0.1.0 — the honest spine
+
+v0.1 is complete: trim, linearise, analyse, all validated against a published
+NASA report, driven from a YAML file by a CLI.
 
 The [charter](docs/CHARTER.md) requires that CI exist before the first feature
 and that no capability be documented before it works, so the gates were built
-first and the physics has been landing against them. What exists today:
+first and the physics landed against them. What exists today:
 
 | Surface | State |
 |---|---|
