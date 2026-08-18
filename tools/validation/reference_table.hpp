@@ -21,9 +21,30 @@ struct ReferenceTable {
   // so that a failing validation names its source in the CI log.
   std::string citation;
   std::vector<std::string> columns;
+
+  // Numeric view: only the fields that parse as a number appear here.
   std::vector<std::map<std::string, double>> rows;
 
+  // Text view: every field, exactly as it appears in the file.
+  //
+  // Reference files come in two shapes. A wide table has one row per altitude
+  // and one numeric column per quantity. A long table has one row per quantity,
+  // with the quantity's NAME in one column and its value in another — which is
+  // the only sane shape for a heterogeneous data set like an aircraft's
+  // derivatives, where "wing area" and "C_m_alpha" have nothing in common but
+  // the document they came from. Both are parsed by the same loader.
+  std::vector<std::map<std::string, std::string>> text_rows;
+
   [[nodiscard]] double at(std::size_t row, const std::string& column) const;
+  [[nodiscard]] const std::string& text(std::size_t row, const std::string& column) const;
+
+  // For a long-format table: map `key_column` -> `value_column`, as numbers.
+  //
+  // Throws if a key repeats. A duplicated key in a transcribed reference file
+  // means the transcription is wrong, and silently keeping the last one would
+  // hide it.
+  [[nodiscard]] std::map<std::string, double> as_lookup(const std::string& key_column,
+                                                        const std::string& value_column) const;
 };
 
 // Loads <directory>/<name>. Throws if the file is missing, has no citation

@@ -33,6 +33,32 @@ double ReferenceTable::at(std::size_t row, const std::string& column) const {
   return found->second;
 }
 
+const std::string& ReferenceTable::text(std::size_t row, const std::string& column) const {
+  if (row >= text_rows.size()) {
+    throw std::out_of_range("reference row " + std::to_string(row) + " out of range");
+  }
+  const auto found = text_rows[row].find(column);
+  if (found == text_rows[row].end()) {
+    throw std::out_of_range("reference column '" + column + "' not present");
+  }
+  return found->second;
+}
+
+std::map<std::string, double> ReferenceTable::as_lookup(const std::string& key_column,
+                                                        const std::string& value_column) const {
+  std::map<std::string, double> lookup;
+  for (std::size_t row = 0; row < text_rows.size(); ++row) {
+    const std::string& key = text(row, key_column);
+    if (lookup.count(key) != 0) {
+      throw std::runtime_error("reference table has a duplicate key '" + key + "' in column '"
+                               + key_column
+                               + "'. A repeated key means the transcription is wrong.");
+    }
+    lookup[key] = at(row, value_column);
+  }
+  return lookup;
+}
+
 ReferenceTable load_reference(const std::string& directory, const std::string& name) {
   const std::string path = directory + "/" + name;
   std::ifstream file(path);
@@ -64,11 +90,24 @@ ReferenceTable load_reference(const std::string& directory, const std::string& n
                                + std::to_string(fields.size()) + " fields, header has "
                                + std::to_string(table.columns.size()));
     }
-    std::map<std::string, double> row;
+    std::map<std::string, double> numeric;
+    std::map<std::string, std::string> text;
     for (std::size_t i = 0; i < fields.size(); ++i) {
-      row[table.columns[i]] = std::stod(fields[i]);
+      text[table.columns[i]] = fields[i];
+      // A field that is not a number is not an error: long-format tables carry
+      // names and unit strings alongside values.
+      try {
+        std::size_t consumed = 0;
+        const double value = std::stod(fields[i], &consumed);
+        if (consumed == fields[i].size()) {
+          numeric[table.columns[i]] = value;
+        }
+      } catch (const std::exception&) {
+        // Not numeric; the text view already has it.
+      }
     }
-    table.rows.push_back(row);
+    table.rows.push_back(numeric);
+    table.text_rows.push_back(text);
   }
 
   // An uncited reference table is the failure mode charter rule 8 exists to

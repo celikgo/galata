@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A, flight condition 1 — geometry, mass properties, stability derivatives
+# and PUBLISHED modal characteristics.
+#
+# SOURCE (primary):
+#   Robert K. Heffley and Wayne F. Jewell,
+#   "Aircraft Handling Qualities Data".
+#   NASA CR-2144. Also Systems Technology Inc. Technical Report 1004-1, and
+#   DTIC AD-A277031. Prepared under contract NAS 4-1729.
+#   Systems Technology, Inc., Hawthorne, California, December 1972.
+#   NTRS document ID 19730003312.
+#   https://ntrs.nasa.gov/citations/19730003312
+#
+# RIGHTS: the report's own NASA Report Documentation Page prints
+#   "18. Distribution Statement: Unclassified - Unlimited" and
+#   "19./20. Security Classif.: Unclassified". No copyright notice, no
+#   proprietary or limited-rights legend and no export-control marking appears
+#   anywhere in the document. It is a NASA contractor report prepared under a
+#   government contract and released without restriction.
+#
+# TRANSCRIPTION METHOD — read this before trusting a digit:
+#   The NTRS PDF (7,101,468 bytes, 352 pages,
+#   SHA-256 f2976b2d9a3f62471de276c019f314af58b83c92ebd61f915779bea4d784349a)
+#   is a bitonal CCITTFax G4 microfilm scan, 2544x3300 at 300 dpi, with an OCR
+#   text layer bolted on. That layer is USABLE ONLY FOR PROSE. On every numeric
+#   table page it returns garbage — the Table II-2 page extracts as
+#   "P-I 0 ,.-I t-.-.1 bid .,rl ,-4 0 .,,-I .4,}". NO VALUE IN THIS FILE CAME
+#   FROM THE TEXT LAYER. Every number was read visually from the page images.
+#   A second, independent pass re-downloaded the document, confirmed its
+#   SHA-256, and re-read twelve of these values from the page images without
+#   reference to the first pass. All twelve agreed exactly.
+#
+# THE AIRCRAFT AND THE CONDITION:
+#   NT-33A, a variable-stability T-33 operated by Cornell Aeronautical
+#   Laboratory. Flight condition 1 of eight, from Table II-2 (report p.22):
+#   sea level, M = 0.204, power-approach configuration — 230 gal tip tanks,
+#   25% internal fuel, full flaps, gear down, 1.4 Vs, W = 11,800 lb, c.g. at
+#   0.260 c-bar.
+#
+# WHERE THE MODAL VALUES COME FROM — this is the part that is easy to get wrong:
+#   The report does not print headings saying "short period" or "Dutch roll".
+#   The modal characteristics ARE the factored denominators of the
+#   transfer-function tables. Appendix A (p.A-11) defines the notation:
+#     (s + 1/Tx)_i  ->  printed as 1/T(X)i
+#     (s^2 + 2 zeta omega_n s + omega_n^2)_j  ->  printed as Z(X)j ; W(X)j
+#     DET = "Roots of the denominator"
+#   So in Table II-4 (elevator) the denominator's two quadratics are the
+#   phugoid and the short period, and in Table II-8 (aileron) the denominator's
+#   two real roots are the spiral and the roll subsidence and its quadratic is
+#   the Dutch roll. Appendix A prints this exact flight condition's lateral
+#   denominator as its worked example, which is what fixes the identification:
+#     "(s + .0318)(s + 2.20)(s^2 + 2 x .0609 x 1.13s + 1.13^2)"
+#
+# SCOPE LIMIT stated by the report itself (p.3): the tabulated handling-
+#   qualities and modal values are BARE AIRFRAME, stability augmentation OFF.
+#
+# AN IDENTIFICATION THIS FILE MAKES AND THE DOCUMENT DOES NOT:
+#   The longitudinal denominator block lists its two quadratics as Z(DET)1 /
+#   W(DET)1 and Z(DET)2 / W(DET)2 — distinguished only by the index. The words
+#   "phugoid" and "short period" appear nowhere in that block, nor in the table
+#   title, nor anywhere on the page. Appendix A's subscript list defines the
+#   symbols zeta_Ph and zeta_sp, and page A-12 uses them in the handling-quality
+#   formulae, but the report never states which DET index supplies which.
+#
+#   The rows named phugoid_* and short_period_* below therefore carry an
+#   identification made HERE, not in the source: index 1 (omega_n = 0.172 rad/s,
+#   zeta = 0.0948) is the phugoid and index 2 (omega_n = 1.59 rad/s,
+#   zeta = 0.622) is the short period. The two are an order of magnitude apart
+#   in frequency and the damping ratios are textbook for each mode, so the
+#   assignment is not in doubt at this flight condition — but it is an inference,
+#   and at a configuration where the two modes approach each other it would not
+#   be safe. Said here so that nobody later reads it as the document's own
+#   labelling.
+#
+#   The lateral identification needs no such inference: Appendix A prints this
+#   exact flight condition's denominator as its worked example, in factored
+#   form, which fixes 1/T(DET)1 as the spiral and 1/T(DET)2 as the roll
+#   subsidence.
+#
+# UNITS ARE AS PRINTED — feet, slugs, pounds. Conversion to SI happens in the
+#   test, at the file-format boundary, per ADR-0003.
+#
+# The `location` column gives the table and the report page, so any value can
+# be checked against the source without re-deriving where it came from.
+#
+quantity,value,units,location
+wing_area,234.8,ft2,Table II-2 header p.22
+wing_span,37.54,ft,Table II-2 header p.22
+mean_aerodynamic_chord,6.72,ft,Table II-2 header p.22
+mach,0.204,-,Table II-2 row M p.22
+true_airspeed,228.0,ft/s,Table II-2 row VTO(FPS) p.22
+weight,11800.0,lbf,Table II-2 row W(LBS) p.22
+cg_fraction_mac,0.260,-,Table II-2 row C.G.(MGC) p.22
+inertia_xx,12700.0,slug-ft2,Table II-2 row IX p.22
+inertia_yy,20700.0,slug-ft2,Table II-2 row IY p.22
+inertia_zz,32001.0,slug-ft2,Table II-2 row IZ p.22
+inertia_xz,480.0,slug-ft2,Table II-2 row IXZ p.22
+principal_axis_inclination,-1.42,deg,Table II-2 row EPSILON p.22
+dynamic_pressure,61.7,lbf/ft2,Table II-2 row Q(PSF) p.22
+trim_alpha,2.20,deg,Table II-2 row ALPHA(DEG) p.22
+trim_gamma,0.0,deg,Table II-2 row GAMMA(DEG) p.22
+CL,0.813,-,Table II-1 p.21
+CD,0.135,-,Table II-1 p.21
+CL_alpha,5.22,1/rad,Table II-1 p.21
+CD_alpha,0.54,1/rad,Table II-1 p.21
+Cm_alpha,-0.401,1/rad,Table II-1 p.21
+Cm_q,-10.0,1/rad,Table II-1 p.21
+Cm_alpha_dot,-5.0,1/rad,Table II-1 p.21
+CL_delta_e,0.34,1/rad,Table II-1 p.21
+Cm_delta_e,-0.89,1/rad,Table II-1 p.21
+Cy_beta,-0.72,1/rad,Table II-1 p.21
+Cn_beta,0.049,1/rad,Table II-1 p.21
+Cl_beta,-0.127,1/rad,Table II-1 p.21
+Cl_p,-0.57,1/rad,Table II-1 p.21
+Cn_p,-0.045,1/rad,Table II-1 p.21
+Cl_r,0.20,1/rad,Table II-1 p.21
+Cn_r,-0.16,1/rad,Table II-1 p.21
+Cn_delta_a,-0.009,1/rad,Table II-1 p.21
+Cl_delta_a,0.14,1/rad,Table II-1 p.21
+Cy_delta_r,0.17,1/rad,Table II-1 p.21
+Cn_delta_r,-0.073,1/rad,Table II-1 p.21
+Cl_delta_r,-0.002,1/rad,Table II-1 p.21
+X_u_star,-0.0391,1/s,Table II-3 row XU* p.23
+Z_u_star,-0.248,1/s,Table II-3 row ZU* p.23
+M_u_star,0.000318,1/(s-ft),Table II-3 row MU* p.23
+X_w,0.0815,1/s,Table II-3 row XW p.23
+Z_w,-0.936,1/s,Table II-3 row ZW p.23
+M_w,-0.00827,1/(s-ft),Table II-3 row MW p.23
+Z_w_dot,0.0,-,Table II-3 row ZWD p.23
+Z_q,0.0,ft/s,Table II-3 row ZQ p.23
+M_w_dot,-0.00152,1/ft,Table II-3 row MWD p.23
+M_q,-0.694,1/s,Table II-3 row MQ p.23
+X_delta_e,0.516,ft/(s2-rad),Table II-3 row XDE p.23
+Z_delta_e,-13.4,ft/(s2-rad),Table II-3 row ZDE p.23
+M_delta_e,-4.19,1/s2,Table II-3 row MDE p.23
+Y_v,-0.125,1/s,Table II-7 row YV p.27
+Y_beta,-28.4,ft/s2,Table II-7 row YB p.27
+L_beta_prime,-5.49,1/s2,Table II-7 row LB' p.27
+N_beta_prime,0.667,1/s2,Table II-7 row NB' p.27
+L_p_prime,-2.03,1/s,Table II-7 row LP' p.27
+N_p_prime,-0.116,1/s,Table II-7 row NP' p.27
+L_r_prime,0.641,1/s,Table II-7 row LR' p.27
+N_r_prime,-0.207,1/s,Table II-7 row NR' p.27
+L_delta_a_prime,6.01,1/s2,Table II-7 row L'DA p.27
+N_delta_a_prime,0.0286,1/s2,Table II-7 row N'DA p.27
+Y_delta_r_star,0.0295,1/s,Table II-7 row Y*DR p.27
+L_delta_r_prime,-0.0125,1/s2,Table II-7 row L'DR p.27
+N_delta_r_prime,-1.24,1/s2,Table II-7 row N'DR p.27
+phugoid_damping_ratio,0.0948,-,Table II-4 DENOMINATOR Z(DET)1 p.24
+phugoid_natural_frequency,0.172,rad/s,Table II-4 DENOMINATOR W(DET)1 p.24
+short_period_damping_ratio,0.622,-,Table II-4 DENOMINATOR Z(DET)2 p.24
+short_period_natural_frequency,1.59,rad/s,Table II-4 DENOMINATOR W(DET)2 p.24
+spiral_root,0.0318,1/s,Table II-8 DENOMINATOR 1/T(DET)1 p.28
+roll_subsidence_root,2.20,1/s,Table II-8 DENOMINATOR 1/T(DET)2 p.28
+dutch_roll_damping_ratio,0.0609,-,Table II-8 DENOMINATOR Z(DET)1 p.28
+dutch_roll_natural_frequency,1.13,rad/s,Table II-8 DENOMINATOR W(DET)1 p.28
+dutch_roll_period,5.57,s,Table II-10 row DR PERIOD p.30
+control_anticipation_parameter,0.392,rad/s2/g,Table II-6 row CAP p.26
+n_z_alpha,6.37,g/rad,Table II-6 row NZA p.26
