@@ -3,7 +3,7 @@
 # galata_numerics: integrators, root-finders, Jacobians, eigenproblems.
 # Depends on Eigen and galata_core, and on nothing that knows about aircraft.
 
-find_package(Eigen3 3.4 CONFIG REQUIRED)
+galata_find_eigen()
 
 add_library(galata_numerics
   integrator.cpp

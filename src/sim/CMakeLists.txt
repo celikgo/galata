@@ -2,7 +2,7 @@
 #
 # galata_sim: rigid-body dynamics and the nonlinear simulation loop.
 
-find_package(Eigen3 3.4 CONFIG REQUIRED)
+galata_find_eigen()
 
 add_library(galata_sim
   rigid_body.cpp

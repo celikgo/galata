@@ -7,12 +7,14 @@ add_executable(galata_unit_tests
   test_frames.cpp
   test_state.cpp
   test_integrator.cpp
+  test_modes.cpp
 )
 
 target_link_libraries(galata_unit_tests
   PRIVATE
     galata::core
     galata::numerics
+    galata::analyze
     galata::warnings
     GTest::gtest_main
 )

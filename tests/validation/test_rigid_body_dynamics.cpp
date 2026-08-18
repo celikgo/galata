@@ -188,6 +188,9 @@ TEST_P(SymmetricTop, TransverseMagnitudeIsConserved) {
   }
 }
 
+// The name-generator lambda's parameter is deliberately not called `info`:
+// INSTANTIATE_TEST_SUITE_P expands to a context that already has one in scope,
+// and -Wshadow is an error on GCC.
 INSTANTIATE_TEST_SUITE_P(Shapes,
                          SymmetricTop,
                          ::testing::Values(
@@ -196,8 +199,8 @@ INSTANTIATE_TEST_SUITE_P(Shapes,
                              // Prolate: axial moment smallest, like a rocket. lambda < 0, so the
                              // precession runs the other way round the body.
                              PrecessionCase{"prolate", 20000.0, 8000.0}),
-                         [](const ::testing::TestParamInfo<PrecessionCase>& info) {
-                           return std::string(info.param.name);
+                         [](const ::testing::TestParamInfo<PrecessionCase>& parameter_info) {
+                           return std::string(parameter_info.param.name);
                          });
 
 // ===========================================================================

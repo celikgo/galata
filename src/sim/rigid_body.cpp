@@ -136,11 +136,17 @@ core::StateVector rigid_body_derivative(const core::State& state,
   // Solved rather than inverted. For a well-conditioned 3x3 the difference is
   // slight, but an aircraft with a large product of inertia relative to its
   // moments can be poorly conditioned, and an explicit inverse loses accuracy
-  // exactly there. LDLT is valid because validate() has established that the
-  // tensor is symmetric positive definite.
+  // exactly there.
+  //
+  // LLT rather than LDLT. Cholesky without pivoting is the right factorisation
+  // for a symmetric POSITIVE DEFINITE system, and validate() has established
+  // that the inertia tensor is exactly that — an inertia tensor is never
+  // indefinite or semi-definite, which is the case LDLT's pivoting exists to
+  // handle. LLT is also the cheaper of the two, and it runs on every RK4 stage
+  // of every step.
   const Eigen::Vector3d angular_momentum = mass.inertia_cg_body_kg_m2 * omega;
   const Eigen::Vector3d net_moment = applied.moment_cg_body_n_m - omega.cross(angular_momentum);
-  const Eigen::Vector3d angular_rate_rate = mass.inertia_cg_body_kg_m2.ldlt().solve(net_moment);
+  const Eigen::Vector3d angular_rate_rate = mass.inertia_cg_body_kg_m2.llt().solve(net_moment);
 
   core::StateVector derivative;
   derivative(core::kPositionNorth) = position_rate.x();

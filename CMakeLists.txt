@@ -38,6 +38,7 @@ include(CTest)
 include(GalataOptions)
 include(GalataWarnings)
 include(GalataDeterminism)
+include(GalataEigen)
 
 # Public include search path. Generated headers land under build/generated.
 add_library(galata_public_headers INTERFACE)

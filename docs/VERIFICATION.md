@@ -49,10 +49,10 @@ document prints.
 
 | Quantity | Worst deviation (units in last printed place) | Rounds to the printed value everywhere |
 |---|---|---|
-| Temperature | 0.487296 | yes |
-| Pressure | 0.960739 | **no** |
-| Density | 0.849645 | **no** |
-| Speed of sound | 0.499227 | yes |
+| Temperature | 0.487 | yes |
+| Pressure | 0.961 | **no** |
+| Density | 0.85 | **no** |
+| Speed of sound | 0.499 | yes |
 
 **Gate.** The validation suite requires every cell to agree within 1.0 units of
 the last printed place. That bound is chosen to be the tightest one the 1976
@@ -67,9 +67,9 @@ There are 3 of them, out of 32 tabulated cells.
 
 | Geometric altitude (m) | Quantity | Published | Computed | Units in last place |
 |---|---|---|---|---|
-| 11000 | pressure | 226.99 | 227 | 0.960739 |
-| 71000 | pressure | 0.044795 | 0.0447956 | 0.632462 |
-| 71000 | density | 7.1966e-05 | 7.19652e-05 | 0.849645 |
+| 11000 | pressure | 226.99 | 227 | 0.961 |
+| 71000 | pressure | 0.044795 | 0.044796 | 0.632 |
+| 71000 | density | 7.1966e-05 | 7.1965e-05 | 0.85 |
 
 ### Known model-versus-table differences that are not errors
 
@@ -136,8 +136,8 @@ product of inertia, 60 s of integration at a 1 ms fixed step — 60,000 RK4 step
 
 | Invariant | Worst relative drift over 60 s |
 |---|---|
-| Rotational kinetic energy | 1.5225e-14 |
-| Angular momentum vector, resolved in NED | 5.12662e-14 |
+| Rotational kinetic energy | below 1e-13 |
+| Angular momentum vector, resolved in NED | below 1e-13 |
 
 The angular-momentum figure is the vector in the NAVIGATION frame, not its
 magnitude in body axes. That is deliberate and it is the stronger claim: the

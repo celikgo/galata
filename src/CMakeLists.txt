@@ -2,3 +2,4 @@
 add_subdirectory(core)
 add_subdirectory(numerics)
 add_subdirectory(sim)
+add_subdirectory(analyze)

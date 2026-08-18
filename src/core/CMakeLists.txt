@@ -6,11 +6,11 @@
 
 # Version pinned in vcpkg.json's `overrides`, not floated against the registry
 # baseline: Eigen's version is part of what makes a numerical result
-# reproducible (ADR-0004). EXACT rather than a minimum, so that a registry
-# roll to Eigen 5 is a deliberate edit with a determinism re-baseline rather
-# than something that happens on a Tuesday. The floor here rejects a major
-# bump; the manifest override fixes the exact build.
-find_package(Eigen3 3.4 CONFIG REQUIRED)
+# reproducible (ADR-0004). The floor in galata_find_eigen() rejects a major
+# bump; the manifest override fixes the exact build. The macro additionally
+# marks Eigen's headers SYSTEM — see cmake/GalataEigen.cmake for the GCC
+# false positive that made that necessary.
+galata_find_eigen()
 
 add_library(galata_core
   version.cpp

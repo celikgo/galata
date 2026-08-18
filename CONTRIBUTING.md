@@ -27,6 +27,22 @@ git ls-files '*.cpp' '*.hpp' '*.h' | xargs clang-format -i
 shellcheck --severity=warning scripts/*.sh
 ```
 
+**If you develop on macOS, compile once with real GCC before pushing.** AppleClang
+accepts several things GCC rejects under this project's warning set, and the CI
+matrix will find them after you have pushed rather than before:
+
+```bash
+brew install gcc                          # provides g++-15
+EIGEN=build/dev/vcpkg_installed/arm64-osx/include/eigen3
+g++-15 -std=c++20 -O2 -Wall -Wextra -Wshadow -Wold-style-cast -Werror \
+  -I include -I build/dev/generated/include -isystem "$EIGEN" \
+  -c src/path/to/your.cpp -o /dev/null
+```
+
+Two classes account for most of it: `-Wshadow` inside GoogleTest macros, which
+expand to a scope containing names you did not write, and `-Wold-style-cast`
+reaching into third-party headers.
+
 **clang-format is pinned to 20.1.8.** Its output changes between major versions,
 so an unpinned formatter means the gate fails on a change you cannot reproduce.
 Install it from pip, not from your system package manager.
