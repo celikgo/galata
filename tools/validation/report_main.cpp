@@ -189,7 +189,8 @@ and it is preferred to a number invented to fill the gap.
 | Torque-free precession of a symmetric top | Closed-form solution of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** |
 | Intermediate-axis instability (Dzhanibekov) | Closed-form linearised solution of Euler's equations | **validated** |
 | Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
-| Six-degree-of-freedom equations with aerodynamic forces | — | **not implemented** — there is no aerodynamic model yet |
+| Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated** indirectly — the linearised derivatives match to 0.26%, which the equations of motion, the coefficient buildup and the wind-to-body rotation all feed |
+| Nonlinear simulation with aerodynamic forces, over time | — | **not implemented** — there is no simulation loop yet, only the derivative |
 | Riccati solvers | — | **not implemented** |
 | Aircraft lateral modes (spiral, roll subsidence, Dutch roll) | Heffley & Jewell, NASA CR-2144 (1972), Table II-8 | **validated** |
 | Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
