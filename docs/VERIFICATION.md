@@ -59,6 +59,10 @@ Four checks stand behind it, each a test rather than a convention:
 | Disk margin — robustness to simultaneous gain and phase variation | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), worked example `ex:edm` | **validated** — Eight published values reproduced. The strongest evidence is not a value at all: the perturbation the theorem constructs must actually destabilise the loop, placing a closed-loop pole on the imaginary axis at the critical frequency. See ADR-0007 for why values from a copyrighted paper may be committed. |
 | Disk margin — the guaranteed PHASE variation phi_m | MathWorks, *Stability Analysis Using Disk Margins*, Robust Control Toolbox documentation | **validated**, with a caveat — Against VENDOR DOCUMENTATION, not a peer-reviewed source, and marked as such. The paper derives phi_m but prints no number for it, so without a second source this output would be gated against nothing. galata computes 25.8017 degrees and MathWorks' published diskmargin output for the same loop agrees to every figure it prints — see tests/validation/reference/seiler2020_disk_margin.csv, which carries that value and its location. A second implementation agreeing is real evidence; it is not a published derivation. |
 | Disk margin — the critical frequency, against the paper's printed value | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), worked example `ex:edm` | **known discrepancy** — The discrepancy is in the SOURCE, not in galata. The paper prints omega_0 = 1.94 rad/s, but its own printed delta_0 and f_0 are evaluated at omega_0 and are reproduced only near 1.955 rad/s, which is where \|S - 1/2\| actually peaks. At the printed 1.94 the construction gives Re delta_0 = 0.1955 against a printed 0.212, out by 16.5 units in its last printed figure. galata reports the self-consistent value. A test asserts the inconsistency, so that a future resolution of it fails loudly rather than passing quietly. |
+| Singular values of a transfer matrix against closed-form decompositions | Closed-form singular value decompositions; Skogestad & Postlethwaite, *Multivariable Feedback Control*, 2nd ed. (2005) | **validated** — The reference is algebra rather than a document. For [[1,1],[0,1]] the singular values are the golden ratio and its reciprocal, and every element of that matrix has magnitude at most 1 while its largest gain is 1.618 — which is the reason a MIMO system needs singular values and not a grid of element-by-element Bode plots. |
+| Sensitivity and complementary sensitivity peaks M_S and M_T | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), Theorem `thm:edm` and its named skews | **validated** — The strongest evidence is a published IDENTITY between two of galata's own computations: the disk margin at skew +1 is 1/M_S and at skew -1 is 1/M_T. One route takes the peak of a scalar sensitivity, the other inverts the smallest singular value of I + L; they share nothing below the frequency response, and they agree to below 1e-15 relative. |
+| The reported peak gain is a lower bound on the H-infinity norm, not equal to it | Boyd & Balakrishnan (1990); Bruinsma & Steinbuch (1990) — the exact computation galata does NOT use | **validated**, with a caveat — Every peak in this library is found on a refined frequency grid rather than by the exact Hamiltonian-eigenvalue method, so it UNDERSTATES the true supremum. For a robustness margin that error is optimistic. The tests demonstrate the shortfall rather than hiding it: 1/(s+1) has an H-infinity norm of exactly 1 attained at zero frequency, which no logarithmic grid contains, and the reported peak approaches it from below as the sweep widens. |
+| Classical margins guaranteed by M_S and M_T | Skogestad & Postlethwaite, *Multivariable Feedback Control*, 2nd ed. (2005), equations (2.47), (2.48) and (2.50), pp. 35-37 | **validated** — The book's own worked values reproduced — M_S = 2 guarantees GM >= 2 and PM >= 29.0 degrees — but the stronger check is that the inequalities BOUND real loops: across four loop gains, the measured margins are at least what the peaks promise. Equation (2.50), an exact identity, ties three separate parts of galata together at the gain crossover. The bounds are SISO only, which is the source's own scope and not a hedge, and galata refuses them for a MIMO loop. |
 | Riccati solvers against the CAREX and DAREX benchmark collections | — | not implemented — Named in the v0.2 milestone. |
 
 ### Evidence
@@ -99,6 +103,10 @@ ctest --preset dev -R '<test name>'
 | Disk margin — robustness to simultaneous gain and phase variation | `DiskMarginSeiler2020.SymmetricDiskMarginMatchesThePublishedValues` (validation)<br>`DiskMarginSeiler2020.TheConstructedPerturbationActuallyDestabilisesTheLoop` (validation)<br>`DiskMarginSeiler2020.NamedSkewsHaveThePublishedInterceptClosedForms` (validation)<br>`DiskMarginSeiler2020.GainInterceptsFollowTheDiskParameterisationAtEverySkew` (validation)<br>`DiskMargin.ConstructedPerturbationDestabilisesWhateverTheSkew` (unit) |
 | Disk margin — the guaranteed PHASE variation phi_m | `DiskMarginSeiler2020.AgreesWithASecondImplementationIncludingThePhaseMargin` (validation) |
 | Disk margin — the critical frequency, against the paper's printed value | `DiskMarginSeiler2020.PublishedCriticalFrequencyDisagreesWithItsOwnPublishedPerturbation` (validation) |
+| Singular values of a transfer matrix against closed-form decompositions | `SingularValues.TriangularGainHasTheGoldenRatioSingularValues` (unit)<br>`SingularValues.DiagonalSystemHasTheElementMagnitudesAsItsSingularValues` (unit)<br>`SingularValues.SisoSingularValueIsTheMagnitude` (unit)<br>`SingularValues.RankDeficiencyIsReportedAsAnInfiniteConditionNumber` (unit) |
+| Sensitivity and complementary sensitivity peaks M_S and M_T | `Sensitivity.PeaksAgreeWithTheDiskMarginAtTheNamedSkews` (unit)<br>`Sensitivity.SisoTracesMatchTheirClosedForms` (unit)<br>`Sensitivity.DiagonalMimoLoopMatchesItsClosedForm` (unit)<br>`Sensitivity.SplusTIsTheIdentityAsMatrices` (unit) |
+| The reported peak gain is a lower bound on the H-infinity norm, not equal to it | `SingularValues.ThePeakIsALowerBoundOnTheTrueNorm` (unit)<br>`Sensitivity.TheReportedPeakIsALowerBoundOnTheTrueOne` (unit) |
+| Classical margins guaranteed by M_S and M_T | `SkogestadSensitivityBounds.WorkedValuesMatchTheBook` (validation)<br>`SkogestadSensitivityBounds.TheBoundsActuallyBoundRealLoops` (validation)<br>`SkogestadSensitivityBounds.SensitivityAndComplementaryAgreeAtTheGainCrossover` (validation)<br>`SkogestadSensitivityBounds.MsIsTheReciprocalOfTheDistanceToTheCriticalPoint` (validation)<br>`SkogestadSensitivityBounds.TheBoundsAreRefusedForAMimoLoop` (validation) |
 | Riccati solvers against the CAREX and DAREX benchmark collections | — |
 
 ### Capabilities, and the cases that validate them
@@ -111,10 +119,12 @@ against.
 
 | Capability | Declared state | Validated by |
 |---|---|---|
-| `analyze.diskmargin` | implemented and validated | `analyze.diskmargin`, `analyze.diskmargin.phase`, `analyze.diskmargin.critical_frequency` |
+| `analyze.diskmargin` | implemented and validated | `analyze.diskmargin`, `analyze.diskmargin.phase`, `analyze.diskmargin.critical_frequency`, `analyze.sigma.grid_bound` |
 | `analyze.freqresp` | implemented and validated | `analyze.freqresp`, `analyze.freqresp.hessenberg` |
 | `analyze.margins` | implemented and validated | `analyze.margins` |
 | `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
+| `analyze.sensitivity` | implemented and validated | `analyze.sensitivity`, `analyze.sigma.grid_bound`, `analyze.sensitivity.bounds` |
+| `analyze.sigma` | implemented and validated | `analyze.sigma`, `analyze.sigma.grid_bound` |
 | `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.linear.statespace` | implemented, unvalidated | — |
@@ -596,6 +606,110 @@ on the true peak, so the reported margin is an upper bound on the true one: the
 error is in the optimistic direction. The grid is refined around the
 closed-loop system's own lightly damped modes, which is where such peaks are,
 and every result records the band and point count that were searched.
+
+## Singular values and the sensitivity peaks
+
+**References.** S. Skogestad and I. Postlethwaite, *Multivariable Feedback
+Control: Analysis and Design*, 2nd ed., Wiley, 2005 — the definitions, the
+peaks M_S and M_T, and equations (2.47), (2.48) and (2.50). The first author
+hosts the book: <https://folk.ntnu.no/skoge/book/ps/bookall.pdf>. Also
+P. Seiler, A. Packard and P. Gahinet, *An Introduction to Disk Margins*, IEEE
+CSM 40(5), 2020, for the identity linking these peaks to the disk margin.
+
+### Why a MIMO system needs singular values
+
+A SISO system has one gain at each frequency. A MIMO system has a range of
+them, because the gain depends on the DIRECTION of the input, and the singular
+values are exactly that range. The shipped example
+`examples/nt33a-lateral-mimo` makes the point on a real aeroplane: at 0.01
+rad/s its principal gains are 43.8 and 0.458, a spread of about 96 to one at a
+single frequency.
+
+Reading a MIMO system through its individual element transfer functions instead
+is not a weaker analysis, it is a misleading one — every element can be small
+while the largest gain is not. The unit test uses the smallest example that
+shows this: for `[[1,1],[0,1]]` every element has magnitude at most 1, and the
+singular values are the golden ratio 1.618 and its reciprocal.
+
+### What the singular values are gated against
+
+Algebra, not a document. For a 2x2 matrix the singular values are the square
+roots of the eigenvalues of A^T A, which for the test cases come out in closed
+form: the golden ratio above, the element magnitudes of a diagonal system, and
+exactly one singular value equal to |G| for a SISO system — which is the check
+that ties this back to the already-validated frequency response.
+
+### The sensitivity peaks, and an identity between two of galata's own routes
+
+M_S and M_T are computed WITHOUT inverting a matrix:
+
+    sigma_max(S) = sigma_max((I+L)^-1) = 1 / sigma_min(I + L)
+
+so the sensitivity is read straight off the singular values of I + L. T comes
+from SOLVING (I + L) T = L. This matters because near the peak I + L is close
+to singular by definition — that is what a peak in S IS — so it is the one
+place where forming an inverse would destroy the digits being reported.
+
+The strongest evidence for these numbers is not a comparison against a document
+at all. Seiler, Packard and Gahinet prove that the disk margin at skew +1 is
+1/M_S and at skew -1 is 1/M_T. galata computes those two quantities by routes
+that share nothing below the frequency response — one takes the peak of a
+scalar sensitivity, the other inverts the smallest singular value of a matrix —
+and they agree to below 1e-15 relative. For the tutorial loop:
+
+| Quantity | galata | via the disk margin |
+|---|---|---|
+| M_S | 2.48666 at 2.01145 rad/s | 1 / alpha at skew +1 |
+| M_T | 2.05606 at 1.87562 rad/s | 1 / alpha at skew -1 |
+
+The shortest distance from that loop's Nyquist curve to the critical point is
+0.402146, which is 1/M_S — the geometric statement the book
+makes on its page 36.
+
+### The margins M_S guarantees, and the scope of that guarantee
+
+Skogestad and Postlethwaite, equations (2.47) and (2.48), printed page 36:
+
+    GM >= M_S/(M_S - 1)    PM >= 2 arcsin(1/(2 M_S)) >= 1/M_S   [rad]
+    GM >= 1 + 1/M_T        PM >= 2 arcsin(1/(2 M_T)) >= 1/M_T   [rad]
+
+The `[rad]` is printed on the equations themselves. Note the two gain-margin
+bounds have DIFFERENT functional forms, which is easy to blur from memory: at
+M_S = M_T = 2 they give 2 and 1.5 respectively, and the book prints both.
+
+Reproducing those two sentences is the weaker half of the validation. The
+stronger half is that the inequalities are checked to BOUND real loops: across
+four loop gains, the margins galata measures independently are at least what
+the peaks promise. Equation (2.50) — that |S| and |T| are equal at the gain
+crossover and both equal 1/(2 sin(PM/2)) — is an exact identity, and it ties
+three separate parts of galata together at a single frequency.
+
+**These bounds are SISO only, and that is the source's own scope.** Equations
+(2.47) and (2.48) sit in a chapter whose stated remit is SISO, and the book
+never restates them for MIMO. It goes further: its spinning-satellite example
+shows a plant with excellent margins "when considering one loop at a time" that
+is destabilised by small SIMULTANEOUS input gain errors. galata therefore
+refuses to compute these bounds for a loop that is not 1x1, and says so in the
+report rather than omitting them silently.
+
+### What these do not establish
+
+Singular values carry no phase, and there is no MIMO equivalent of a Bode phase
+plot here. They are also not eigenvalues: a system whose eigenvalues are all
+small can have a large sigma_max, and reading a singular value plot as a pole
+plot is a mistake the two have no relationship to prevent.
+
+Every peak in this section is a GRID MAXIMUM and therefore a LOWER bound on the
+true H-infinity norm — the exact computation is the Hamiltonian-eigenvalue
+method (Boyd & Balakrishnan; Bruinsma & Steinbuch), which galata does not have.
+For a robustness margin that error is optimistic. The tests demonstrate the
+shortfall rather than hiding it: 1/(s+1) has an H-infinity norm of exactly 1
+attained at zero frequency, which no logarithmic grid contains, and the
+reported peak climbs towards it from below as the sweep is widened.
+
+Finally, the condition number depends on how inputs and outputs are SCALED.
+Comparing it between two models scaled differently compares the scalings, and
+strict SI does not make a metre and a radian commensurate.
 
 ---
 

@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The classical margins guaranteed by a given sensitivity or complementary
+# sensitivity peak, and the book's own worked values for them.
+#
+# SOURCE (textbook, freely hosted by its first author):
+#   Sigurd Skogestad and Ian Postlethwaite,
+#   "Multivariable Feedback Control: Analysis and Design", Second Edition.
+#   John Wiley & Sons, 2005. ISBN 0-470-01167-X.
+#   Author-hosted PDF: https://folk.ntnu.no/skoge/book/ps/bookall.pdf
+#   Book home page:    https://skoge.folk.ntnu.no/book/
+#
+#   Everything below is from Chapter 2, Section 2.4.3 "Maximum peak criteria",
+#   printed pages 35-37 (PDF pages 51-53).
+#
+# RIGHTS: this is a copyrighted textbook and is NOT a US Government work.
+#   Nothing of it is reproduced here. What is transcribed is four scalar
+#   results of two worked sentences, quoted to verify an independent
+#   implementation and attributed in full, plus the equation numbers of the
+#   formulae implemented. Every value has additionally been reproduced from the
+#   book's own stated formulae. See
+#   docs/adr/0007-reference-values-from-copyrighted-sources.md.
+#
+# THE FORMULAE, transcribed verbatim from printed page 36:
+#
+#   (2.47)  GM >= M_S/(M_S - 1);   PM >= 2 arcsin(1/(2 M_S)) >= 1/M_S   [rad]
+#   (2.48)  GM >= 1 + 1/M_T;       PM >= 2 arcsin(1/(2 M_T)) >= 1/M_T   [rad]
+#
+#   The "[rad]" tag is printed on the equations themselves. The book converts
+#   to degrees only in prose, which is where the 29.0 values below come from.
+#
+# SCOPE, which is the source's own and not a hedge added here: (2.47) and
+#   (2.48) sit in Chapter 2, whose stated remit is SISO, and the book never
+#   restates them for MIMO. Section 3.7 goes further and shows a plant (the
+#   spinning satellite) with excellent margins "when considering one loop at a
+#   time" that is destabilised by small SIMULTANEOUS input gain errors.
+#   galata therefore refuses to compute these bounds for a loop that is not
+#   1x1.
+#
+# THE SENTENCES THE VALUES COME FROM, verbatim, printed page 36:
+#   "For example, with M_S = 2 we are guaranteed GM >= 2 and PM >= 29.0 degrees."
+#   "and specifically with M_T = 2 we have GM >= 1.5 and PM >= 29.0 degrees."
+#
+# Note that 2 arcsin(1/4) = 0.5053605 rad = 28.9550 degrees, which the book
+# prints rounded to 29.0. That is 0.45 units in the last printed figure, so the
+# standard 0.5 allowance covers it: the computed value rounds to the printed
+# one, with no relaxation needed anywhere in this file.
+#
+# The decibel figures the book gives alongside corroborate the transcription:
+# 20 log10(2) = 6.02 dB against its "2 (6 dB)", and 20 log10(1.25) = 1.94 dB
+# against its "1.25 (2 dB)".
+#
+quantity,value,significant_figures,units_in_last_place,units,location
+gain_margin_at_ms_2,2.0,2,0.5,-,"p.36 with M_S = 2 we are guaranteed GM >= 2"
+phase_margin_at_ms_2,29.0,3,0.5,deg,"p.36 and PM >= 29.0 degrees"
+gain_margin_at_mt_2,1.5,2,0.5,-,"p.36 with M_T = 2 we have GM >= 1.5"
+phase_margin_at_mt_2,29.0,3,0.5,deg,"p.36 and PM >= 29.0 degrees"
+typical_ms_limit,2.0,2,0.5,-,"p.36 it is required that M_S is less than about 2 (6 dB)"
+typical_mt_limit,1.25,3,0.5,-,"p.36 and M_T is less than about 1.25 (2 dB)"

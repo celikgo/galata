@@ -4,6 +4,7 @@
 
 #include "galata/analyze/frequency_response.hpp"
 
+#include "peak_search.hpp"
 #include <Eigen/Eigenvalues>
 
 #include <cmath>
@@ -13,9 +14,6 @@
 
 namespace galata::analyze {
 namespace {
-
-// (3 - sqrt 5) / 2, the golden-section fraction.
-constexpr double kGoldenFraction = 0.3819660112501051517954131656344;
 
 // | S(jw) + (sigma - 1)/2 |, the quantity whose peak IS the reciprocal of the
 // disk margin (eq:alphadm).
@@ -50,45 +48,12 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
     return shifted_sensitivity_gain(loop, frequency, skew);
   };
 
-  // Locate the peak on the grid, then refine it by golden section on the
-  // bracket its neighbours provide. A fixed step count, not a tolerance
-  // (ADR-0004).
-  std::size_t peak_index = 0;
-  double peak_value = gain(grid[0]);
-  for (std::size_t index = 1; index < grid.size(); ++index) {
-    const double value = gain(grid[index]);
-    if (value > peak_value) {
-      peak_value = value;
-      peak_index = index;
-    }
-  }
-
-  double low = grid[peak_index == 0 ? 0 : peak_index - 1];
-  double high = grid[peak_index + 1 < grid.size() ? peak_index + 1 : grid.size() - 1];
-  if (high > low) {
-    for (int step = 0; step < options.peak_refinement_iterations; ++step) {
-      const double first = low + (high - low) * kGoldenFraction;
-      const double second = high - (high - low) * kGoldenFraction;
-      if (first >= second) {
-        break;
-      }
-      if (gain(first) > gain(second)) {
-        high = second;
-      } else {
-        low = first;
-      }
-    }
-    const double refined = 0.5 * (low + high);
-    const double refined_value = gain(refined);
-    // The grid point wins if refinement somehow did worse: the peak is a
-    // maximum and this function must never report a smaller one than it
-    // actually saw.
-    if (refined_value > peak_value) {
-      peak_value = refined_value;
-      grid[peak_index] = refined;
-    }
-  }
-  const double critical_frequency = grid[peak_index];
+  // The peak search is shared with the sensitivity peaks (src/analyze/
+  // peak_search.hpp) so that every quantity in this library that is a maximum
+  // over frequency locates it the same way.
+  const detail::Peak peak = detail::find_peak(gain, grid, options.peak_refinement_iterations);
+  const double peak_value = peak.value;
+  const double critical_frequency = peak.frequency_rad_s;
 
   DiskMargin margin{};
   margin.skew = skew;

@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A lateral-directional dynamics as a TWO-INPUT, TWO-OUTPUT loop: aileron
+# and rudder driving bank angle and sideslip, broken at the plant input.
+#
+# WHAT THIS IS. The A and B matrices are the aircraft, identical to
+# examples/nt33a-lateral-modes/nt33a-lateral.yaml. The C rows are the control
+# law: measure bank angle, measure sideslip, and feed each back through a gain
+# of 0.5. Aileron is paired with bank, rudder with sideslip — the obvious
+# pairing, and part of what this example is for is showing that the obvious
+# pairing does not make the two loops independent.
+#
+# WHY BOTH GAINS ARE 0.5. Deliberately equal, and deliberately not tuned. Equal
+# gains matter here: the condition number of a transfer matrix depends on how
+# its inputs and outputs are SCALED, so unequal gains would manufacture
+# directionality that belongs to the units rather than to the aeroplane. With
+# both at 0.5 the spread between the principal gains is the aircraft's own.
+#
+# WHY NOT NEGATIVE. Both feedback signs are positive here because the loop is
+# closed with NEGATIVE unit feedback downstream, so a positive C entry is
+# already an opposing correction. Flipping either sign makes the closed loop
+# unstable, and galata refuses to report a sensitivity peak for it — that
+# refusal is exercised in the test suite.
+
+description: >-
+  NT-33A lateral-directional, flight condition 1 — 2x2 bank and sideslip loop,
+  broken at the plant input, gains 0.5 rad/rad
+citation: >-
+  Aircraft dynamics: R. K. Heffley and W. F. Jewell, "Aircraft Handling
+  Qualities Data", NASA CR-2144, Systems Technology Inc., December 1972,
+  Tables II-1, II-2, II-7 and Appendix C p.C-3. NTRS 19730003312.
+  Distribution: Unclassified - Unlimited.
+  The feedback gains are NOT from that report; they are chosen for this
+  example, as the file header explains.
+units: beta rad, p rad/s, r rad/s, phi rad; aileron and rudder deflections rad
+
+states: [beta, p, r, phi]
+inputs: [delta_a, delta_r]
+outputs: [bank_feedback, sideslip_feedback]
+
+a:
+  - [-0.125,        0.0383878091, -0.9992629164,  0.1410102351]
+  - [-5.49,        -2.03,          0.641,         0.0         ]
+  - [ 0.667,       -0.116,        -0.207,         0.0         ]
+  - [ 0.0,          1.0,           0.0384161250,  0.0         ]
+b:
+  - [ 0.0,    0.0295 ]
+  - [ 6.01,  -0.0125 ]
+  - [ 0.0286, -1.24  ]
+  - [ 0.0,    0.0    ]
+# The control law: bank angle (state 4) and sideslip (state 1), each at 0.5.
+c:
+  - [ 0.0, 0.0, 0.0, 0.5 ]
+  - [ 0.5, 0.0, 0.0, 0.0 ]
+d:
+  - [ 0.0, 0.0 ]
+  - [ 0.0, 0.0 ]

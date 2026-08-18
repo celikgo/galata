@@ -7,6 +7,9 @@ galata_find_eigen()
 
 add_library(galata_analyze
   disk_margin.cpp
+  peak_search.cpp
+  sensitivity.cpp
+  singular_values.cpp
   frequency_response.cpp
   margins.cpp
   modes.cpp

@@ -49,18 +49,24 @@ boundary. Validated against closed-form transfer functions and against the
 published worked example of Seiler, Packard & Gahinet (2020); see
 `docs/VERIFICATION.md`.
 
+Also done: singular values for MIMO loops (`analyze.sigma`) and the sensitivity
+and complementary-sensitivity peaks (`analyze.sensitivity`), with the classical
+margins M_S and M_T guarantee — SISO only, which is the source's own scope.
+
 **Remaining.** `synth.pid`, `synth.lqr`, CARE via the generalised Schur method
 validated against the CAREX benchmark collection, root locus, and
 `sim.nonlinear` with actuator position and rate limits in the loop. Markdown
-reports with embedded plots. Singular values for MIMO loops and the sensitivity
-and complementary-sensitivity peaks. A high-fidelity aircraft model with its
+reports with embedded plots. A high-fidelity aircraft model with its
 provenance, and the modal validation gate against published values.
 
-Known gap carried forward: the disk margin's peak is found on a refined
+Known gap carried forward: EVERY peak over frequency in galata — the disk
+margin, M_S, M_T and the largest singular value — is found on a refined
 frequency grid rather than by the exact Hamiltonian-eigenvalue method (Boyd &
-Balakrishnan; Bruinsma & Steinbuch), so the reported margin is an upper bound on
-the true one. The error is in the optimistic direction and is documented at
-every point it surfaces.
+Balakrishnan; Bruinsma & Steinbuch), so each is a lower bound on the true
+H-infinity norm and the derived robustness margins are upper bounds on the true
+ones. The error is in the optimistic direction and is documented at every point
+it surfaces. Closing it is a single piece of work — one exact norm routine
+behind `src/analyze/peak_search.hpp` — and it would tighten all four at once.
 
 ## v0.3 — the desktop application
 

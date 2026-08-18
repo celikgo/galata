@@ -12,6 +12,8 @@ add_executable(galata_unit_tests
   test_frequency_response.cpp
   test_margins.cpp
   test_disk_margin.cpp
+  test_singular_values.cpp
+  test_sensitivity.cpp
   test_jacobian.cpp
   test_newton.cpp
 )

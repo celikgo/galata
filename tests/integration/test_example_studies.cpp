@@ -169,6 +169,53 @@ TEST(ExampleNt33aBankLoopMargins, DiskMarginQualifiesTheInfiniteGainMargin) {
   EXPECT_NE(text.find("upper bound on the true disk margin"), std::string::npos);
 }
 
+TEST(ExampleNt33aLateralMimo, RunsEndToEnd) {
+  const auto result = run_example("nt33a-lateral-mimo", "mimo-study.yaml");
+  ASSERT_EQ(result.stages.size(), 5U);
+  EXPECT_EQ(result.stages[0].capability, "model.linear.statespace");
+  EXPECT_EQ(result.stages[1].capability, "analyze.sigma");
+  EXPECT_EQ(result.stages[2].capability, "analyze.sensitivity");
+  EXPECT_EQ(result.stages[3].capability, "analyze.margins");
+  EXPECT_EQ(result.stages[4].capability, "report.markdown");
+}
+
+TEST(ExampleNt33aLateralMimo, ShowsThePerChannelMarginsBeingOptimistic) {
+  // The example's argument, checked against the report a reader actually sees.
+  // The aileron channel alone reports an INFINITE gain margin; the 2x2 loop has
+  // M_S = 1.85. If either half stops being true the example stops making its
+  // point, and its README stops being accurate.
+  const auto result = run_example("nt33a-lateral-mimo", "mimo-study.yaml");
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+
+  EXPECT_NE(text.find("| Sensitivity M_S | 1.84855 |"), std::string::npos);
+  EXPECT_NE(text.find("| Complementary M_T | 1.80178 |"), std::string::npos);
+  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+  EXPECT_NE(text.find("48.486 deg"), std::string::npos);
+
+  // The shortest distance to the critical point, which the README quotes.
+  EXPECT_NE(text.find("0.54097"), std::string::npos);
+}
+
+TEST(ExampleNt33aLateralMimo, ReportsTwoPrincipalGainsAndTheirSpread) {
+  const auto result = run_example("nt33a-lateral-mimo", "mimo-study.yaml");
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+
+  EXPECT_NE(text.find("2 principal gains (2 outputs, 2 inputs)"), std::string::npos);
+  // The condition number the README quotes as "about 96" at the low end.
+  EXPECT_NE(text.find("| 0.01000 | 43.80798 | 0.45760 | 95.733 |"), std::string::npos)
+      << "the low-frequency principal gains and their spread are what the README quotes";
+
+  // And the guaranteed-margin bounds must be REFUSED here, with the reason,
+  // rather than computed per channel.
+  EXPECT_NE(text.find("stated for SINGLE-LOOP systems"), std::string::npos);
+  EXPECT_EQ(text.find("gain margin at least"), std::string::npos)
+      << "the SISO-only bounds must not appear for a 2x2 loop";
+}
+
 TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedModes) {
   // The example's README quotes these. If the model, the trim or the
   // linearisation changes, this fails and the README gets corrected — which is

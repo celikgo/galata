@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Singular values and the sensitivity peaks of a 2x2 aircraft loop.
+#
+# Run it with:
+#   galata run examples/nt33a-lateral-mimo/mimo-study.yaml
+
+version: 1
+
+stages:
+  - id: loop
+    capability: model.linear.statespace
+    input:
+      path: nt33a-lateral-mimo.yaml
+
+  - id: sigma
+    capability: analyze.sigma
+    input:
+      system: { from: loop }
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+      points: 400
+
+  - id: peaks
+    capability: analyze.sensitivity
+    input:
+      system: { from: loop }
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+
+  # Single-loop margins on the aileron-to-bank channel ALONE, included so the
+  # report can show them being optimistic against the MIMO peaks above.
+  - id: aileron_only
+    capability: analyze.margins
+    input:
+      system: { from: loop }
+      input: delta_a
+      output: bank_feedback
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A lateral 2x2 loop — principal gains and sensitivity peaks
+      sections:
+        - { from: sigma }
+        - { from: peaks }
+        - { from: aileron_only }
+      path: lateral-mimo.md

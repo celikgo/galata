@@ -11,6 +11,8 @@
 #include "galata/analyze/frequency_response.hpp"
 #include "galata/analyze/margins.hpp"
 #include "galata/analyze/modes.hpp"
+#include "galata/analyze/sensitivity.hpp"
+#include "galata/analyze/singular_values.hpp"
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
@@ -505,6 +507,74 @@ Artifact disk_margin_capability(const StageContext& context) {
   return artifact;
 }
 
+// --- analyze.sigma ---------------------------------------------------------
+
+struct SigmaArtifact {
+  analyze::SingularValueResponse response;
+  std::string system_description;
+};
+
+Artifact sigma_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("system");
+  const auto& system = upstream.payload_as<model::LinearSystem>("linear_system");
+  if (system.input_count() == 0) {
+    throw std::runtime_error(
+        "analyze.sigma: the model has no inputs, so it has no transfer "
+        "matrix");
+  }
+
+  const double from = context.input->number_at("from_rad_s", 1.0e-3);
+  const double to = context.input->number_at("to_rad_s", 1.0e3);
+  const int points = static_cast<int>(context.input->number_at("points", 500));
+  const bool refine = context.input->bool_at("refine_near_modes", true);
+  const std::vector<double> grid = refine
+                                       ? analyze::grid_refined_for_modes(system.a, from, to, points)
+                                       : analyze::logarithmic_grid(from, to, points);
+
+  SigmaArtifact result;
+  result.response = analyze::singular_values(system, grid);
+  result.system_description = system.description;
+
+  std::ostringstream summary;
+  summary << result.response.channel_count() << " principal gains, peak "
+          << format(result.response.peak_gain, 4) << " at "
+          << format(result.response.peak_frequency_rad_s, 4) << " rad/s";
+
+  Artifact artifact;
+  artifact.kind = "singular_values";
+  artifact.summary = summary.str();
+  artifact.payload = result;
+  return artifact;
+}
+
+// --- analyze.sensitivity ---------------------------------------------------
+
+struct SensitivityArtifact {
+  analyze::SensitivityPeaks peaks;
+  std::string system_description;
+};
+
+Artifact sensitivity_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("system");
+  const auto& system = upstream.payload_as<model::LinearSystem>("linear_system");
+
+  SensitivityArtifact result;
+  result.peaks = analyze::sensitivity_peaks(system, read_margin_options(context));
+  result.system_description = system.description;
+
+  std::ostringstream summary;
+  summary << "M_S " << format(result.peaks.sensitivity_peak, 4) << " at "
+          << format(result.peaks.sensitivity_peak_frequency_rad_s, 4) << " rad/s, M_T "
+          << format(result.peaks.complementary_peak, 4) << " at "
+          << format(result.peaks.complementary_peak_frequency_rad_s, 4) << " rad/s";
+
+  Artifact artifact;
+  artifact.kind = "sensitivity_peaks";
+  artifact.summary = summary.str();
+  artifact.payload = result;
+  return artifact;
+}
+
 // --- Markdown writers for the frequency-domain artefacts --------------------
 
 std::string frequency_or_dash(bool present, double value) {
@@ -633,6 +703,77 @@ void write_disk_margin_section(std::ostream& out, const DiskMarginArtifact& arti
          "result as marginal.*\n\n";
 }
 
+void write_sigma_section(std::ostream& out, const SigmaArtifact& artifact) {
+  const analyze::SingularValueResponse& response = artifact.response;
+  if (!artifact.system_description.empty()) {
+    out << "**Model.** " << artifact.system_description << "\n\n";
+  }
+  out << "**Channels.** " << response.channel_count() << " principal gains ("
+      << response.output_names.size() << " outputs, " << response.input_names.size()
+      << " inputs).\n\n";
+  out << "**Peak gain.** " << format(response.peak_gain, 5) << " at "
+      << format(response.peak_frequency_rad_s, 5) << " rad/s.\n\n";
+
+  const std::vector<double> largest = response.largest();
+  const std::vector<double> smallest = response.smallest();
+  const std::vector<double> condition = response.condition_number();
+
+  out << "| w (rad/s) | sigma_max | sigma_min | condition |\n";
+  out << "| ---: | ---: | ---: | ---: |\n";
+  const std::size_t stride = std::max<std::size_t>(1, response.frequencies_rad_s.size() / 20);
+  for (std::size_t index = 0; index < response.frequencies_rad_s.size(); index += stride) {
+    out << "| " << format(response.frequencies_rad_s[index], 5) << " | "
+        << format(largest[index], 5) << " | " << format(smallest[index], 5) << " | "
+        << (std::isinf(condition[index]) ? std::string("infinite") : format(condition[index], 3))
+        << " |\n";
+  }
+  out << "\n*Sampled every " << stride
+      << " points of the grid. The peak is a grid maximum "
+         "and therefore a LOWER bound on the H-infinity norm.*\n\n";
+}
+
+void write_sensitivity_section(std::ostream& out, const SensitivityArtifact& artifact) {
+  const analyze::SensitivityPeaks& peaks = artifact.peaks;
+  if (!artifact.system_description.empty()) {
+    out << "**Model.** " << artifact.system_description << "\n\n";
+  }
+  out << "| peak | value | at (rad/s) |\n| --- | ---: | ---: |\n";
+  out << "| Sensitivity M_S | " << format(peaks.sensitivity_peak, 5) << " | "
+      << format(peaks.sensitivity_peak_frequency_rad_s, 5) << " |\n";
+  out << "| Complementary M_T | " << format(peaks.complementary_peak, 5) << " | "
+      << format(peaks.complementary_peak_frequency_rad_s, 5) << " |\n\n";
+
+  out << "M_S is the reciprocal of the shortest distance from the Nyquist curve of the loop to "
+         "the critical point -1, so it covers gain and phase variation together where the "
+         "classical margins hold one fixed while varying the other. The shortest distance here "
+         "is "
+      << format(1.0 / peaks.sensitivity_peak, 5) << ".\n\n";
+
+  const analyze::GuaranteedMargins bounds = analyze::guaranteed_margins(peaks);
+  if (bounds.applies && bounds.valid) {
+    out << "Classical margins these peaks GUARANTEE (Skogestad & Postlethwaite, 2nd ed., "
+           "equations (2.47) and (2.48)) — lower bounds, so the loop's actual margins are at "
+           "least this good:\n\n";
+    out << "| from | gain margin at least | phase margin at least |\n| --- | ---: | ---: |\n";
+    out << "| M_S | " << format(bounds.gain_margin_from_sensitivity, 4) << " | "
+        << format(units::radians_to_degrees(bounds.phase_margin_from_sensitivity_rad), 3)
+        << " deg |\n";
+    out << "| M_T | " << format(bounds.gain_margin_from_complementary, 4) << " | "
+        << format(units::radians_to_degrees(bounds.phase_margin_from_complementary_rad), 3)
+        << " deg |\n\n";
+  } else if (!bounds.applies) {
+    out << "*No guaranteed gain and phase margins are reported: equations (2.47) and (2.48) "
+           "are stated for SINGLE-LOOP systems and this loop is not one. Applying them "
+           "per-channel to a multi-loop system is the specific error that makes a MIMO design "
+           "look robust when it is not — see Skogestad & Postlethwaite section 3.7.*\n\n";
+  }
+
+  out << "*Both peaks are grid maxima and therefore LOWER bounds on the true H-infinity norms; "
+         "for M_S that error makes the loop look more robust than it is. Searched "
+      << format(peaks.searched_from_rad_s, 5) << " to " << format(peaks.searched_to_rad_s, 2)
+      << " rad/s over " << peaks.grid_points << " points.*\n\n";
+}
+
 Artifact write_markdown_report(const StageContext& context) {
   const std::string relative = context.input->string_at("path");
   const std::string path = context.resolve_output_path(relative);
@@ -670,6 +811,10 @@ Artifact write_markdown_report(const StageContext& context) {
           out, std::any_cast<const FrequencyResponseArtifact&>(artifact.payload));
     } else if (artifact.kind == "stability_margins") {
       write_margins_section(out, std::any_cast<const MarginArtifact&>(artifact.payload));
+    } else if (artifact.kind == "singular_values") {
+      write_sigma_section(out, std::any_cast<const SigmaArtifact&>(artifact.payload));
+    } else if (artifact.kind == "sensitivity_peaks") {
+      write_sensitivity_section(out, std::any_cast<const SensitivityArtifact&>(artifact.payload));
     } else if (artifact.kind == "disk_margin") {
       write_disk_margin_section(out, std::any_cast<const DiskMarginArtifact&>(artifact.payload));
     } else {
@@ -764,6 +909,22 @@ Registry build_registry() {
       "disk_margin",
       Capability::State::Implemented,
       disk_margin_capability});
+
+  registry.add(Capability{
+      "analyze.sigma",
+      "Singular values of a MIMO transfer matrix over frequency — the principal gains, their "
+      "spread, and the peak gain",
+      "singular_values",
+      Capability::State::Implemented,
+      sigma_capability});
+
+  registry.add(Capability{
+      "analyze.sensitivity",
+      "Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with "
+      "negative unit feedback, and the frequencies at which they occur",
+      "sensitivity_peaks",
+      Capability::State::Implemented,
+      sensitivity_capability});
 
   registry.add(Capability{"report.markdown",
                           "Write a Markdown report from upstream results",

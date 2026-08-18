@@ -13,6 +13,8 @@
 #include "galata/analyze/disk_margin.hpp"
 #include "galata/analyze/margins.hpp"
 #include "galata/analyze/modes.hpp"
+#include "galata/analyze/sensitivity.hpp"
+#include "galata/analyze/singular_values.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
@@ -536,6 +538,44 @@ int main(int argc, char** argv) {
     measured["disk.omega0_units_off"] = format_significant(
         std::fabs(delta_real_at_printed - kPrintedDeltaReal) / kUnitInLastFigure, 3);
     measured["disk.delta_real_at_printed"] = format_significant(delta_real_at_printed, 4);
+  }
+
+  // --- Sensitivity peaks against the disk margin ----------------------------
+  //
+  // The identity the two independent routes must satisfy: alpha at skew +1 is
+  // 1/M_S, and at skew -1 is 1/M_T. Measured here rather than quoted so the
+  // agreement reported in the case notes is one this build produced.
+  {
+    galata::model::LinearSystem loop;
+    loop.a = Eigen::MatrixXd::Zero(3, 3);
+    loop.a << 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -10.0, -10.0, -10.0;
+    loop.b = Eigen::MatrixXd::Zero(3, 1);
+    loop.b(2, 0) = 1.0;
+    loop.c = Eigen::MatrixXd::Zero(1, 3);
+    loop.c(0, 0) = 25.0;
+    loop.state_names = {"x0", "x1", "x2"};
+    loop.input_names = {"u"};
+    loop.output_names = {"y"};
+
+    galata::analyze::MarginOptions options;
+    options.frequencies = galata::analyze::logarithmic_grid(1.0e-2, 1.0e3, 2000);
+
+    const auto peaks = galata::analyze::sensitivity_peaks(loop, options);
+    const auto s_based = galata::analyze::disk_margin(loop, 0, 0, 1.0, options);
+    const auto t_based = galata::analyze::disk_margin(loop, 0, 0, -1.0, options);
+
+    const double sensitivity_gap =
+        std::fabs(peaks.sensitivity_peak - 1.0 / s_based.alpha) / peaks.sensitivity_peak;
+    const double complementary_gap =
+        std::fabs(peaks.complementary_peak - 1.0 / t_based.alpha) / peaks.complementary_peak;
+
+    measured["sigma.ms"] = format_significant(peaks.sensitivity_peak, 6);
+    measured["sigma.ms_frequency"] = format_significant(peaks.sensitivity_peak_frequency_rad_s, 6);
+    measured["sigma.mt"] = format_significant(peaks.complementary_peak, 6);
+    measured["sigma.mt_frequency"] =
+        format_significant(peaks.complementary_peak_frequency_rad_s, 6);
+    measured["sigma.st_ulps"] = format_bound(std::fmax(sensitivity_gap, complementary_gap));
+    measured["sigma.nyquist_distance"] = format_significant(1.0 / peaks.sensitivity_peak, 6);
   }
 
   measured["det.total"] = std::to_string(fingerprint_counts.total);
@@ -1265,6 +1305,113 @@ on the true peak, so the reported margin is an upper bound on the true one: the
 error is in the optimistic direction. The grid is refined around the
 closed-loop system's own lightly damped modes, which is where such peaks are,
 and every result records the band and point count that were searched.
+
+)",
+                          measured);
+
+  std::cout << substitute(R"(## Singular values and the sensitivity peaks
+
+**References.** S. Skogestad and I. Postlethwaite, *Multivariable Feedback
+Control: Analysis and Design*, 2nd ed., Wiley, 2005 — the definitions, the
+peaks M_S and M_T, and equations (2.47), (2.48) and (2.50). The first author
+hosts the book: <https://folk.ntnu.no/skoge/book/ps/bookall.pdf>. Also
+P. Seiler, A. Packard and P. Gahinet, *An Introduction to Disk Margins*, IEEE
+CSM 40(5), 2020, for the identity linking these peaks to the disk margin.
+
+### Why a MIMO system needs singular values
+
+A SISO system has one gain at each frequency. A MIMO system has a range of
+them, because the gain depends on the DIRECTION of the input, and the singular
+values are exactly that range. The shipped example
+`examples/nt33a-lateral-mimo` makes the point on a real aeroplane: at 0.01
+rad/s its principal gains are 43.8 and 0.458, a spread of about 96 to one at a
+single frequency.
+
+Reading a MIMO system through its individual element transfer functions instead
+is not a weaker analysis, it is a misleading one — every element can be small
+while the largest gain is not. The unit test uses the smallest example that
+shows this: for `[[1,1],[0,1]]` every element has magnitude at most 1, and the
+singular values are the golden ratio 1.618 and its reciprocal.
+
+### What the singular values are gated against
+
+Algebra, not a document. For a 2x2 matrix the singular values are the square
+roots of the eigenvalues of A^T A, which for the test cases come out in closed
+form: the golden ratio above, the element magnitudes of a diagonal system, and
+exactly one singular value equal to |G| for a SISO system — which is the check
+that ties this back to the already-validated frequency response.
+
+### The sensitivity peaks, and an identity between two of galata's own routes
+
+M_S and M_T are computed WITHOUT inverting a matrix:
+
+    sigma_max(S) = sigma_max((I+L)^-1) = 1 / sigma_min(I + L)
+
+so the sensitivity is read straight off the singular values of I + L. T comes
+from SOLVING (I + L) T = L. This matters because near the peak I + L is close
+to singular by definition — that is what a peak in S IS — so it is the one
+place where forming an inverse would destroy the digits being reported.
+
+The strongest evidence for these numbers is not a comparison against a document
+at all. Seiler, Packard and Gahinet prove that the disk margin at skew +1 is
+1/M_S and at skew -1 is 1/M_T. galata computes those two quantities by routes
+that share nothing below the frequency response — one takes the peak of a
+scalar sensitivity, the other inverts the smallest singular value of a matrix —
+and they agree to {sigma.st_ulps} relative. For the tutorial loop:
+
+| Quantity | galata | via the disk margin |
+|---|---|---|
+| M_S | {sigma.ms} at {sigma.ms_frequency} rad/s | 1 / alpha at skew +1 |
+| M_T | {sigma.mt} at {sigma.mt_frequency} rad/s | 1 / alpha at skew -1 |
+
+The shortest distance from that loop's Nyquist curve to the critical point is
+{sigma.nyquist_distance}, which is 1/M_S — the geometric statement the book
+makes on its page 36.
+
+### The margins M_S guarantees, and the scope of that guarantee
+
+Skogestad and Postlethwaite, equations (2.47) and (2.48), printed page 36:
+
+    GM >= M_S/(M_S - 1)    PM >= 2 arcsin(1/(2 M_S)) >= 1/M_S   [rad]
+    GM >= 1 + 1/M_T        PM >= 2 arcsin(1/(2 M_T)) >= 1/M_T   [rad]
+
+The `[rad]` is printed on the equations themselves. Note the two gain-margin
+bounds have DIFFERENT functional forms, which is easy to blur from memory: at
+M_S = M_T = 2 they give 2 and 1.5 respectively, and the book prints both.
+
+Reproducing those two sentences is the weaker half of the validation. The
+stronger half is that the inequalities are checked to BOUND real loops: across
+four loop gains, the margins galata measures independently are at least what
+the peaks promise. Equation (2.50) — that |S| and |T| are equal at the gain
+crossover and both equal 1/(2 sin(PM/2)) — is an exact identity, and it ties
+three separate parts of galata together at a single frequency.
+
+**These bounds are SISO only, and that is the source's own scope.** Equations
+(2.47) and (2.48) sit in a chapter whose stated remit is SISO, and the book
+never restates them for MIMO. It goes further: its spinning-satellite example
+shows a plant with excellent margins "when considering one loop at a time" that
+is destabilised by small SIMULTANEOUS input gain errors. galata therefore
+refuses to compute these bounds for a loop that is not 1x1, and says so in the
+report rather than omitting them silently.
+
+### What these do not establish
+
+Singular values carry no phase, and there is no MIMO equivalent of a Bode phase
+plot here. They are also not eigenvalues: a system whose eigenvalues are all
+small can have a large sigma_max, and reading a singular value plot as a pole
+plot is a mistake the two have no relationship to prevent.
+
+Every peak in this section is a GRID MAXIMUM and therefore a LOWER bound on the
+true H-infinity norm — the exact computation is the Hamiltonian-eigenvalue
+method (Boyd & Balakrishnan; Bruinsma & Steinbuch), which galata does not have.
+For a robustness margin that error is optimistic. The tests demonstrate the
+shortfall rather than hiding it: 1/(s+1) has an H-infinity norm of exactly 1
+attained at zero frequency, which no logarithmic grid contains, and the
+reported peak climbs towards it from below as the sweep is widened.
+
+Finally, the condition number depends on how inputs and outputs are SCALED.
+Comparing it between two models scaled differently compares the scalings, and
+strict SI does not make a metre and a radian commensurate.
 
 )",
                           measured);

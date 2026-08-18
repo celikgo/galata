@@ -13,7 +13,9 @@ published modes to 1.0%.
 It evaluates frequency response and reports all four margin types — gain,
 phase, delay and disk — with every crossover and the frequency at which it
 occurs, gated against closed-form transfer functions and a published worked
-example.
+example. For multivariable loops it computes principal gains and the
+sensitivity peaks M_S and M_T, which is what catches a design whose
+per-channel margins look comfortable and whose loop is not.
 
 Control synthesis and the nonlinear simulation loop are the point of the
 project and are **not built yet**. The status table below is the authority on
@@ -68,6 +70,8 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
+| `analyze.sensitivity` | Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with negative unit feedback, and the frequencies at which they occur | `sensitivity_peaks` | implemented and validated |
+| `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |

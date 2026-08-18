@@ -19,6 +19,8 @@ const char* const kSeiler =
     "Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020)";
 const char* const kMathWorks =
     "MathWorks, *Stability Analysis Using Disk Margins*, Robust Control Toolbox documentation";
+const char* const kSkogestad =
+    "Skogestad & Postlethwaite, *Multivariable Feedback Control*, 2nd ed. (2005)";
 const char* const kEuler =
     "Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz)";
 
@@ -405,6 +407,72 @@ const std::vector<Case>& validation_cases() {
        "by {disk.omega0_units_off} units in its last printed figure. galata reports the "
        "self-consistent value. A test asserts the inconsistency, so that a future resolution of "
        "it fails loudly rather than passing quietly."},
+
+      // --- Singular values and the sensitivity peaks -------------------------
+      {"analyze.sigma",
+       "Singular values of a transfer matrix against closed-form decompositions",
+       {"analyze.sigma"},
+       "Closed-form singular value decompositions; Skogestad & Postlethwaite, *Multivariable "
+       "Feedback Control*, 2nd ed. (2005)",
+       Status::Validated,
+       {E{kUnit, "SingularValues.TriangularGainHasTheGoldenRatioSingularValues"},
+        E{kUnit, "SingularValues.DiagonalSystemHasTheElementMagnitudesAsItsSingularValues"},
+        E{kUnit, "SingularValues.SisoSingularValueIsTheMagnitude"},
+        E{kUnit, "SingularValues.RankDeficiencyIsReportedAsAnInfiniteConditionNumber"}},
+       "The reference is algebra rather than a document. For [[1,1],[0,1]] the singular values "
+       "are the golden ratio and its reciprocal, and every element of that matrix has magnitude "
+       "at most 1 while its largest gain is 1.618 — which is the reason a MIMO system needs "
+       "singular values and not a grid of element-by-element Bode plots."},
+
+      {"analyze.sensitivity",
+       "Sensitivity and complementary sensitivity peaks M_S and M_T",
+       {"analyze.sensitivity"},
+       std::string(kSeiler) + ", Theorem `thm:edm` and its named skews",
+       Status::Validated,
+       {E{kUnit, "Sensitivity.PeaksAgreeWithTheDiskMarginAtTheNamedSkews"},
+        E{kUnit, "Sensitivity.SisoTracesMatchTheirClosedForms"},
+        E{kUnit, "Sensitivity.DiagonalMimoLoopMatchesItsClosedForm"},
+        E{kUnit, "Sensitivity.SplusTIsTheIdentityAsMatrices"}},
+       "The strongest evidence is a published IDENTITY between two of galata's own "
+       "computations: the disk margin at skew +1 is 1/M_S and at skew -1 is 1/M_T. One route "
+       "takes the peak of a scalar sensitivity, the other inverts the smallest singular value "
+       "of I + L; they share nothing below the frequency response, and they agree to "
+       "{sigma.st_ulps} "
+       "relative."},
+
+      {"analyze.sigma.grid_bound",
+       "The reported peak gain is a lower bound on the H-infinity norm, not equal to it",
+       {"analyze.sigma", "analyze.sensitivity", "analyze.diskmargin"},
+       "Boyd & Balakrishnan (1990); Bruinsma & Steinbuch (1990) — the exact computation galata "
+       "does NOT use",
+       Status::ValidatedWithCaveat,
+       {E{kUnit, "SingularValues.ThePeakIsALowerBoundOnTheTrueNorm"},
+        E{kUnit, "Sensitivity.TheReportedPeakIsALowerBoundOnTheTrueOne"}},
+       "Every peak in this library is found on a refined frequency grid rather than by the "
+       "exact Hamiltonian-eigenvalue method, so it UNDERSTATES the true supremum. For a "
+       "robustness margin that error is optimistic. The tests demonstrate the shortfall rather "
+       "than hiding it: 1/(s+1) has an H-infinity norm of exactly 1 attained at zero frequency, "
+       "which no logarithmic grid contains, and the reported peak approaches it from below as "
+       "the sweep widens."},
+
+      {"analyze.sensitivity.bounds",
+       "Classical margins guaranteed by M_S and M_T",
+       {"analyze.sensitivity"},
+       std::string(kSkogestad) + ", equations (2.47), (2.48) and (2.50), pp. 35-37",
+       Status::Validated,
+       {E{kValidation, "SkogestadSensitivityBounds.WorkedValuesMatchTheBook"},
+        E{kValidation, "SkogestadSensitivityBounds.TheBoundsActuallyBoundRealLoops"},
+        E{kValidation,
+          "SkogestadSensitivityBounds.SensitivityAndComplementaryAgreeAtTheGainCrossover"},
+        E{kValidation,
+          "SkogestadSensitivityBounds.MsIsTheReciprocalOfTheDistanceToTheCriticalPoint"},
+        E{kValidation, "SkogestadSensitivityBounds.TheBoundsAreRefusedForAMimoLoop"}},
+       "The book's own worked values reproduced — M_S = 2 guarantees GM >= 2 and PM >= 29.0 "
+       "degrees — but the stronger check is that the inequalities BOUND real loops: across four "
+       "loop gains, the measured margins are at least what the peaks promise. Equation (2.50), "
+       "an exact identity, ties three separate parts of galata together at the gain crossover. "
+       "The bounds are SISO only, which is the source's own scope and not a hedge, and galata "
+       "refuses them for a MIMO loop."},
 
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
