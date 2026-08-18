@@ -12,6 +12,7 @@ add_executable(galata_determinism_tests
 
 target_link_libraries(galata_determinism_tests
   PRIVATE
+    galata::determinism_fingerprint
     galata::core
     galata::numerics
     galata::sim

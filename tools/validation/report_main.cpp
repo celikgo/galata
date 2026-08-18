@@ -191,6 +191,9 @@ struct Nt33aMeasurements {
   double hand_phugoid_zeta = 0.0;
   double hand_phugoid_real = 0.0;
   double hand_phugoid_imag = 0.0;
+  // Weakest and strongest evidence behind any label the chain assigns.
+  double min_label_score = 1.0;
+  double max_label_score = 0.0;
 };
 
 Nt33aMeasurements measure_nt33a(const std::map<std::string, double>& published,
@@ -288,6 +291,13 @@ Nt33aMeasurements measure_nt33a(const std::map<std::string, double>& published,
     throw std::runtime_error(
         "galata-validation-report: the hand-assembled matrix produced no phugoid");
   }
+  for (const auto* modes : {&lateral_modes, &longitudinal_modes}) {
+    for (const auto& mode : modes->modes) {
+      out.min_label_score = std::fmin(out.min_label_score, mode.label_score);
+      out.max_label_score = std::fmax(out.max_label_score, mode.label_score);
+    }
+  }
+
   out.hand_phugoid_zeta = hand_phugoid->damping_ratio;
   out.hand_phugoid_real = hand_phugoid->eigenvalue.real();
   out.hand_phugoid_imag = hand_phugoid->eigenvalue.imag();
@@ -450,6 +460,36 @@ int main(int argc, char** argv) {
         measured["chain.phugoid_percent"] = percent(comparison.relative());
       }
     }
+  }
+
+  // The standard states its ceiling twice and the two disagree; by how much is
+  // a property of equation (18), not a remembered number.
+  measured["atm.ceiling_geopotential"] =
+      format_significant(galata::core::geopotential_from_geometric(86000.0), 8);
+  {
+    // How far the molecular-scale temperature departs from the tabulated
+    // kinetic one at the top of the model.
+    const double tabulated_kinetic = 186.87;  // Table I at Z = 86 km, transcribed
+    measured["atm.tm_departure_k"] =
+        format(galata::core::isa(86000.0).temperature_k - tabulated_kinetic);
+  }
+  {
+    // The stability-to-body rotation "looks like a cos(alpha) effect". How
+    // small that would be, and how much bigger the cross term is, are both
+    // properties of the published derivative set.
+    const double alpha = galata::units::degrees_to_radians(published_nt33a.at("trim_alpha"));
+    measured["axes.cos_alpha"] = format_significant(std::cos(alpha), 4);
+    measured["axes.cos_effect_percent"] = percent(1.0 - std::cos(alpha));
+    measured["axes.beta_ratio"] =
+        format(std::fabs(published_nt33a.at("Cl_beta") / published_nt33a.at("Cn_beta")));
+  }
+  measured["chain.min_label_score"] = format(nt33a.min_label_score);
+  measured["chain.max_label_score"] = format(nt33a.max_label_score);
+  {
+    const galata::determinism::Amplification amplification =
+        galata::determinism::amplification_study();
+    measured["fingerprint.min_amplification"] = format(amplification.smallest);
+    measured["fingerprint.max_amplification"] = format(amplification.largest);
   }
 
   measured["det.total"] = std::to_string(fingerprint_counts.total);
@@ -683,13 +723,13 @@ system is defined in terms of molecular-scale temperature `T_M`, which equals
 kinetic temperature `T` only where the mean molecular weight equals its
 sea-level value. Above roughly 80 km the ratio `M/M_0` falls away from 1 — the
 document's Table 8 gives 0.9995788 at 86 km — so galata's temperature runs high
-relative to the tabulated kinetic temperature by up to about 0.08 K in the top
+relative to the tabulated kinetic temperature by {atm.tm_departure_k} K in the top
 6 km. At 86 km the document tabulates `T = 186.87` K and `T_M = 186.95` K;
 galata computes {atm.tm_86km} K, which is the `T_M` value.
 
 **The upper bound is stated twice and the two statements differ.** The standard
 gives the ceiling as both 84.8520 km' geopotential and 86 km geometric.
-Equation (18) maps 86000 m to 84852.046 m', so the geopotential figure is the
+Equation (18) maps 86000 m to {atm.ceiling_geopotential} m', so the geopotential figure is the
 document's own rounding. galata bounds the envelope in geometric altitude, so
 that a query at exactly the standard's stated ceiling is accepted.
 
@@ -726,7 +766,7 @@ extrapolating.
 )",
                           measured);
 
-  std::cout << R"(## Determinism
+  std::cout << substitute(R"(## Determinism
 
 ADR-0004 defines two tiers, and both are gated by
 `.github/workflows/determinism.yml` on Linux, macOS and Windows.
@@ -758,11 +798,12 @@ than a bit-identity claim that would be false.
 meaningful on a computation that does not amplify small differences; on a
 chaotic trajectory the gate would be measuring chaos rather than agreement. The
 fingerprint's rigid-body case was measured and amplifies a perturbation by a
-factor between 0.06 and 1.0 over 60 s. A test asserts this, so a change that
-makes the battery chaotic fails there rather than as an intermittently red
-workflow.
+factor between {fingerprint.min_amplification} and {fingerprint.max_amplification} over
+60 s. A test asserts this, so a change that makes the battery chaotic fails
+there rather than as an intermittently red workflow.
 
-)";
+)",
+                          measured);
 
   std::cout << substitute(R"(## Trim and linearisation
 
@@ -835,8 +876,9 @@ The worst is {modes.worst_name} at {modes.worst_percent}.
 **An error this comparison caught.** The first version of the model treated the
 report's lateral derivatives as body-axis when the report gives them in
 stability axes. At a trim angle of attack of about two degrees that looks like a
-0.07% effect, since cos(2.2 deg) = 0.9993. It is not: the rotation MIXES the
-rolling and yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross
+{axes.cos_effect_percent} effect, since cos(alpha) = {axes.cos_alpha}. It is not: the
+rotation MIXES the rolling and yawing moments, and C_l_beta is {axes.beta_ratio}
+times C_n_beta, so the cross
 term dominates and C_n_beta moves by 10%. The Dutch roll damping came out 35%
 high. It was the derivative-by-derivative comparison above that localised it —
 the modes alone said only that something was wrong.
@@ -1001,7 +1043,8 @@ uncertainty by the conversion factor of 3.28.
 band: the spiral root, the roll-subsidence root, the Dutch-roll frequency and
 damping, the phugoid frequency, and the short-period frequency and damping. All
 five modes are also labelled correctly by participation factor alone, with
-scores between 0.72 and 0.99. The Dutch-roll period, published separately in
+scores between {chain.min_label_score} and {chain.max_label_score}. The Dutch-roll period,
+published separately in
 Table II-10, agrees to within 1%.
 
 ### The phugoid damping ratio: localised, and no longer open

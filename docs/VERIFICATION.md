@@ -158,7 +158,7 @@ system is defined in terms of molecular-scale temperature `T_M`, which equals
 kinetic temperature `T` only where the mean molecular weight equals its
 sea-level value. Above roughly 80 km the ratio `M/M_0` falls away from 1 — the
 document's Table 8 gives 0.9995788 at 86 km — so galata's temperature runs high
-relative to the tabulated kinetic temperature by up to about 0.08 K in the top
+relative to the tabulated kinetic temperature by 0.0759 K in the top
 6 km. At 86 km the document tabulates `T = 186.87` K and `T_M = 186.95` K;
 galata computes 186.946 K, which is the `T_M` value.
 
@@ -230,9 +230,9 @@ than a bit-identity claim that would be false.
 meaningful on a computation that does not amplify small differences; on a
 chaotic trajectory the gate would be measuring chaos rather than agreement. The
 fingerprint's rigid-body case was measured and amplifies a perturbation by a
-factor between 0.06 and 1.0 over 60 s. A test asserts this, so a change that
-makes the battery chaotic fails there rather than as an intermittently red
-workflow.
+factor between 0.0563 and 1.01 over
+60 s. A test asserts this, so a change that makes the battery chaotic fails
+there rather than as an intermittently red workflow.
 
 ## Trim and linearisation
 
@@ -302,8 +302,9 @@ The worst is Dutch roll zeta at 1.05%.
 **An error this comparison caught.** The first version of the model treated the
 report's lateral derivatives as body-axis when the report gives them in
 stability axes. At a trim angle of attack of about two degrees that looks like a
-0.07% effect, since cos(2.2 deg) = 0.9993. It is not: the rotation MIXES the
-rolling and yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross
+0.07% effect, since cos(alpha) = 0.9993. It is not: the
+rotation MIXES the rolling and yawing moments, and C_l_beta is 2.59
+times C_n_beta, so the cross
 term dominates and C_n_beta moves by 10%. The Dutch roll damping came out 35%
 high. It was the derivative-by-derivative comparison above that localised it —
 the modes alone said only that something was wrong.
@@ -409,7 +410,8 @@ uncertainty by the conversion factor of 3.28.
 band: the spiral root, the roll-subsidence root, the Dutch-roll frequency and
 damping, the phugoid frequency, and the short-period frequency and damping. All
 five modes are also labelled correctly by participation factor alone, with
-scores between 0.72 and 0.99. The Dutch-roll period, published separately in
+scores between 0.717 and 0.993. The Dutch-roll period,
+published separately in
 Table II-10, agrees to within 1%.
 
 ### The phugoid damping ratio: localised, and no longer open

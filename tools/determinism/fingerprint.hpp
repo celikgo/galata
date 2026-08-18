@@ -38,6 +38,29 @@ struct Counts {
 
 [[nodiscard]] Counts fingerprint_counts(const std::string& model_path);
 
+// How much the fingerprint's rigid-body trajectory amplifies a perturbation of
+// the initial state, over a range of horizons up to the one the battery
+// integrates.
+//
+// This is not a curiosity. A cross-platform determinism bound is only
+// meaningful on a computation that does not amplify small differences: two
+// platforms' math libraries disagree by around 1e-16 relative, and on a chaotic
+// trajectory that becomes anything at all, so the tier 2 gate would be
+// measuring chaos rather than agreement.
+//
+// Shared between the test that asserts the bound and the report that states it,
+// so the two cannot describe different trajectories.
+struct Amplification {
+  double smallest = 0.0;
+  double largest = 0.0;
+  // The relative perturbation applied. Large enough to survive the resolution
+  // of the final value: one ulp of u is smaller than one ulp of the RESULT, so
+  // it rounds away entirely and the study reads a misleading zero.
+  double seed = 1e-9;
+};
+
+[[nodiscard]] Amplification amplification_study();
+
 }  // namespace galata::determinism
 
 #endif  // GALATA_TOOLS_DETERMINISM_FINGERPRINT_HPP

@@ -34,6 +34,18 @@ Round-trip conversions, quaternion normalisation, frame-transformation
 composition and associativity. These are the tests that catch a transposed
 rotation matrix, which no single hand-picked example reliably does.
 
+**No number in the V&V report is typed.** Every figure it states about galata's
+own behaviour is measured at render time and referred to in prose by name. The
+generator refuses to produce a document if a case note contains a value it also
+computes, and `scripts/gen-verification.sh` fails on an unresolved placeholder —
+which is left visible rather than dropped, because a sentence with the number
+silently removed still reads fine and says nothing.
+
+Anything shared between a test and the report lives in one place for the same
+reason: the determinism battery, the perturbation-amplification study and the
+hand-assembled NT-33A matrices are all libraries, not copies. Two
+implementations would be two answers to the same question.
+
 **The V&V report's summary table is generated, and its claims are checked.**
 `docs/VERIFICATION.md` is produced from `tools/validation/case_registry.cpp`,
 which declares every validation case: its reference, its status, and the tests

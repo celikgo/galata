@@ -218,6 +218,63 @@ void fingerprint(const std::string& model_path, const Emit& emit) {
   fingerprint_trim_and_linearisation(model_path, emit);
 }
 
+Amplification amplification_study() {
+  // The same body, wrench and initial state the rigid-body fingerprint uses.
+  sim::MassProperties mass;
+  mass.mass_kg = 4000.0;
+  mass.inertia_cg_body_kg_m2 << 12000.0, 0.0, -1500.0,  //
+      0.0, 40000.0, 0.0,                                //
+      -1500.0, 0.0, 48000.0;
+
+  sim::Wrench wrench;
+  wrench.force_body_n = Eigen::Vector3d(2500.0, -400.0, -1200.0);
+  wrench.moment_cg_body_n_m = Eigen::Vector3d(800.0, -1500.0, 300.0);
+
+  core::State initial;
+  initial.position_ned_m = Eigen::Vector3d(0.0, 0.0, -3048.0);
+  initial.velocity_body_m_s = Eigen::Vector3d(120.0, 3.0, 8.0);
+  initial.attitude_body_to_ned = core::quaternion_from_euler({0.3, -0.2, 1.1});
+  initial.angular_rate_body_rad_s = Eigen::Vector3d(0.9, -0.4, 0.6);
+
+  const numerics::DerivativeFunction derivative =
+      [&mass, &wrench](double, const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    return sim::rigid_body_derivative(core::State::from_vector(core::StateVector(x)),
+                                      mass,
+                                      wrench,
+                                      Eigen::Vector3d(0.0, 0.0, 9.80665));
+  };
+  const numerics::ProjectionFunction project = [](Eigen::VectorXd& x) {
+    core::State state = core::State::from_vector(core::StateVector(x));
+    state.renormalise_attitude();
+    x = state.to_vector();
+  };
+
+  Amplification result;
+  const Eigen::VectorXd base = initial.to_vector();
+  Eigen::VectorXd nudged = base;
+  nudged(core::kVelocityU) *= (1.0 + result.seed);
+
+  bool first = true;
+  for (const int steps : {500, 2000, 5000, 10000, 15000, 30000}) {
+    const auto reference =
+        numerics::integrate_fixed_step(derivative, base, 0.0, 0.002, steps, steps, project);
+    const auto perturbed =
+        numerics::integrate_fixed_step(derivative, nudged, 0.0, 0.002, steps, steps, project);
+    const double divergence =
+        (reference.states.back() - perturbed.states.back()).norm() / reference.states.back().norm();
+    const double amplification = divergence / result.seed;
+    if (first) {
+      result.smallest = amplification;
+      result.largest = amplification;
+      first = false;
+    } else {
+      result.smallest = std::fmin(result.smallest, amplification);
+      result.largest = std::fmax(result.largest, amplification);
+    }
+  }
+  return result;
+}
+
 Counts fingerprint_counts(const std::string& model_path) {
   Counts counts;
   fingerprint(model_path, [&counts](const std::string& key, double) {
