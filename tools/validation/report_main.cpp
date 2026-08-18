@@ -195,7 +195,8 @@ and it is preferred to a number invented to fill the gap.
 | Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
 | Aircraft longitudinal modes — phugoid DAMPING RATIO | same, Table II-4 | **open discrepancy**, see below |
 | Modal classification into the five classical modes | same; labels checked against the report's own identification | **validated** |
-| Determinism, cross-platform | — | **not implemented** |
+| Determinism, tier 1 (same platform, byte-identical) | ADR-0004 | **validated** on Linux, macOS and Windows |
+| Determinism, tier 2 (cross-platform, bounded) | ADR-0004 | **validated** against a 1e-9 relative gate |
 
 )";
 
@@ -310,6 +311,44 @@ it against published values.
 
 **Everything above 86 km.** Out of scope: galata refuses the query rather than
 extrapolating.
+
+)";
+
+  std::cout << R"(## Determinism
+
+ADR-0004 defines two tiers, and both are gated by
+`.github/workflows/determinism.yml` on Linux, macOS and Windows.
+
+**Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
+emits 92 values at `%.17g`, which round-trips a double exactly, so byte-identical
+output means bit-identical values rather than values that merely print the same.
+Gated absolutely on every platform.
+
+**Tier 2 — cross-platform, bounded.** Every platform PAIR is compared, not each
+against a nominated reference: with a reference, which platform holds that role
+is an arbitrary choice that then shows up in the published numbers. The gate is
+1e-9 relative — far above the roughly 1e-16 that one math-library call costs,
+far below the roughly 1e-5 that any real divergence in the physics would
+produce, so it discriminates between "different libm" and "different answer".
+
+The observed deviation is printed by every run rather than merely bounded; read
+it from the workflow log. It is not restated here, because a measured figure
+copied into a hand-maintained document is a figure that drifts.
+
+**Why tier 2 is not bit-identity.** `sqrt` is required by IEEE 754 to be
+correctly rounded and agrees everywhere. `sin`, `cos`, `tan`, `asin`, `atan2`,
+`exp`, `log` and `pow` are not, and come from the platform's math library.
+galata cannot avoid them — angle of attack is an `atan2`, the atmosphere's
+pressure profile is a `pow` — so the honest claim is the two-tier one rather
+than a bit-identity claim that would be false.
+
+**A constraint on what may be fingerprinted.** A cross-platform bound is only
+meaningful on a computation that does not amplify small differences; on a
+chaotic trajectory the gate would be measuring chaos rather than agreement. The
+fingerprint's rigid-body case was measured and amplifies a perturbation by a
+factor between 0.06 and 1.0 over 60 s. A test asserts this, so a change that
+makes the battery chaotic fails there rather than as an intermittently red
+workflow.
 
 )";
 

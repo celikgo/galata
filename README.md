@@ -16,6 +16,7 @@ the authority on what exists; the roadmap is the authority on what is intended.
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
 [![CI](https://github.com/celikgo/galata/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/celikgo/galata/actions/workflows/ci.yml)
+[![Determinism](https://github.com/celikgo/galata/actions/workflows/determinism.yml/badge.svg?branch=main)](docs/adr/0004-determinism-policy.md)
 
 
 ---
