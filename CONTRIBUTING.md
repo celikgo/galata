@@ -43,6 +43,14 @@ Two classes account for most of it: `-Wshadow` inside GoogleTest macros, which
 expand to a scope containing names you did not write, and `-Wold-style-cast`
 reaching into third-party headers.
 
+**A header must include what it uses**, and MSVC is the only compiler that will
+tell you when it does not. libstdc++ and libc++ pull `<stdexcept>`,
+`<algorithm>` and friends in transitively through other standard headers;
+MSVC's standard library does not. `std::runtime_error` used in a header that
+only includes `<map>` compiles on Linux and macOS and fails on Windows. Neither
+the local GCC check above nor CI's Linux and macOS jobs catch it — only the
+Windows job does, after you have pushed.
+
 **clang-format is pinned to 20.1.8.** Its output changes between major versions,
 so an unpinned formatter means the gate fails on a change you cannot reproduce.
 Install it from pip, not from your system package manager.

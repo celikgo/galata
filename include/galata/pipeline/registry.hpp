@@ -20,6 +20,11 @@
 #include <any>
 #include <functional>
 #include <map>
+// <stdexcept> for the std::runtime_error thrown by payload_as below. libstdc++
+// and libc++ both pull it in transitively through one of the headers above;
+// MSVC's standard library does not, and this header failed to compile on
+// Windows because of it. A header includes what it uses.
+#include <stdexcept>
 #include <string>
 #include <vector>
 
