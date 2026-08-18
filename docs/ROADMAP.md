@@ -10,13 +10,31 @@ that tag and run something real.
 
 ## v0.1 — the honest spine
 
-Core types, frames, quaternions, units, ISA atmosphere, the nonlinear 6-DOF
-equations of motion, fixed-step RK4, a simple reference aircraft model,
-`trim.level`, `linearize.finitediff`, `analyze.modes`, the pipeline runner and
-the CLI. `ci.yml` and `determinism.yml`. The atmosphere and rigid-body
-validation cases.
+**In progress.** What it needs, and where each piece stands:
 
-No AI. No GUI. One example turns a YAML file into a modal table.
+| Piece | State |
+|---|---|
+| Core types, frames, quaternions, units | done, property-tested |
+| ISA atmosphere | done, validated against the published tables |
+| Nonlinear 6-DOF equations of motion | done, validated against closed-form solutions of Euler's equations |
+| Fixed-step RK4 | done, order verified |
+| `analyze.modes` | done, validated against NASA CR-2144 |
+| Pipeline runner and CLI | done |
+| `ci.yml`, `determinism.yml` | done |
+| A reference aircraft model | done as a **linear** model; the nonlinear one is not built |
+| `trim.level` | **not built** |
+| `linearize.finitediff` | **not built** |
+| One example: YAML file to modal table | done, two of them, both checked by CI |
+
+The two missing capabilities are the same missing thing: there is no nonlinear
+aircraft model to trim or to linearise. `analyze.modes` is validated against a
+published aircraft, but the state matrix it consumes is read from a file rather
+than produced by trimming and linearising a nonlinear model. Closing that gap
+means an aerodynamic coefficient model, a trim formulation as a constrained
+root-find with a reported residual and Jacobian condition number, and
+central-difference linearisation with a Richardson truncation-error estimate.
+
+No AI. No GUI.
 
 This is the credibility floor and nothing ships before it.
 
