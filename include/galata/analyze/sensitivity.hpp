@@ -112,6 +112,30 @@ struct SensitivityPeaks {
 // both, so specifying M_S "can make specifications on the GM and PM
 // unnecessary" (ibid., p. 37).
 //
+// THE DERIVATION, so a reader can check these without the book. All four fall
+// out of two exact identities in three lines each.
+//
+//   At the phase crossover w_180, L is real and negative with |L| = 1/GM, so
+//   L = -1/GM, and therefore
+//
+//       S = 1/(1+L) = GM/(GM - 1)        T = L/(1+L) = -1/(GM - 1)
+//
+//   Since |S| <= M_S everywhere, GM/(GM-1) <= M_S rearranges to
+//   GM >= M_S/(M_S - 1). Since |T| <= M_T, 1/(GM-1) <= M_T rearranges to
+//   GM >= 1 + 1/M_T. The two bounds differ in form because S and T differ.
+//
+//   At the gain crossover w_c, |L| = 1, so L and the critical point -1 are two
+//   points on the unit circle separated by the angle PM. The chord between
+//   them is |1 + L| = 2 sin(PM/2), giving
+//
+//       |S(j w_c)| = |T(j w_c)| = 1 / (2 sin(PM/2))
+//
+//   which is the book's (2.50). Bounding that by M_S gives
+//   sin(PM/2) >= 1/(2 M_S), i.e. PM >= 2 arcsin(1/(2 M_S)); likewise for M_T.
+//
+//   A useful sanity check falls out: M_S = 1 gives PM = 60 degrees exactly, so
+//   these bounds can never promise more than 60 degrees however good M_S is.
+//
 // ===========================================================================
 // SISO ONLY. This is not a hedge, it is the source's own scope.
 // ===========================================================================

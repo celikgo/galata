@@ -574,7 +574,20 @@ int main(int argc, char** argv) {
     measured["sigma.mt"] = format_significant(peaks.complementary_peak, 6);
     measured["sigma.mt_frequency"] =
         format_significant(peaks.complementary_peak_frequency_rad_s, 6);
-    measured["sigma.st_ulps"] = format_bound(std::fmax(sensitivity_gap, complementary_gap));
+    // Floored before formatting. The observed agreement is a few machine
+    // epsilons, and format_bound() reports the next power of ten above it —
+    // which puts the printed claim right on a decade boundary that platform
+    // math libraries straddle. macOS produced "below 1e-15" and Linux "below
+    // 1e-14" for the same code, failing the report-staleness gate for a reason
+    // that has nothing to do with the numbers.
+    //
+    // A PUBLISHED bound must not depend on which machine generated the
+    // document. The floor is four decades above anything observed, so no
+    // platform can move it, and the claim it makes is still far stronger than
+    // ADR-0004's 1e-9 cross-platform tier.
+    constexpr double kStableFloor = 1.0e-12;
+    measured["sigma.st_ulps"] =
+        format_bound(std::fmax(std::fmax(sensitivity_gap, complementary_gap), kStableFloor));
     measured["sigma.nyquist_distance"] = format_significant(1.0 / peaks.sensitivity_peak, 6);
   }
 
