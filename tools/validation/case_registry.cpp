@@ -72,7 +72,8 @@ const std::vector<Case>& validation_cases() {
         E{kValidation, "Ussa1976.DensityMatchesThePublishedTable"},
         E{kValidation, "Ussa1976.SpeedOfSoundMatchesThePublishedTable"}},
        "Temperature and speed of sound round to the printed value everywhere; pressure and "
-       "density do not, at 3 of 32 cells, by at most 0.96 units in the last printed place. "
+       "density do not, at {atm.deviating} of {atm.total} cells, by at most {atm.worst_ulp} units "
+       "in the last printed place. "
        "Every deviation is listed below."},
 
       {"atmosphere.layer_recurrence",
@@ -95,7 +96,7 @@ const std::vector<Case>& validation_cases() {
        {},
        "Implemented, but no tabulated viscosity values were transcribed, so there is nothing "
        "to compare against. It also inherits the source's own S = 110 K versus 110.4 K "
-       "ambiguity, worth about 0.1%."},
+       "ambiguity, worth {atm.viscosity_s_percent}."},
 
       // --- Core conventions -------------------------------------------------
       {"core.conventions",
@@ -166,7 +167,9 @@ const std::vector<Case>& validation_cases() {
        {E{kValidation, "IntermediateAxis.PerturbationFollowsTheClosedFormHyperbolicGrowth"},
         E{kValidation, "IntermediateAxis.RotationAboutTheMajorAndMinorAxesIsStable"}},
        "Asserted against the cosh/sinh closed form pointwise, including the sign the "
-       "(I2 - I3) < 0 factor forces. Fitting a log-slope instead measures 0.70 sigma and looks "
+       "(I2 - I3) < 0 factor forces. Fitting a log-slope instead measures {cosh.slope_factor} "
+       "sigma "
+       "and looks "
        "like a defect in the dynamics."},
 
       {"rigid_body.conservation",
@@ -186,7 +189,8 @@ const std::vector<Case>& validation_cases() {
        std::string(kCr2144) + ", Tables II-1 and II-7",
        Status::ValidatedWithCaveat,
        {E{kValidation, "Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable"}},
-       "Validated INDIRECTLY: the linearised derivatives that match Table II-7 to 0.26% run "
+       "Validated INDIRECTLY: the linearised derivatives that match Table II-7 to "
+       "{deriv.worst_percent} run "
        "through these equations, the coefficient buildup and the wind-to-body rotation. There "
        "is no case comparing the equations in isolation."},
 
@@ -205,8 +209,9 @@ const std::vector<Case>& validation_cases() {
        {"analyze.modes"},
        std::string(kCr2144) + ", Table II-8",
        Status::Validated,
-       {E{kValidation, "Nt33aLateral.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision"},
-        E{kValidation, "Nt33aLateral.TheDutchRollPeriodAgreesWithThePublishedPeriod"}},
+       {E{kValidation,
+          "Nt33aHandAssembled.LateralModesMatchThePublishedValuesWithinTheSourcesOwnPrecision"},
+        E{kValidation, "Nt33aHandAssembled.TheDutchRollPeriodAgreesWithThePublishedPeriod"}},
        "Tolerance measured, not chosen: each input is perturbed by half a unit in its own last "
        "printed digit and the published value's own rounding is added."},
 
@@ -217,7 +222,8 @@ const std::vector<Case>& validation_cases() {
        std::string(kCr2144) + ", Table II-4",
        Status::Validated,
        {E{kValidation,
-          "Nt33aLongitudinal.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision"}},
+          "Nt33aHandAssembled."
+          "LongitudinalModesMatchThePublishedValuesWithinTheSourcesOwnPrecision"}},
        "Three of the four longitudinal quantities. The fourth is the row below."},
 
       {"nt33a.phugoid_damping_hand",
@@ -225,8 +231,9 @@ const std::vector<Case>& validation_cases() {
        {"analyze.modes"},
        std::string(kCr2144) + ", Table II-4",
        Status::KnownDiscrepancy,
-       {E{kValidation, "Nt33aLongitudinal.PhugoidDampingDiscrepancyDoesNotGrow"}},
-       "0.0929 against a published 0.0948, about three times what the inputs' rounding allows. "
+       {E{kValidation, "Nt33aHandAssembled.PhugoidDampingDiscrepancyDoesNotGrow"}},
+       "{hand.phugoid_zeta} against a published 0.0948, out by {hand.phugoid_percent}, about three "
+       "times what the inputs' rounding allows. "
        "Localised to the hand assembly — the full chain reproduces it. Held by a labelled "
        "regression lock; see below."},
 
@@ -235,8 +242,8 @@ const std::vector<Case>& validation_cases() {
        {"analyze.modes"},
        std::string(kCr2144) + ", labels checked against the report's own identification",
        Status::Validated,
-       {E{kValidation, "Nt33aLateral.AllThreeLateralModesAreFoundAndCorrectlyLabelled"},
-        E{kValidation, "Nt33aLongitudinal.BothLongitudinalModesAreFoundAndCorrectlyLabelled"},
+       {E{kValidation, "Nt33aHandAssembled.AllThreeLateralModesAreFoundAndCorrectlyLabelled"},
+        E{kValidation, "Nt33aHandAssembled.BothLongitudinalModesAreFoundAndCorrectlyLabelled"},
         E{kValidation, "Nt33aChain.ModesAreLabelledCorrectlyFromParticipationAlone"},
         E{kUnit, "Modes.ClassifiesLongitudinalModesByParticipationNotByFrequency"}},
        "By eigenvector participation, not by frequency. A unit test builds a system whose "
@@ -254,8 +261,9 @@ const std::vector<Case>& validation_cases() {
         E{kValidation, "Nt33aChain.DynamicPressureAndMachMatchThePublishedFlightCondition"},
         E{kValidation,
           "Nt33aChain.TrimAlphaDiffersFromThePublishedValueByExactlyTheDragInclinationTerm"}},
-       "Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The "
-       "trimmed alpha is 0.05 deg below the published 2.20, and a test asserts that difference "
+       "Dynamic pressure {trim.psf} psf against a published {trim.published_psf}; Mach {trim.mach} "
+       "against {trim.published_mach}. The trimmed alpha is {trim.alpha_shift_deg} deg below the "
+       "published {trim.published_alpha_deg}, and a test asserts that difference "
        "is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects."},
 
       {"nt33a.linearised_derivatives",
@@ -267,7 +275,7 @@ const std::vector<Case>& validation_cases() {
         E{kValidation, "Nt33aChain.TruncationErrorIsNegligible"},
         E{kValidation, "Nt33aChain.TheLongitudinalAndLateralAxesDecoupleAtThisTrim"}},
        "Seven numbers the report computed from the same non-dimensional set by a different "
-       "route, reproduced to 0.26%. The sharpest comparison in the suite."},
+       "route, reproduced to {deriv.worst_percent}. The sharpest comparison in the suite."},
 
       {"nt33a.chain_modes",
        "All five classical modes from trim and linearisation of a nonlinear model",
@@ -276,7 +284,8 @@ const std::vector<Case>& validation_cases() {
        Status::Validated,
        {E{kValidation, "Nt33aChain.AllFiveClassicalModesMatchThePublishedValues"},
         E{kValidation, "Nt33aChain.ThePhugoidDampingThatTheHandAssembledMatrixMissedIsRecovered"}},
-       "To 1.0%, worst case the Dutch roll damping. The input is a non-dimensional derivative "
+       "To {modes.worst_percent}, worst case {modes.worst_name}. The input is a non-dimensional "
+       "derivative "
        "set and some geometry; there is no matrix anywhere in it."},
 
       // --- Determinism ------------------------------------------------------
@@ -289,7 +298,7 @@ const std::vector<Case>& validation_cases() {
         E{kDeterminism, "Determinism.SplittingAnIntegrationInTwoGivesTheSameResult"},
         E{kDeterminism, "Determinism.ModalDecompositionIsBitIdenticalAndOrderStable"},
         E{kDeterminism, "Determinism.AtmosphereDoesNotDependOnQueryOrder"}},
-       "Gated on Linux, macOS and Windows over 145 fingerprinted values. The strongest of "
+       "Gated on Linux, macOS and Windows over {det.total} fingerprinted values. The strongest of "
        "these is splitting: 4000 steps must equal 1500 then 2500, bit for bit."},
 
       {"determinism.tier2",
@@ -301,7 +310,8 @@ const std::vector<Case>& validation_cases() {
        "Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because "
        "platform math libraries disagree on sin in the last bits. Values downstream of a "
        "finite difference are excluded from this tier and held byte-identical in tier 1 "
-       "instead: dividing by h amplifies a libm disagreement by 1/h."},
+       "instead — {det.tier1_only} of the {det.total} values — because dividing by h amplifies a "
+       "libm disagreement by 1/h."},
 
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",

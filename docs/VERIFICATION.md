@@ -32,27 +32,27 @@ Four checks stand behind it, each a test rather than a convention:
 
 | Case | Reference | Status |
 |---|---|---|
-| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, Tables I and III | **validated** — Temperature and speed of sound round to the printed value everywhere; pressure and density do not, at 3 of 32 cells, by at most 0.96 units in the last printed place. Every deviation is listed below. |
+| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, Tables I and III | **validated** — Temperature and speed of sound round to the printed value everywhere; pressure and density do not, at 3 of 32 cells, by at most 0.961 units in the last printed place. Every deviation is listed below. |
 | U.S. Standard Atmosphere 1976 — derived layer base temperatures and the pressure recurrence | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, Table I at each breakpoint | **validated** — Table 4 has no base-temperature column, so these are derived rather than transcribed. The pressure recurrence is checked at the top of the seven-layer chain, where any per-layer error would have accumulated. |
-| U.S. Standard Atmosphere 1976 — dynamic viscosity | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, equation (51) | unvalidated — Implemented, but no tabulated viscosity values were transcribed, so there is nothing to compare against. It also inherits the source's own S = 110 K versus 110.4 K ambiguity, worth about 0.1%. |
+| U.S. Standard Atmosphere 1976 — dynamic viscosity | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, equation (51) | unvalidated — Implemented, but no tabulated viscosity values were transcribed, so there is nothing to compare against. It also inherits the source's own S = 110 K versus 110.4 K ambiguity, worth 0.10%. |
 | Quaternion, frame and state conventions | ADR-0002, cross-checked against Eigen's independent implementation | self-consistent, not externally validated — The rotation matrix is written out by hand from ADR-0002 and compared against Eigen over the whole rotation group. That checks the documented convention against the implemented one; it is not a comparison against a document. |
 | Numerical Jacobians against analytically known Jacobians | Charter validation case 4; analytic derivatives of closed-form functions | **validated** — Agreement to the cancellation limit, eps \|f\| / h, which is the floor a central difference has even on a linear function. The Richardson estimate is checked to bound the actual error rather than understate it. |
 | Fixed-step RK4 — method order | Hairer, Norsett & Wanner (1993); exact solutions of closed-form problems | **validated** — Exact on cubics, as Simpson's rule must be; error falls by 16 per halving on the exponential. |
 | Newton's method — convergence and failure reporting | Nocedal & Wright (2006); systems with closed-form roots | **validated** — Quadratic convergence on a smooth system; a system with no real root is reported as unconverged rather than returned as a least-bad point. |
 | Torque-free precession of a symmetric top | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Checked for fourth-order CONVERGENCE to the closed form, not proximity to it. A solution converging to the wrong closed form sits at a small constant error and passes an absolute check. |
-| Intermediate-axis instability (the Dzhanibekov effect) | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Asserted against the cosh/sinh closed form pointwise, including the sign the (I2 - I3) < 0 factor forces. Fitting a log-slope instead measures 0.70 sigma and looks like a defect in the dynamics. |
+| Intermediate-axis instability (the Dzhanibekov effect) | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Asserted against the cosh/sinh closed form pointwise, including the sign the (I2 - I3) < 0 factor forces. Fitting a log-slope instead measures 0.699 sigma and looks like a defect in the dynamics. |
 | Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated** — The angular-momentum figure is the VECTOR resolved in NED, not its body-axis magnitude. A transposed direction-cosine matrix conserves the magnitude and fails this. Drift measured below. |
 | Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated**, with a caveat — Validated INDIRECTLY: the linearised derivatives that match Table II-7 to 0.26% run through these equations, the coefficient buildup and the wind-to-body rotation. There is no case comparing the equations in isolation. |
 | Nonlinear simulation with aerodynamic forces, over time | — | not implemented — There is a state derivative, not a loop flying an aircraft through time. |
 | Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-8 | **validated** — Tolerance measured, not chosen: each input is perturbed by half a unit in its own last printed digit and the published value's own rounding is added. |
 | Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **validated** — Three of the four longitudinal quantities. The fourth is the row below. |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, about three times what the inputs' rounding allows. Localised to the hand assembly — the full chain reproduces it. Held by a labelled regression lock; see below. |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, out by 2.04%, about three times what the inputs' rounding allows. Localised to the hand assembly — the full chain reproduces it. Held by a labelled regression lock; see below. |
 | Modal classification into the five classical modes | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), labels checked against the report's own identification | **validated** — By eigenvector participation, not by frequency. A unit test builds a system whose phugoid block is deliberately faster than its short-period block; a frequency-based classifier gets both labels backwards on it. |
-| Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.05 deg below the published 2.20, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
+| Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
-| All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.0%, worst case the Dutch roll damping. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
+| All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
 | Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 145 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
-| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead: dividing by h amplifies a libm disagreement by 1/h. |
+| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 47 of the 145 values — because dividing by h amplifies a libm disagreement by 1/h. |
 | Riccati solvers against the CAREX and DAREX benchmark collections | — | not implemented — Named in the v0.2 milestone. |
 | Gain, phase, delay and disk margins | — | not implemented — Named in the v0.2 milestone. |
 
@@ -79,10 +79,10 @@ ctest --preset dev -R '<test name>'
 | Energy and angular-momentum conservation, general inertia tensor | `TorqueFreeConservation.EnergyAndAngularMomentumDriftIsBounded` (validation)<br>`TorqueFreeConservation.AngularMomentumRotatesInBodyAxesButNotInNed` (validation) |
 | Six-degree-of-freedom equations with aerodynamic forces | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation) |
 | Nonlinear simulation with aerodynamic forces, over time | — |
-| Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | `Nt33aLateral.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation)<br>`Nt33aLateral.TheDutchRollPeriodAgreesWithThePublishedPeriod` (validation) |
-| Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | `Nt33aLongitudinal.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation) |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | `Nt33aLongitudinal.PhugoidDampingDiscrepancyDoesNotGrow` (validation) |
-| Modal classification into the five classical modes | `Nt33aLateral.AllThreeLateralModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aLongitudinal.BothLongitudinalModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aChain.ModesAreLabelledCorrectlyFromParticipationAlone` (validation)<br>`Modes.ClassifiesLongitudinalModesByParticipationNotByFrequency` (unit) |
+| Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | `Nt33aHandAssembled.LateralModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation)<br>`Nt33aHandAssembled.TheDutchRollPeriodAgreesWithThePublishedPeriod` (validation) |
+| Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | `Nt33aHandAssembled.LongitudinalModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation) |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | `Nt33aHandAssembled.PhugoidDampingDiscrepancyDoesNotGrow` (validation) |
+| Modal classification into the five classical modes | `Nt33aHandAssembled.AllThreeLateralModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aHandAssembled.BothLongitudinalModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aChain.ModesAreLabelledCorrectlyFromParticipationAlone` (validation)<br>`Modes.ClassifiesLongitudinalModesByParticipationNotByFrequency` (unit) |
 | Trim of a nonlinear model against the published flight condition | `Nt33aChain.TrimConvergesToMachinePrecision` (validation)<br>`Nt33aChain.TrimSatisfiesTheClosedFormForceBalanceExactly` (validation)<br>`Nt33aChain.DynamicPressureAndMachMatchThePublishedFlightCondition` (validation)<br>`Nt33aChain.TrimAlphaDiffersFromThePublishedValueByExactlyTheDragInclinationTerm` (validation) |
 | Linearised dimensional derivatives from a nonlinear model | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation)<br>`Nt33aChain.TruncationErrorIsNegligible` (validation)<br>`Nt33aChain.TheLongitudinalAndLateralAxesDecoupleAtThisTrim` (validation) |
 | All five classical modes from trim and linearisation of a nonlinear model | `Nt33aChain.AllFiveClassicalModesMatchThePublishedValues` (validation)<br>`Nt33aChain.ThePhugoidDampingThatTheHandAssembledMatrixMissedIsRecovered` (validation) |
@@ -186,8 +186,8 @@ transcription error.
 **Dynamic viscosity.** galata implements equation (51), but no tabulated
 viscosity values were transcribed from the document, so there is nothing to
 compare against. The implementation is unvalidated. It additionally inherits the
-`S = 110` versus `S = 110.4` ambiguity above, which moves the result by about
-0.1%.
+`S = 110` versus `S = 110.4` ambiguity above, which moves the result by
+0.10%.
 
 **Altitudes between the tabulated points.** Eight altitudes are checked against
 the tables. Continuity, monotonicity and the absence of steps at layer
@@ -247,19 +247,24 @@ derivatives and the modes fall out. Everything in between is under test: the
 atmosphere, every unit conversion, the coefficient buildup, the wind-to-body
 rotation, the equations of motion, the root-find and the finite differences.
 
-**Trim.** Converges to a residual of exactly zero, with quadratic convergence
-visible in the reported history. The trim is checked two ways: against the
-closed-form force balance `L = mg - D tan(a)` and `T = D/cos(a)`, which it
-satisfies to a part in 10^6; and against the published flight condition, where
-the dynamic pressure comes out 61.78 psf against a published 61.7 and the Mach
-0.2042 against 0.204.
+**Trim.** Converges to a residual of 0, with quadratic
+convergence visible in the reported history. It is checked two ways: against
+the closed-form force balance `L = mg - D tan(a)` and `T = D/cos(a)`, which it
+satisfies to a part in 10^6; and against the published flight condition.
 
-The trimmed angle of attack is 2.1481 degrees against a published 2.20, and the
-difference is understood rather than tolerated. The published pair
-(alpha = 2.20 deg, C_L = 0.813) is related by the conventional level-flight
-relation C_L = W/(qS), which neglects the vertical component of drag in body
-axes. galata solves the exact balance, which needs C_L = 0.8084. The shift is
-exactly `D tan(a)/(qS)/C_L_alpha`, and a test asserts it is that term and
+| Quantity | galata | published |
+|---|---|---|
+| Dynamic pressure | 61.78 psf | 61.7 psf |
+| Mach | 0.2042 | 0.204 |
+| Trim lift coefficient | 0.8084 | 0.813 |
+| Angle of attack | 2.1481 deg | 2.2 deg |
+
+The trimmed angle of attack sits 0.0519 deg below the published
+value, and the difference is understood rather than tolerated. The published
+pair (alpha and C_L) is related by the conventional level-flight relation
+C_L = W/(qS), which neglects the vertical component of drag in body axes.
+galata solves the exact balance, which needs a slightly smaller C_L. The shift
+is exactly `D tan(a)/(qS)/C_L_alpha`, and a test asserts it is that term and
 nothing else.
 
 **Linearised dimensional derivatives** against Table II-7 — seven numbers the
@@ -267,13 +272,13 @@ report computed from the same non-dimensional set by a different route:
 
 | Derivative | galata | published | difference |
 |---|---|---|---|
-| Y_v | -0.12490 | -0.125 | 0.08% |
+| Y_v | -0.124902 | -0.125 | 0.08% |
 | L_beta' | -5.49695 | -5.49 | 0.13% |
-| N_beta' | +0.66780 | +0.667 | 0.12% |
-| L_p' | -2.03530 | -2.03 | 0.26% |
-| N_p' | -0.11592 | -0.116 | 0.07% |
-| L_r' | +0.64184 | +0.641 | 0.13% |
-| N_r' | -0.20703 | -0.207 | 0.02% |
+| N_beta' | 0.667796 | 0.667 | 0.12% |
+| L_p' | -2.0353 | -2.03 | 0.26% |
+| N_p' | -0.115922 | -0.116 | 0.07% |
+| L_r' | 0.64184 | 0.641 | 0.13% |
+| N_r' | -0.207034 | -0.207 | 0.02% |
 
 The source prints its inputs and its outputs to three significant figures, so
 each carries up to about 0.5% of its own rounding and several combine in every
@@ -283,26 +288,30 @@ one of these. The gate is 0.5%; the worst observed is 0.26%.
 
 | Mode | galata | published | difference |
 |---|---|---|---|
-| Phugoid | zeta 0.0949, omega_n 0.1714 | 0.0948, 0.172 | 0.1%, 0.3% |
-| Short period | zeta 0.6219, omega_n 1.5950 | 0.622, 1.59 | 0.02%, 0.3% |
-| Spiral | 1/T 0.0319 | 0.0318 | 0.3% |
-| Roll subsidence | 1/T 2.1992 | 2.20 | 0.04% |
-| Dutch roll | zeta 0.0603, omega_n 1.1293 | 0.0609, 1.13 | 1.0%, 0.06% |
+| Phugoid zeta | 0.094852 | 0.0948 | 0.05% |
+| Phugoid omega_n | 0.1714 | 0.172 | 0.35% |
+| Short period zeta | 0.62193 | 0.622 | 0.01% |
+| Short period omega_n | 1.595 | 1.59 | 0.32% |
+| Spiral 1/T | 0.031902 | 0.0318 | 0.32% |
+| Roll subsidence 1/T | 2.1992 | 2.2 | 0.04% |
+| Dutch roll zeta | 0.060259 | 0.0609 | 1.05% |
+| Dutch roll omega_n | 1.1293 | 1.13 | 0.06% |
+
+The worst is Dutch roll zeta at 1.05%.
 
 **An error this comparison caught.** The first version of the model treated the
 report's lateral derivatives as body-axis when the report gives them in
-stability axes. At a trim angle of attack of 2.2 degrees that looks like a
+stability axes. At a trim angle of attack of about two degrees that looks like a
 0.07% effect, since cos(2.2 deg) = 0.9993. It is not: the rotation MIXES the
 rolling and yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross
 term dominates and C_n_beta moves by 10%. The Dutch roll damping came out 35%
-high. It was the derivative-by-derivative comparison against Table II-7 that
-localised it — the modes alone said only that something was wrong.
+high. It was the derivative-by-derivative comparison above that localised it —
+the modes alone said only that something was wrong.
 
 A second error was found the same way: the force assembly rotated the
 lift/drag/side triple through the full wind-axis rotation, which adds a
 `-D sin(beta)` term to the body y force that a body-axis C_Y_beta already
-contains. Double-counting it inflated the side-force derivative from -0.125 to
--0.148.
+contains. Double-counting it inflated the side-force derivative by 19%.
 
 Both are the reason `models/nt33a/nt33a-fc1.yaml` must DECLARE which axes its
 lateral derivatives are in, rather than defaulting.
@@ -411,10 +420,10 @@ full chain.
 
 Two independent routes to the same published number:
 
-| Route | Phugoid zeta | vs published 0.0948 |
+| Route | Phugoid zeta | vs published |
 |---|---|---|
-| State matrix assembled by hand from the report's Table II-3 dimensional derivatives | 0.0929 | 2.0% low |
-| Nonlinear model, trimmed, then linearised by central differences | 0.0949 | 0.1% high |
+| State matrix assembled by hand from the report's Table II-3 dimensional derivatives | 0.0929 | 2.04% |
+| Nonlinear model, trimmed, then linearised by central differences | 0.0949 | 0.05% |
 
 The second route takes the report's NON-dimensional derivatives, builds a
 nonlinear aircraft, finds its trim, and perturbs it. It shares no arithmetic
@@ -437,12 +446,13 @@ It disagrees by about 2% relative, which is roughly three times the band the
 inputs' own rounding allows.
 
 The mode itself is in very nearly the right place. Published, the phugoid
-eigenvalue is −0.016306 ± 0.171226j; galata computes −0.015974 ± 0.171170j.
-The imaginary part agrees to 6e-5, three parts in ten thousand. The
-disagreement is concentrated in a derived quantity: ζ = |Re| / |λ| divides a
-small real part by a small natural frequency, so a 3.3e-4 residual in the real
-part becomes 0.0019 in the ratio — which is the entire discrepancy, accounted
-for but not explained.
+eigenvalue is -0.016306 ± 0.171225j; the hand
+assembly gives -0.015965 ± 0.171168j. The imaginary parts
+agree to a few parts in ten thousand. The disagreement is concentrated in a
+derived quantity: ζ = |Re| / |λ| divides a small real part by a small natural
+frequency, so a residual of a few times 1e-4 in the real part becomes
+2.04% in the ratio — the entire discrepancy, accounted for but
+not explained.
 
 Two candidate explanations, neither confirmed:
 

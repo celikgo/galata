@@ -10,20 +10,28 @@
 // Usage:  galata-validation-report <reference-directory>
 // CI regenerates and diffs against the committed file.
 
+#include "galata/analyze/modes.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
+#include "galata/linearize/finite_difference.hpp"
+#include "galata/model/aircraft.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/pipeline/registry.hpp"
 #include "galata/sim/rigid_body.hpp"
+#include "galata/trim/level.hpp"
+#include "galata/units.hpp"
 #include "galata/version.hpp"
 
 #include "case_registry.hpp"
+#include "fingerprint.hpp"
+#include "nt33a_hand_assembly.hpp"
 #include "reference_table.hpp"
 
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -86,6 +94,46 @@ std::string escape_table_cell(const std::string& text) {
   return escaped;
 }
 
+// Replaces every {key} with its measured value.
+//
+// The point of the mechanism: a number that galata computed must never be typed
+// into prose. It is measured once, at render time, and referred to by name
+// everywhere it appears — so the summary table, the detail sections and the
+// case notes cannot disagree with each other or with the code.
+//
+// An unresolved placeholder is left in the output deliberately rather than
+// silently dropped, and a test greps the rendered document for one.
+std::string substitute(const std::string& text,
+                       const std::map<std::string, std::string>& measurements) {
+  std::string out;
+  out.reserve(text.size());
+  std::size_t cursor = 0;
+  while (cursor < text.size()) {
+    const std::size_t open = text.find('{', cursor);
+    if (open == std::string::npos) {
+      out.append(text, cursor, std::string::npos);
+      break;
+    }
+    const std::size_t close = text.find('}', open);
+    if (close == std::string::npos) {
+      out.append(text, cursor, std::string::npos);
+      break;
+    }
+    out.append(text, cursor, open - cursor);
+    const std::string key = text.substr(open + 1, close - open - 1);
+    const auto found = measurements.find(key);
+    if (found != measurements.end()) {
+      out += found->second;
+    } else {
+      // Left visible on purpose. A silently dropped placeholder is a sentence
+      // that reads fine and says nothing.
+      out += "{UNRESOLVED:" + key + "}";
+    }
+    cursor = close + 1;
+  }
+  return out;
+}
+
 // Fixed number of significant figures.
 std::string format_significant(double value, int figures) {
   char buffer[64];
@@ -112,6 +160,138 @@ std::string format_bound(double value) {
   char buffer[64];
   std::snprintf(buffer, sizeof(buffer), "below 1e%+d", static_cast<int>(exponent));
   return buffer;
+}
+
+// One published quantity against the value galata computes for it.
+struct Comparison {
+  std::string name;
+  double computed = 0.0;
+  double published = 0.0;
+
+  [[nodiscard]] double relative() const {
+    return (published == 0.0) ? 0.0 : std::fabs(computed - published) / std::fabs(published);
+  }
+};
+
+std::string percent(double relative) {
+  char buffer[64];
+  std::snprintf(buffer, sizeof(buffer), "%.2f%%", 100.0 * relative);
+  return buffer;
+}
+
+// Everything the report states about the NT-33A, computed rather than recalled.
+struct Nt33aMeasurements {
+  galata::trim::TrimPoint trim;
+  std::vector<Comparison> lateral_derivatives;
+  std::vector<Comparison> modes;
+  double worst_derivative_relative = 0.0;
+  double worst_mode_relative = 0.0;
+  std::string worst_mode_name;
+  // The hand-assembled route, for the discrepancy section.
+  double hand_phugoid_zeta = 0.0;
+  double hand_phugoid_real = 0.0;
+  double hand_phugoid_imag = 0.0;
+};
+
+Nt33aMeasurements measure_nt33a(const std::map<std::string, double>& published,
+                                const std::string& model_path) {
+  using galata::analyze::analyze_modes;
+  using galata::analyze::ModeLabel;
+  using galata::analyze::StateRoles;
+
+  Nt33aMeasurements out;
+
+  const galata::model::Aircraft aircraft = galata::model::load_aircraft(model_path);
+  galata::trim::LevelTrimRequest request;
+  request.altitude_m = 0.0;
+  request.airspeed_m_s = galata::units::feet_to_metres(published.at("true_airspeed"));
+  out.trim = galata::trim::trim_level(aircraft, request);
+
+  galata::linearize::LinearisationOptions lateral_options;
+  lateral_options.state_subset = galata::linearize::lateral_states();
+  const auto lateral =
+      galata::linearize::linearize_finite_difference(aircraft, out.trim, lateral_options);
+  galata::linearize::LinearisationOptions longitudinal_options;
+  longitudinal_options.state_subset = galata::linearize::longitudinal_states();
+  const auto longitudinal =
+      galata::linearize::linearize_finite_difference(aircraft, out.trim, longitudinal_options);
+
+  // The state is [v, p, r, phi] and the report's is [beta, p, r, phi]; they
+  // differ by a similarity transform with S = diag(1/V, 1, 1, 1), which touches
+  // only the first row and column and leaves the eigenvalues alone.
+  const double speed = out.trim.airspeed_m_s;
+  out.lateral_derivatives = {
+      {"Y_v", lateral.a(0, 0), published.at("Y_v")},
+      {"L_beta'", lateral.a(1, 0) * speed, published.at("L_beta_prime")},
+      {"N_beta'", lateral.a(2, 0) * speed, published.at("N_beta_prime")},
+      {"L_p'", lateral.a(1, 1), published.at("L_p_prime")},
+      {"N_p'", lateral.a(2, 1), published.at("N_p_prime")},
+      {"L_r'", lateral.a(1, 2), published.at("L_r_prime")},
+      {"N_r'", lateral.a(2, 2), published.at("N_r_prime")},
+  };
+  for (const Comparison& comparison : out.lateral_derivatives) {
+    out.worst_derivative_relative = std::fmax(out.worst_derivative_relative, comparison.relative());
+  }
+
+  const auto lateral_modes =
+      analyze_modes(lateral.a, lateral.state_names, StateRoles::from_names(lateral.state_names));
+  const auto longitudinal_modes = analyze_modes(
+      longitudinal.a, longitudinal.state_names, StateRoles::from_names(longitudinal.state_names));
+
+  const auto* spiral = lateral_modes.find(ModeLabel::Spiral);
+  const auto* roll = lateral_modes.find(ModeLabel::RollSubsidence);
+  const auto* dutch = lateral_modes.find(ModeLabel::DutchRoll);
+  const auto* phugoid = longitudinal_modes.find(ModeLabel::Phugoid);
+  const auto* short_period = longitudinal_modes.find(ModeLabel::ShortPeriod);
+  if (spiral == nullptr || roll == nullptr || dutch == nullptr || phugoid == nullptr
+      || short_period == nullptr) {
+    throw std::runtime_error(
+        "galata-validation-report: the NT-33A chain did not produce all five classical modes, "
+        "so the report cannot state what it agrees with");
+  }
+
+  out.modes = {
+      {"Phugoid zeta", phugoid->damping_ratio, published.at("phugoid_damping_ratio")},
+      {"Phugoid omega_n",
+       phugoid->natural_frequency_rad_s,
+       published.at("phugoid_natural_frequency")},
+      {"Short period zeta",
+       short_period->damping_ratio,
+       published.at("short_period_damping_ratio")},
+      {"Short period omega_n",
+       short_period->natural_frequency_rad_s,
+       published.at("short_period_natural_frequency")},
+      {"Spiral 1/T", -spiral->eigenvalue.real(), published.at("spiral_root")},
+      {"Roll subsidence 1/T", -roll->eigenvalue.real(), published.at("roll_subsidence_root")},
+      {"Dutch roll zeta", dutch->damping_ratio, published.at("dutch_roll_damping_ratio")},
+      {"Dutch roll omega_n",
+       dutch->natural_frequency_rad_s,
+       published.at("dutch_roll_natural_frequency")},
+  };
+  for (const Comparison& comparison : out.modes) {
+    if (comparison.relative() > out.worst_mode_relative) {
+      out.worst_mode_relative = comparison.relative();
+      out.worst_mode_name = comparison.name;
+    }
+  }
+
+  // The hand-assembled route, from the same shared assembly the regression lock
+  // tests, so the two cannot describe different matrices.
+  const auto hand_inputs = galata::validation::HandAssemblyInputs::from_published(published);
+  const auto hand_names = galata::validation::longitudinal_state_names();
+  const auto hand_modes =
+      analyze_modes(galata::validation::hand_assembled_longitudinal(hand_inputs),
+                    hand_names,
+                    StateRoles::from_names(hand_names));
+  const auto* hand_phugoid = hand_modes.find(ModeLabel::Phugoid);
+  if (hand_phugoid == nullptr) {
+    throw std::runtime_error(
+        "galata-validation-report: the hand-assembled matrix produced no phugoid");
+  }
+  out.hand_phugoid_zeta = hand_phugoid->damping_ratio;
+  out.hand_phugoid_real = hand_phugoid->eigenvalue.real();
+  out.hand_phugoid_imag = hand_phugoid->eigenvalue.imag();
+  return out;
 }
 
 }  // namespace
@@ -183,6 +363,137 @@ int main(int argc, char** argv) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Everything the document states as a number, measured here, once.
+  //
+  // No figure below this line is typed into prose anywhere in this file or in
+  // the case registry. Prose refers to them by {name}; a test greps the
+  // rendered document for an unresolved placeholder, and another asserts that
+  // no case note contains one of these values as a literal.
+  // ---------------------------------------------------------------------------
+  Nt33aMeasurements nt33a;
+  std::map<std::string, double> published_nt33a;
+  galata::determinism::Counts fingerprint_counts;
+  try {
+    published_nt33a = galata::testing::load_reference(reference_dir, "nt33a_fc1.csv")
+                          .as_lookup("quantity", "value");
+    nt33a = measure_nt33a(published_nt33a, std::string(GALATA_REPORT_MODEL));
+    fingerprint_counts = galata::determinism::fingerprint_counts(std::string(GALATA_REPORT_MODEL));
+  } catch (const std::exception& error) {
+    std::cerr << "galata-validation-report: " << error.what() << "\n";
+    return 1;
+  }
+
+  std::map<std::string, std::string> measured;
+  measured["atm.deviating"] = std::to_string(deviations.size());
+  measured["atm.total"] = std::to_string(table.rows.size() * 4U);
+  measured["atm.worst_ulp"] = format(std::fmax(std::fmax(worst_temperature, worst_pressure),
+                                               std::fmax(worst_density, worst_sound)));
+  measured["atm.worst_temperature"] = format(worst_temperature);
+  measured["atm.worst_pressure"] = format(worst_pressure);
+  measured["atm.worst_density"] = format(worst_density);
+  measured["atm.worst_sound"] = format(worst_sound);
+
+  {
+    // The source prints Sutherland's constant as both 110 K and 110.4 K. How
+    // much that ambiguity is worth is a property of the equation, so it is
+    // computed rather than remembered.
+    const galata::core::AtmosphereState sea_level = galata::core::isa(0.0);
+    const double t = sea_level.temperature_k;
+    const double with_110_4 =
+        galata::core::ussa1976::kSutherlandBeta * t * std::sqrt(t) / (t + 110.4);
+    const double with_110 =
+        galata::core::ussa1976::kSutherlandBeta * t * std::sqrt(t) / (t + 110.0);
+    measured["atm.viscosity_s_percent"] = percent(std::fabs(with_110 - with_110_4) / with_110_4);
+    measured["atm.tm_86km"] = format_significant(galata::core::isa(86000.0).temperature_k, 6);
+  }
+
+  measured["trim.alpha_deg"] =
+      format_significant(galata::units::radians_to_degrees(nt33a.trim.alpha_rad), 5);
+  measured["trim.published_alpha_deg"] = format_significant(published_nt33a.at("trim_alpha"), 3);
+  measured["trim.alpha_shift_deg"] = format(galata::units::radians_to_degrees(
+      galata::units::degrees_to_radians(published_nt33a.at("trim_alpha")) - nt33a.trim.alpha_rad));
+  {
+    // Pounds per square foot, converted at the boundary.
+    const double pascals_per_psf =
+        galata::units::kNewtonsPerPoundForce
+        / (galata::units::kMetresPerFoot * galata::units::kMetresPerFoot);
+    measured["trim.psf"] = format_significant(nt33a.trim.dynamic_pressure_pa / pascals_per_psf, 4);
+  }
+  measured["trim.published_psf"] = format_significant(published_nt33a.at("dynamic_pressure"), 3);
+  measured["trim.mach"] = format_significant(nt33a.trim.mach, 4);
+  measured["trim.published_mach"] = format_significant(published_nt33a.at("mach"), 3);
+  measured["trim.cl"] = format_significant(nt33a.trim.lift_coefficient, 4);
+  measured["trim.published_cl"] = format_significant(published_nt33a.at("CL"), 3);
+  measured["trim.residual"] = format_bound(nt33a.trim.residual_norm);
+  measured["trim.thrust_n"] = format_significant(nt33a.trim.controls.thrust_n, 5);
+
+  measured["deriv.worst_percent"] = percent(nt33a.worst_derivative_relative);
+  measured["modes.worst_percent"] = percent(nt33a.worst_mode_relative);
+  measured["modes.worst_name"] = nt33a.worst_mode_name;
+
+  measured["hand.phugoid_zeta"] = format_significant(nt33a.hand_phugoid_zeta, 3);
+  measured["hand.phugoid_real"] = format_significant(nt33a.hand_phugoid_real, 5);
+  measured["hand.phugoid_imag"] = format_significant(nt33a.hand_phugoid_imag, 6);
+  {
+    const double published_zeta = published_nt33a.at("phugoid_damping_ratio");
+    const double published_omega = published_nt33a.at("phugoid_natural_frequency");
+    measured["hand.phugoid_percent"] =
+        percent(std::fabs(nt33a.hand_phugoid_zeta - published_zeta) / published_zeta);
+    measured["published.phugoid_real"] = format_significant(-published_zeta * published_omega, 5);
+    measured["published.phugoid_imag"] =
+        format_significant(published_omega * std::sqrt(1.0 - published_zeta * published_zeta), 6);
+    // The chain's phugoid, for the side-by-side.
+    for (const Comparison& comparison : nt33a.modes) {
+      if (comparison.name == "Phugoid zeta") {
+        measured["chain.phugoid_zeta"] = format_significant(comparison.computed, 3);
+        measured["chain.phugoid_percent"] = percent(comparison.relative());
+      }
+    }
+  }
+
+  measured["det.total"] = std::to_string(fingerprint_counts.total);
+  measured["det.tier1_only"] = std::to_string(fingerprint_counts.tier1_only);
+  measured["det.cross_platform"] = std::to_string(fingerprint_counts.cross_platform());
+
+  {
+    // What a log-slope fit measures on a cosh over the window the earlier,
+    // wrong version of the intermediate-axis test used. A property of cosh, so
+    // computed rather than quoted.
+    const double early = 0.375;
+    const double late = 1.5;
+    measured["cosh.slope_factor"] =
+        format(std::log(std::cosh(late) / std::cosh(early)) / (late - early));
+  }
+
+  // A value galata computed must be referred to by name, never typed. This
+  // catches the specific mistake of running the report, seeing a number, and
+  // pasting it into a note — which reads identically to using the placeholder
+  // and stops being true the moment anything changes.
+  //
+  // Only values of four characters or more are checked. A count like "3" would
+  // match half the prose in the document, and a false positive here blocks the
+  // build for no reason.
+  {
+    bool hardcoded = false;
+    for (const auto& [key, value] : measured) {
+      if (value.size() < 4) {
+        continue;
+      }
+      for (const auto& validation_case : galata::validation::validation_cases()) {
+        if (validation_case.note.find(value) != std::string::npos) {
+          std::cerr << "galata-validation-report: case '" << validation_case.id
+                    << "' hard-codes the value '" << value << "', which this report computes as {"
+                    << key << "}. Use the placeholder.\n";
+          hardcoded = true;
+        }
+      }
+    }
+    if (hardcoded) {
+      return 1;
+    }
+  }
+
   std::cout << R"(<!-- GENERATED FILE — DO NOT EDIT.
      Produced by tools/validation/report_main.cpp via scripts/gen-verification.sh.
      CI regenerates this file and fails if it differs from the committed copy,
@@ -225,7 +536,7 @@ Four checks stand behind it, each a test rather than a convention:
                                                     : escape_table_cell(validation_case.reference))
               << " | " << galata::validation::to_string(validation_case.status);
     if (!validation_case.note.empty()) {
-      std::cout << " — " << escape_table_cell(validation_case.note);
+      std::cout << " — " << escape_table_cell(substitute(validation_case.note, measured));
     }
     std::cout << " |\n";
   }
@@ -365,7 +676,7 @@ against.
     std::cout << "\n";
   }
 
-  std::cout << R"(### Known model-versus-table differences that are not errors
+  std::cout << substitute(R"(### Known model-versus-table differences that are not errors
 
 **Molecular-scale versus kinetic temperature above 80 km.** The seven-layer
 system is defined in terms of molecular-scale temperature `T_M`, which equals
@@ -374,7 +685,7 @@ sea-level value. Above roughly 80 km the ratio `M/M_0` falls away from 1 — the
 document's Table 8 gives 0.9995788 at 86 km — so galata's temperature runs high
 relative to the tabulated kinetic temperature by up to about 0.08 K in the top
 6 km. At 86 km the document tabulates `T = 186.87` K and `T_M = 186.95` K;
-galata computes 186.946 K, which is the `T_M` value.
+galata computes {atm.tm_86km} K, which is the `T_M` value.
 
 **The upper bound is stated twice and the two statements differ.** The standard
 gives the ceiling as both 84.8520 km' geopotential and 86 km geometric.
@@ -400,8 +711,8 @@ transcription error.
 **Dynamic viscosity.** galata implements equation (51), but no tabulated
 viscosity values were transcribed from the document, so there is nothing to
 compare against. The implementation is unvalidated. It additionally inherits the
-`S = 110` versus `S = 110.4` ambiguity above, which moves the result by about
-0.1%.
+`S = 110` versus `S = 110.4` ambiguity above, which moves the result by
+{atm.viscosity_s_percent}.
 
 **Altitudes between the tabulated points.** Eight altitudes are checked against
 the tables. Continuity, monotonicity and the absence of steps at layer
@@ -412,7 +723,8 @@ it against published values.
 **Everything above 86 km.** Out of scope: galata refuses the query rather than
 extrapolating.
 
-)";
+)",
+                          measured);
 
   std::cout << R"(## Determinism
 
@@ -452,7 +764,7 @@ workflow.
 
 )";
 
-  std::cout << R"(## Trim and linearisation
+  std::cout << substitute(R"(## Trim and linearisation
 
 **Reference.** Heffley and Jewell, NASA CR-2144, Tables II-1, II-2 and II-7.
 
@@ -465,19 +777,24 @@ derivatives and the modes fall out. Everything in between is under test: the
 atmosphere, every unit conversion, the coefficient buildup, the wind-to-body
 rotation, the equations of motion, the root-find and the finite differences.
 
-**Trim.** Converges to a residual of exactly zero, with quadratic convergence
-visible in the reported history. The trim is checked two ways: against the
-closed-form force balance `L = mg - D tan(a)` and `T = D/cos(a)`, which it
-satisfies to a part in 10^6; and against the published flight condition, where
-the dynamic pressure comes out 61.78 psf against a published 61.7 and the Mach
-0.2042 against 0.204.
+**Trim.** Converges to a residual of {trim.residual}, with quadratic
+convergence visible in the reported history. It is checked two ways: against
+the closed-form force balance `L = mg - D tan(a)` and `T = D/cos(a)`, which it
+satisfies to a part in 10^6; and against the published flight condition.
 
-The trimmed angle of attack is 2.1481 degrees against a published 2.20, and the
-difference is understood rather than tolerated. The published pair
-(alpha = 2.20 deg, C_L = 0.813) is related by the conventional level-flight
-relation C_L = W/(qS), which neglects the vertical component of drag in body
-axes. galata solves the exact balance, which needs C_L = 0.8084. The shift is
-exactly `D tan(a)/(qS)/C_L_alpha`, and a test asserts it is that term and
+| Quantity | galata | published |
+|---|---|---|
+| Dynamic pressure | {trim.psf} psf | {trim.published_psf} psf |
+| Mach | {trim.mach} | {trim.published_mach} |
+| Trim lift coefficient | {trim.cl} | {trim.published_cl} |
+| Angle of attack | {trim.alpha_deg} deg | {trim.published_alpha_deg} deg |
+
+The trimmed angle of attack sits {trim.alpha_shift_deg} deg below the published
+value, and the difference is understood rather than tolerated. The published
+pair (alpha and C_L) is related by the conventional level-flight relation
+C_L = W/(qS), which neglects the vertical component of drag in body axes.
+galata solves the exact balance, which needs a slightly smaller C_L. The shift
+is exactly `D tan(a)/(qS)/C_L_alpha`, and a test asserts it is that term and
 nothing else.
 
 **Linearised dimensional derivatives** against Table II-7 — seven numbers the
@@ -485,47 +802,55 @@ report computed from the same non-dimensional set by a different route:
 
 | Derivative | galata | published | difference |
 |---|---|---|---|
-| Y_v | -0.12490 | -0.125 | 0.08% |
-| L_beta' | -5.49695 | -5.49 | 0.13% |
-| N_beta' | +0.66780 | +0.667 | 0.12% |
-| L_p' | -2.03530 | -2.03 | 0.26% |
-| N_p' | -0.11592 | -0.116 | 0.07% |
-| L_r' | +0.64184 | +0.641 | 0.13% |
-| N_r' | -0.20703 | -0.207 | 0.02% |
+)",
+                          measured);
 
+  for (const Comparison& comparison : nt33a.lateral_derivatives) {
+    std::cout << "| " << comparison.name << " | " << format_significant(comparison.computed, 6)
+              << " | " << format_significant(comparison.published, 6) << " | "
+              << percent(comparison.relative()) << " |\n";
+  }
+
+  std::cout << substitute(R"(
 The source prints its inputs and its outputs to three significant figures, so
 each carries up to about 0.5% of its own rounding and several combine in every
-one of these. The gate is 0.5%; the worst observed is 0.26%.
+one of these. The gate is 0.5%; the worst observed is {deriv.worst_percent}.
 
 **All five modes**, from the same linearisation:
 
 | Mode | galata | published | difference |
 |---|---|---|---|
-| Phugoid | zeta 0.0949, omega_n 0.1714 | 0.0948, 0.172 | 0.1%, 0.3% |
-| Short period | zeta 0.6219, omega_n 1.5950 | 0.622, 1.59 | 0.02%, 0.3% |
-| Spiral | 1/T 0.0319 | 0.0318 | 0.3% |
-| Roll subsidence | 1/T 2.1992 | 2.20 | 0.04% |
-| Dutch roll | zeta 0.0603, omega_n 1.1293 | 0.0609, 1.13 | 1.0%, 0.06% |
+)",
+                          measured);
+
+  for (const Comparison& comparison : nt33a.modes) {
+    std::cout << "| " << comparison.name << " | " << format_significant(comparison.computed, 5)
+              << " | " << format_significant(comparison.published, 4) << " | "
+              << percent(comparison.relative()) << " |\n";
+  }
+
+  std::cout << substitute(R"(
+The worst is {modes.worst_name} at {modes.worst_percent}.
 
 **An error this comparison caught.** The first version of the model treated the
 report's lateral derivatives as body-axis when the report gives them in
-stability axes. At a trim angle of attack of 2.2 degrees that looks like a
+stability axes. At a trim angle of attack of about two degrees that looks like a
 0.07% effect, since cos(2.2 deg) = 0.9993. It is not: the rotation MIXES the
 rolling and yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross
 term dominates and C_n_beta moves by 10%. The Dutch roll damping came out 35%
-high. It was the derivative-by-derivative comparison against Table II-7 that
-localised it — the modes alone said only that something was wrong.
+high. It was the derivative-by-derivative comparison above that localised it —
+the modes alone said only that something was wrong.
 
 A second error was found the same way: the force assembly rotated the
 lift/drag/side triple through the full wind-axis rotation, which adds a
 `-D sin(beta)` term to the body y force that a body-axis C_Y_beta already
-contains. Double-counting it inflated the side-force derivative from -0.125 to
--0.148.
+contains. Double-counting it inflated the side-force derivative by 19%.
 
 Both are the reason `models/nt33a/nt33a-fc1.yaml` must DECLARE which axes its
 lateral derivatives are in, rather than defaulting.
 
-)";
+)",
+                          measured);
 
   // --- Rigid-body dynamics, measured -----------------------------------
   {
@@ -640,7 +965,7 @@ which passes every other check.
 )";
   }
 
-  std::cout << R"(## Aircraft modal characteristics
+  std::cout << substitute(R"(## Aircraft modal characteristics
 
 **Reference.** R. K. Heffley and W. F. Jewell, *Aircraft Handling Qualities
 Data*, NASA CR-2144, Systems Technology Inc., December 1972.
@@ -687,10 +1012,10 @@ full chain.
 
 Two independent routes to the same published number:
 
-| Route | Phugoid zeta | vs published 0.0948 |
+| Route | Phugoid zeta | vs published |
 |---|---|---|
-| State matrix assembled by hand from the report's Table II-3 dimensional derivatives | 0.0929 | 2.0% low |
-| Nonlinear model, trimmed, then linearised by central differences | 0.0949 | 0.1% high |
+| State matrix assembled by hand from the report's Table II-3 dimensional derivatives | {hand.phugoid_zeta} | {hand.phugoid_percent} |
+| Nonlinear model, trimmed, then linearised by central differences | {chain.phugoid_zeta} | {chain.phugoid_percent} |
 
 The second route takes the report's NON-dimensional derivatives, builds a
 nonlinear aircraft, finds its trim, and perturbs it. It shares no arithmetic
@@ -713,12 +1038,13 @@ It disagrees by about 2% relative, which is roughly three times the band the
 inputs' own rounding allows.
 
 The mode itself is in very nearly the right place. Published, the phugoid
-eigenvalue is −0.016306 ± 0.171226j; galata computes −0.015974 ± 0.171170j.
-The imaginary part agrees to 6e-5, three parts in ten thousand. The
-disagreement is concentrated in a derived quantity: ζ = |Re| / |λ| divides a
-small real part by a small natural frequency, so a 3.3e-4 residual in the real
-part becomes 0.0019 in the ratio — which is the entire discrepancy, accounted
-for but not explained.
+eigenvalue is {published.phugoid_real} ± {published.phugoid_imag}j; the hand
+assembly gives {hand.phugoid_real} ± {hand.phugoid_imag}j. The imaginary parts
+agree to a few parts in ten thousand. The disagreement is concentrated in a
+derived quantity: ζ = |Re| / |λ| divides a small real part by a small natural
+frequency, so a residual of a few times 1e-4 in the real part becomes
+{hand.phugoid_percent} in the ratio — the entire discrepancy, accounted for but
+not explained.
 
 Two candidate explanations, neither confirmed:
 
@@ -737,7 +1063,8 @@ one, per charter rule 8 — holds the gap at its measured size so it cannot grow
 unnoticed, and fails if it shrinks, since that would mean the cause has been
 found and the lock should become a validation.
 
-)";
+)",
+                          measured);
 
   // Version only, deliberately NOT build_identification(): the report is
   // regenerated and diffed by CI on a different compiler and build type from a

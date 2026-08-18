@@ -35,6 +35,17 @@ trap 'rm -f "$generated"' EXIT
 
 "$binary" tests/validation/reference > "$generated"
 
+# An unresolved placeholder means a prose sentence refers to a measurement the
+# report does not compute. The generator leaves it visible rather than dropping
+# it silently, because a sentence with the number quietly removed still reads
+# fine and says nothing.
+if grep -n 'UNRESOLVED:' "$generated"; then
+  printf '\n::error::the report contains unresolved measurement placeholders (above).\n'
+  printf 'Either add the measurement in tools/validation/report_main.cpp, or fix the\n'
+  printf 'placeholder name.\n'
+  exit 1
+fi
+
 if [ "$mode" = "--check" ]; then
   if ! diff -u "$target" "$generated"; then
     printf '\n::error::%s is stale.\n' "$target"

@@ -1,3 +1,5 @@
+galata_find_eigen()
+
 # SPDX-License-Identifier: Apache-2.0
 #
 # Shared between the validation test suite and the report generator, so that
@@ -8,6 +10,7 @@
 add_library(galata_validation_reference
   reference_table.cpp
   case_registry.cpp
+  nt33a_hand_assembly.cpp
 )
 add_library(galata::validation_reference ALIAS galata_validation_reference)
 
@@ -16,6 +19,7 @@ target_include_directories(galata_validation_reference
 )
 
 target_link_libraries(galata_validation_reference
+  PUBLIC galata::core Eigen3::Eigen
   PRIVATE galata::warnings
 )
 
@@ -56,8 +60,17 @@ target_link_libraries(galata-validation-report
     galata::numerics
     galata::sim
     galata::validation_reference
+    galata::determinism_fingerprint
+    galata::model
+    galata::trim
+    galata::linearize
+    galata::analyze
     galata::pipeline
     galata::warnings
+)
+
+target_compile_definitions(galata-validation-report
+  PRIVATE GALATA_REPORT_MODEL="${CMAKE_SOURCE_DIR}/models/nt33a/nt33a-fc1.yaml"
 )
 
 set_target_properties(galata-validation-report PROPERTIES FOLDER "tools")
