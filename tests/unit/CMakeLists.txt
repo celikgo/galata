@@ -9,6 +9,9 @@ add_executable(galata_unit_tests
   test_state.cpp
   test_integrator.cpp
   test_modes.cpp
+  test_frequency_response.cpp
+  test_margins.cpp
+  test_disk_margin.cpp
   test_jacobian.cpp
   test_newton.cpp
 )
@@ -18,6 +21,7 @@ target_link_libraries(galata_unit_tests
     galata::core
     galata::numerics
     galata::analyze
+    galata::model
     galata::warnings
     GTest::gtest_main
 )

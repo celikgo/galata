@@ -101,6 +101,74 @@ TEST(ExampleNt33aLateralModes, ModalValuesMatchThePublishedOnes) {
   EXPECT_NE(text.find("0.0607"), std::string::npos) << "Dutch roll zeta not as published";
 }
 
+TEST(ExampleNt33aBankLoopMargins, RunsEndToEnd) {
+  const auto result = run_example("nt33a-bank-loop-margins", "margin-study.yaml");
+  ASSERT_EQ(result.stages.size(), 5U);
+  EXPECT_EQ(result.stages[0].capability, "model.linear.statespace");
+  EXPECT_EQ(result.stages[1].capability, "analyze.freqresp");
+  EXPECT_EQ(result.stages[2].capability, "analyze.margins");
+  EXPECT_EQ(result.stages[3].capability, "analyze.diskmargin");
+  EXPECT_EQ(result.stages[4].capability, "report.markdown");
+
+  for (const auto& stage : result.stages) {
+    EXPECT_FALSE(stage.artifact.produced_by_capability.empty());
+    EXPECT_NE(stage.artifact.produced_by_build.find("galata "), std::string::npos);
+  }
+}
+
+TEST(ExampleNt33aBankLoopMargins, ReportsTheThreeCrossoversItsReadmeQuotes) {
+  // The example's whole point is that this loop has THREE gain crossovers and
+  // that reporting only the first would call it comfortable. Its README prints
+  // all three. If the model, the gain or the crossover search changes, this
+  // fails and the README gets corrected.
+  const auto result = run_example("nt33a-bank-loop-margins", "margin-study.yaml");
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+
+  EXPECT_NE(text.find("All crossovers:"), std::string::npos);
+  EXPECT_NE(text.find("0.59308"), std::string::npos) << "first gain crossover";
+  EXPECT_NE(text.find("0.91805"), std::string::npos) << "second gain crossover";
+  EXPECT_NE(text.find("1.61076"), std::string::npos) << "third, governing gain crossover";
+  EXPECT_NE(text.find("101.015"), std::string::npos) << "phase margin at the first crossover";
+  EXPECT_NE(text.find("48.486"), std::string::npos) << "the GOVERNING phase margin";
+
+  // The governing margin is the smallest, not the first found.
+  const std::size_t governing = text.find("| Phase | 48.486 deg |");
+  EXPECT_NE(governing, std::string::npos)
+      << "the headline phase margin must be the smallest of the three";
+
+  // Infinite gain margin, which is exactly the case the disk margin exists to
+  // qualify. The README says so; the report must too.
+  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+}
+
+TEST(ExampleNt33aBankLoopMargins, DiskMarginQualifiesTheInfiniteGainMargin) {
+  // The README claims a guaranteed gain range of roughly 0.39 to 2.56 and a
+  // phase range of about +/- 47 degrees for a loop whose classical gain margin
+  // is infinite. Those numbers are the example's whole argument, so they are
+  // checked against the report a user actually reads.
+  const auto result = run_example("nt33a-bank-loop-margins", "margin-study.yaml");
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+
+  EXPECT_NE(text.find("| Disk margin alpha | 0.87548 |"), std::string::npos);
+  EXPECT_NE(text.find("0.3911 to 2.5571"), std::string::npos)
+      << "guaranteed gain range not as the README quotes it";
+  EXPECT_NE(text.find("+/- 47.282 deg"), std::string::npos)
+      << "guaranteed phase range not as the README quotes it";
+
+  // The claim the example exists to make: a BOUNDED robustness margin sitting
+  // underneath an INFINITE classical gain margin. If either half of that stops
+  // being true, the example stops making its point and this fails.
+  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+
+  // And the report must say how the peak was found, since a grid maximum makes
+  // the disk margin an optimistic bound.
+  EXPECT_NE(text.find("upper bound on the true disk margin"), std::string::npos);
+}
+
 TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedModes) {
   // The example's README quotes these. If the model, the trim or the
   // linearisation changes, this fails and the README gets corrected — which is

@@ -53,8 +53,13 @@ Four checks stand behind it, each a test rather than a convention:
 | All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
 | Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 145 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
 | Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 47 of the 145 values — because dividing by h amplifies a libm disagreement by 1/h. |
+| Frequency response G(jw) against closed-form transfer functions | Closed-form evaluation of rational transfer functions at s = jw | **validated** — The reference is arithmetic, not a document: for a system whose transfer function can be written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding. |
+| The hand-written Hessenberg solver against a general LU on the unreduced matrix | Laub, *Efficient multivariable frequency response computations*, IEEE TAC 26(2) (1981) | **validated** — Two different eliminations of the same system over a grid reaching a condition number above 1e6. The gate is kappa * eps — the conditioning of the problem — not a chosen tolerance. |
+| Gain, phase and delay margins against loops whose margins are exact | Franklin, Powell & Emami-Naeini, *Feedback Control of Dynamic Systems*; Astrom & Murray, *Feedback Systems*, ch. 10 | **validated** — 1/(s(s+1)(s+2)) has gain margin exactly 6 at exactly sqrt(2) rad/s, and 1/(s(s+1)^2) exactly 2 at exactly 1 rad/s. The delay margin is checked by PROPERTY as well as by formula: applying the reported delay must land the loop on the critical point. |
+| Disk margin — robustness to simultaneous gain and phase variation | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), worked example `ex:edm` | **validated** — Eight published values reproduced. The strongest evidence is not a value at all: the perturbation the theorem constructs must actually destabilise the loop, placing a closed-loop pole on the imaginary axis at the critical frequency. See ADR-0007 for why values from a copyrighted paper may be committed. |
+| Disk margin — the guaranteed PHASE variation phi_m | MathWorks, *Stability Analysis Using Disk Margins*, Robust Control Toolbox documentation | **validated**, with a caveat — Against VENDOR DOCUMENTATION, not a peer-reviewed source, and marked as such. The paper derives phi_m but prints no number for it, so without a second source this output would be gated against nothing. galata computes 25.8017 degrees and MathWorks' published diskmargin output for the same loop agrees to every figure it prints — see tests/validation/reference/seiler2020_disk_margin.csv, which carries that value and its location. A second implementation agreeing is real evidence; it is not a published derivation. |
+| Disk margin — the critical frequency, against the paper's printed value | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), worked example `ex:edm` | **known discrepancy** — The discrepancy is in the SOURCE, not in galata. The paper prints omega_0 = 1.94 rad/s, but its own printed delta_0 and f_0 are evaluated at omega_0 and are reproduced only near 1.955 rad/s, which is where \|S - 1/2\| actually peaks. At the printed 1.94 the construction gives Re delta_0 = 0.1955 against a printed 0.212, out by 16.5 units in its last printed figure. galata reports the self-consistent value. A test asserts the inconsistency, so that a future resolution of it fails loudly rather than passing quietly. |
 | Riccati solvers against the CAREX and DAREX benchmark collections | — | not implemented — Named in the v0.2 milestone. |
-| Gain, phase, delay and disk margins | — | not implemented — Named in the v0.2 milestone. |
 
 ### Evidence
 
@@ -88,8 +93,13 @@ ctest --preset dev -R '<test name>'
 | All five classical modes from trim and linearisation of a nonlinear model | `Nt33aChain.AllFiveClassicalModesMatchThePublishedValues` (validation)<br>`Nt33aChain.ThePhugoidDampingThatTheHandAssembledMatrixMissedIsRecovered` (validation) |
 | Determinism tier 1 — same platform, byte-identical | `Determinism.LongIntegrationIsBitIdenticalAcrossRuns` (determinism)<br>`Determinism.SplittingAnIntegrationInTwoGivesTheSameResult` (determinism)<br>`Determinism.ModalDecompositionIsBitIdenticalAndOrderStable` (determinism)<br>`Determinism.AtmosphereDoesNotDependOnQueryOrder` (determinism) |
 | Determinism tier 2 — cross-platform, bounded | `Determinism.TheFingerprintTrajectoryIsNotChaotic` (determinism) |
+| Frequency response G(jw) against closed-form transfer functions | `FrequencyResponse.FirstOrderLagMatchesItsClosedForm` (unit)<br>`FrequencyResponse.SecondOrderResonantPeakMatchesItsClosedForm` (unit)<br>`FrequencyResponse.RationalTransferFunctionWithZerosMatchesItsRatio` (unit)<br>`FrequencyResponse.PhaseIsUnwrappedAcrossTheHalfTurnBoundary` (unit) |
+| The hand-written Hessenberg solver against a general LU on the unreduced matrix | `FrequencyResponse.HessenbergSolveAgreesWithADirectlyFormedSolve` (unit) |
+| Gain, phase and delay margins against loops whose margins are exact | `Margins.ThirdOrderIntegratorChainMatchesItsClosedFormMargins` (unit)<br>`Margins.RepeatedPoleChainMatchesItsClosedFormMargins` (unit)<br>`Margins.PureDelayLoopIsMeasuredThroughTheEvaluator` (unit)<br>`Margins.GainMarginBelowUnityMeansTheGainMustComeDown` (unit)<br>`DiskMarginSeiler2020.ClassicalMarginsMatchThePublishedValuesAndTheClosedForm` (validation) |
+| Disk margin — robustness to simultaneous gain and phase variation | `DiskMarginSeiler2020.SymmetricDiskMarginMatchesThePublishedValues` (validation)<br>`DiskMarginSeiler2020.TheConstructedPerturbationActuallyDestabilisesTheLoop` (validation)<br>`DiskMarginSeiler2020.NamedSkewsHaveThePublishedInterceptClosedForms` (validation)<br>`DiskMarginSeiler2020.GainInterceptsFollowTheDiskParameterisationAtEverySkew` (validation)<br>`DiskMargin.ConstructedPerturbationDestabilisesWhateverTheSkew` (unit) |
+| Disk margin — the guaranteed PHASE variation phi_m | `DiskMarginSeiler2020.AgreesWithASecondImplementationIncludingThePhaseMargin` (validation) |
+| Disk margin — the critical frequency, against the paper's printed value | `DiskMarginSeiler2020.PublishedCriticalFrequencyDisagreesWithItsOwnPublishedPerturbation` (validation) |
 | Riccati solvers against the CAREX and DAREX benchmark collections | — |
-| Gain, phase, delay and disk margins | — |
 
 ### Capabilities, and the cases that validate them
 
@@ -101,6 +111,9 @@ against.
 
 | Capability | Declared state | Validated by |
 |---|---|---|
+| `analyze.diskmargin` | implemented and validated | `analyze.diskmargin`, `analyze.diskmargin.phase`, `analyze.diskmargin.critical_frequency` |
+| `analyze.freqresp` | implemented and validated | `analyze.freqresp`, `analyze.freqresp.hessenberg` |
+| `analyze.margins` | implemented and validated | `analyze.margins` |
 | `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
 | `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
@@ -472,6 +485,117 @@ discrepancy rather than as validated, and a **regression lock** — labelled as
 one, per charter rule 8 — holds the gap at its measured size so it cannot grow
 unnoticed, and fails if it shrinks, since that would mean the cause has been
 found and the lock should become a validation.
+
+## Frequency response and stability margins
+
+**References.** G. F. Franklin, J. D. Powell and A. Emami-Naeini, *Feedback
+Control of Dynamic Systems*, and K. J. Astrom and R. M. Murray, *Feedback
+Systems*, for the classical margins. A. J. Laub, "Efficient multivariable
+frequency response computations", IEEE TAC 26(2), 1981, for the Hessenberg
+method. P. Seiler, A. Packard and P. Gahinet, "An Introduction to Disk Margins",
+IEEE Control Systems Magazine 40(5), pp. 78-95, 2020,
+doi:10.1109/MCS.2020.3005277, for the disk margin — consulted as the authors'
+preprint <https://arxiv.org/abs/2003.04771>, since the published version is
+paywalled.
+
+### What is compared against what
+
+Frequency response is gated against **arithmetic, not a document**. For a system
+whose transfer function can be written down, G(jw) is a ratio of polynomials
+evaluated at s = jw, and the state-space result must equal it to rounding. That
+is a stronger reference than any printed table, because it has no precision of
+its own to hide behind.
+
+The same is true of two of the margin cases. The loop `1/(s(s+1)(s+2))` has a
+phase crossover at exactly sqrt(2) rad/s — the phase reaches -180 degrees when
+`1 - w^2/2` vanishes — and a gain margin of exactly 6, since
+`|L(j sqrt2)| = 1/(sqrt2 sqrt3 sqrt6) = 1/6`. The loop `1/(s(s+1)^2)` crosses at
+exactly 1 rad/s with a gain margin of exactly 2. Their gain crossovers are the
+roots of stated cubics, solved in the test by an independent bisection.
+
+The **delay margin** is checked twice over, and the second check is the one that
+matters: applying exactly the reported delay must put the loop exactly on the
+critical point, `1 + L(jw) e^(-jw tau) = 0`. A delay margin computed by the
+wrong formula can still satisfy the formula it was computed from; it cannot
+satisfy this.
+
+### The disk margin
+
+Gated against the tutorial's worked example, the loop
+`L(s) = 25 / (s^3 + 10 s^2 + 10 s + 10)`.
+
+| Quantity | galata | published | note |
+|---|---|---|---|
+| Classical gain margin | 3.6 | 3.6 | Also exactly 90/25, since Im L = 0 at w = sqrt(10) |
+| Classical phase margin | 29.1104 deg | 29.1 deg | |
+| Peak of \|S - 1/2\| | 2.183 | 2.18 | |
+| Disk margin alpha (skew 0) | 0.45809 | 0.46 | |
+| Guaranteed gain range | 0.62728 to 1.5942 | 0.63 to 1.59 | |
+| Guaranteed phase range | +/- 25.8017 deg | — | Not printed by the paper; see below |
+| Critical frequency | 1.955 rad/s | 1.94 rad/s | **Discrepancy — see below** |
+
+Every allowance is measured rather than chosen, in
+`tests/validation/reference/seiler2020_disk_margin.csv`, which also records the
+exact location of each value in the source and the rights position. ADR-0007
+sets out why scalar results from a copyrighted paper may be committed at all
+and what the limits on that are.
+
+**The strongest evidence here is not a number.** The theorem's proof constructs
+a perturbation on the boundary of the disk that destabilises the loop, placing a
+closed-loop pole on the imaginary axis at the critical frequency. galata
+computes that perturbation and the test closes the loop with it: the pole has to
+land where the theorem says. That check fails for any transcription error in
+alpha, delta_0 or f_0, individually or together, in a way that comparing
+printed digits does not.
+
+**A gap that had to be closed deliberately.** At skew 0 the factors
+`(1 - sigma)` and `(1 + sigma)` are both 1, so the published example says
+nothing about which is which. Swapping them in `gamma_min` was verified to leave
+every skew-0 result identical. The intercepts are therefore additionally gated
+against the disk parameterisation itself at six skews, and against the paper's
+published closed forms for the two named one-sided margins.
+
+**The guaranteed phase variation** is the one output with no peer-reviewed
+reference: the paper derives the formula for phi_m but prints no number for this
+example. It is gated against MathWorks' published `diskmargin` output for the
+same loop, which is vendor documentation and is labelled as such in the table
+above and in the reference file.
+
+### A discrepancy in the source
+
+The paper prints a critical frequency of 1.94 rad/s. Its own printed
+`delta_0 = 0.212 - 0.406j` and `f_0 = 1.128 - 0.483j` are evaluated at that
+frequency, and neither is reproduced there: at 1.94 the construction gives
+`Re delta_0 = 0.1955`, out by 16.5 units
+in the last figure the paper prints. Both are reproduced near 1.955
+rad/s, which is where `|S - 1/2|` actually peaks, and which is the value galata
+reports.
+
+The printed critical frequency is therefore inconsistent with the rest of the
+example. Because `|S - 1/2|` is flat near its maximum — a peak's location is
+always more weakly determined than its height — this costs almost nothing in
+the margin itself, which is why the published alpha, gamma_min and gamma_max all
+agree. A test asserts the inconsistency directly, so that if a future reading of
+the paper resolves it, the test fails rather than passing quietly.
+
+### What these margins do not establish
+
+Gain and phase margins are **separately-varied** margins: the tolerable gain
+change with no phase change, and the reverse. A loop can show a comfortable
+figure for each and still be fragile to a small simultaneous change in both.
+That is the whole reason the disk margin is computed alongside them, and
+`examples/nt33a-bank-loop-margins` is built to show it on a real aircraft — a
+loop whose gain margin is infinite and whose disk margin is not.
+
+Applied one loop at a time to a multi-loop system, all four are optimistic.
+galata has no structured singular value, so it has no MIMO disk margin.
+
+The disk margin's peak is found by **searching a frequency grid** and refining,
+not by the exact Hamiltonian-eigenvalue method. A grid maximum is a lower bound
+on the true peak, so the reported margin is an upper bound on the true one: the
+error is in the optimistic direction. The grid is refined around the
+closed-loop system's own lightly damped modes, which is where such peaks are,
+and every result records the band and point count that were searched.
 
 ---
 

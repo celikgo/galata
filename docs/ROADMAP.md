@@ -40,12 +40,27 @@ This is the credibility floor and nothing ships before it.
 
 ## v0.2 — analysis and design
 
-Frequency response, gain/phase/delay/disk margins, `synth.pid`, `synth.lqr`,
-CARE via the generalised Schur method validated against the CAREX benchmark
-collection, root locus, and `sim.nonlinear` with actuator position and rate
-limits in the loop. Markdown reports with embedded plots. A high-fidelity
-aircraft model with its provenance, and the modal validation gate against
-published values.
+**Done.** Frequency response (`analyze.freqresp`), evaluated by Hessenberg
+solves with the grid refined around the system's own lightly damped modes, and
+all four margin types: gain, phase and delay (`analyze.margins`) with every
+crossover reported, and the disk margin (`analyze.diskmargin`) with its
+guaranteed gain and phase range and a destabilising perturbation on the
+boundary. Validated against closed-form transfer functions and against the
+published worked example of Seiler, Packard & Gahinet (2020); see
+`docs/VERIFICATION.md`.
+
+**Remaining.** `synth.pid`, `synth.lqr`, CARE via the generalised Schur method
+validated against the CAREX benchmark collection, root locus, and
+`sim.nonlinear` with actuator position and rate limits in the loop. Markdown
+reports with embedded plots. Singular values for MIMO loops and the sensitivity
+and complementary-sensitivity peaks. A high-fidelity aircraft model with its
+provenance, and the modal validation gate against published values.
+
+Known gap carried forward: the disk margin's peak is found on a refined
+frequency grid rather than by the exact Hamiltonian-eigenvalue method (Boyd &
+Balakrishnan; Bruinsma & Steinbuch), so the reported margin is an upper bound on
+the true one. The error is in the optimistic direction and is documented at
+every point it surfaces.
 
 ## v0.3 — the desktop application
 

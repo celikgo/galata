@@ -35,9 +35,18 @@ namespace galata::model {
 struct LinearSystem {
   Eigen::MatrixXd a;  // n x n
   Eigen::MatrixXd b;  // n x m, empty when the model has no inputs
+  // p x n. Empty means "the outputs ARE the states", i.e. C = I. That is what
+  // galata's own linearisation produces, and writing out an identity matrix in
+  // every model file would be noise. Use output_matrix() rather than reading
+  // this directly.
+  Eigen::MatrixXd c;
+  // p x m. Empty means no direct feedthrough, D = 0 — the common case, since a
+  // linearised aircraft has none. Use feedthrough_matrix().
+  Eigen::MatrixXd d;
 
-  std::vector<std::string> state_names;  // n entries
-  std::vector<std::string> input_names;  // m entries
+  std::vector<std::string> state_names;   // n entries
+  std::vector<std::string> input_names;   // m entries
+  std::vector<std::string> output_names;  // p entries; empty mirrors state_names
 
   // Free text from the file, carried through to reports so a result can name
   // the aircraft and condition it describes.
@@ -60,6 +69,15 @@ struct LinearSystem {
   [[nodiscard]] Eigen::Index input_count() const {
     return b.cols();
   }
+
+  [[nodiscard]] Eigen::Index output_count() const {
+    return c.size() == 0 ? a.rows() : c.rows();
+  }
+
+  // C and D with the defaults materialised, so callers never branch on empty.
+  [[nodiscard]] Eigen::MatrixXd output_matrix() const;
+  [[nodiscard]] Eigen::MatrixXd feedthrough_matrix() const;
+  [[nodiscard]] std::vector<std::string> output_labels() const;
 };
 
 // Reads a linear system from a YAML file:
@@ -75,9 +93,15 @@ struct LinearSystem {
 //   b:
 //     - [0.0, 0.0295]
 //     ...
+//   outputs: [phi]
+//   c:
+//     - [0.0, 0.0, 0.0, 1.0]
+//   d:
+//     - [0.0, 0.0]
 //
-// `b` and `inputs` are optional. Throws with the file path in the message on
-// any structural problem.
+// `b` and `inputs` are optional; so are `c`, `d` and `outputs`, which default
+// to C = I, D = 0 and the state names. Throws with the file path in the message
+// on any structural problem.
 [[nodiscard]] LinearSystem load_linear_system(const std::string& path);
 
 }  // namespace galata::model

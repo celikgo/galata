@@ -7,6 +7,9 @@
 // what stops the documentation from claiming more than the code does
 // (charter rule 2).
 
+#include "galata/analyze/disk_margin.hpp"
+#include "galata/analyze/frequency_response.hpp"
+#include "galata/analyze/margins.hpp"
 #include "galata/analyze/modes.hpp"
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
@@ -16,6 +19,7 @@
 #include "galata/units.hpp"
 #include "galata/version.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -323,6 +327,309 @@ void write_linear_system_section(std::ostream& out, const model::LinearSystem& s
   out << "```\n\n";
 }
 
+// --- analyze.freqresp ------------------------------------------------------
+
+struct FrequencyResponseArtifact {
+  analyze::FrequencyResponse response;
+  std::string system_description;
+  std::string system_citation;
+  int input_index;
+  int output_index;
+};
+
+// Resolve a name or an index against a list of names. Names are preferred in
+// pipeline files because an index silently means something different the
+// moment a model gains a state.
+int resolve_channel(const ValuePtr& input,
+                    const std::string& key,
+                    const std::vector<std::string>& names,
+                    const char* what) {
+  const ValuePtr entry = input->get(key);
+  if (!entry) {
+    return 0;
+  }
+  if (entry->kind() == Value::Kind::Number) {
+    const int index = static_cast<int>(entry->as_number());
+    if (index < 0 || index >= static_cast<int>(names.size())) {
+      std::ostringstream message;
+      message << what << " index " << index << " is out of range; the model has " << names.size();
+      throw std::runtime_error(message.str());
+    }
+    return index;
+  }
+  const std::string& wanted = entry->as_string();
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (names[index] == wanted) {
+      return static_cast<int>(index);
+    }
+  }
+  std::ostringstream message;
+  message << what << " '" << wanted << "' is not in the model. Available: ";
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    message << (index == 0 ? "" : ", ") << names[index];
+  }
+  throw std::runtime_error(message.str());
+}
+
+analyze::MarginOptions read_margin_options(const StageContext& context) {
+  analyze::MarginOptions options;
+  options.start_rad_s = context.input->number_at("from_rad_s", options.start_rad_s);
+  options.stop_rad_s = context.input->number_at("to_rad_s", options.stop_rad_s);
+  options.grid_points = static_cast<int>(context.input->number_at("points", options.grid_points));
+  return options;
+}
+
+Artifact frequency_response_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("system");
+  const auto& system = upstream.payload_as<model::LinearSystem>("linear_system");
+  if (system.input_count() == 0) {
+    throw std::runtime_error(
+        "analyze.freqresp: the model has no inputs, so it has no transfer "
+        "function");
+  }
+
+  const int input_index = resolve_channel(context.input, "input", system.input_names, "input");
+  const int output_index =
+      resolve_channel(context.input, "output", system.output_labels(), "output");
+
+  const double from = context.input->number_at("from_rad_s", 1.0e-3);
+  const double to = context.input->number_at("to_rad_s", 1.0e3);
+  const int points = static_cast<int>(context.input->number_at("points", 500));
+  const bool refine = context.input->bool_at("refine_near_modes", true);
+
+  const std::vector<double> grid = refine
+                                       ? analyze::grid_refined_for_modes(system.a, from, to, points)
+                                       : analyze::logarithmic_grid(from, to, points);
+
+  FrequencyResponseArtifact result;
+  result.response = analyze::single_loop_response(system, input_index, output_index, grid);
+  result.system_description = system.description;
+  result.system_citation = system.citation;
+  result.input_index = input_index;
+  result.output_index = output_index;
+
+  std::ostringstream summary;
+  summary << grid.size() << " frequencies from " << format(from, 4) << " to " << format(to, 1)
+          << " rad/s, " << system.input_names.at(static_cast<std::size_t>(input_index)) << " to "
+          << system.output_labels().at(static_cast<std::size_t>(output_index));
+
+  Artifact artifact;
+  artifact.kind = "frequency_response";
+  artifact.summary = summary.str();
+  artifact.payload = result;
+  return artifact;
+}
+
+// --- analyze.margins -------------------------------------------------------
+
+struct MarginArtifact {
+  analyze::StabilityMargins margins;
+  std::string loop_name;
+  std::string system_description;
+};
+
+Artifact margins_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("system");
+  const auto& system = upstream.payload_as<model::LinearSystem>("linear_system");
+  if (system.input_count() == 0) {
+    throw std::runtime_error("analyze.margins: the model has no inputs, so it has no loop");
+  }
+
+  const int input_index = resolve_channel(context.input, "input", system.input_names, "input");
+  const int output_index =
+      resolve_channel(context.input, "output", system.output_labels(), "output");
+
+  MarginArtifact result;
+  result.margins =
+      analyze::stability_margins(system, input_index, output_index, read_margin_options(context));
+  result.loop_name = system.input_names.at(static_cast<std::size_t>(input_index)) + " to "
+                     + system.output_labels().at(static_cast<std::size_t>(output_index));
+  result.system_description = system.description;
+
+  std::ostringstream summary;
+  if (result.margins.has_gain_margin) {
+    summary << "GM " << format(result.margins.gain_margin_db, 2) << " dB";
+  } else {
+    summary << "GM infinite";
+  }
+  summary << ", ";
+  if (result.margins.has_phase_margin) {
+    summary << "PM " << format(result.margins.phase_margin_deg, 2) << " deg";
+  } else {
+    summary << "PM infinite";
+  }
+
+  Artifact artifact;
+  artifact.kind = "stability_margins";
+  artifact.summary = summary.str();
+  artifact.payload = result;
+  return artifact;
+}
+
+// --- analyze.diskmargin ----------------------------------------------------
+
+struct DiskMarginArtifact {
+  analyze::DiskMargin margin;
+  std::string loop_name;
+  std::string system_description;
+};
+
+Artifact disk_margin_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("system");
+  const auto& system = upstream.payload_as<model::LinearSystem>("linear_system");
+  if (system.input_count() == 0) {
+    throw std::runtime_error("analyze.diskmargin: the model has no inputs, so it has no loop");
+  }
+
+  const int input_index = resolve_channel(context.input, "input", system.input_names, "input");
+  const int output_index =
+      resolve_channel(context.input, "output", system.output_labels(), "output");
+  const double skew = context.input->number_at("skew", 0.0);
+
+  DiskMarginArtifact result;
+  result.margin =
+      analyze::disk_margin(system, input_index, output_index, skew, read_margin_options(context));
+  result.loop_name = system.input_names.at(static_cast<std::size_t>(input_index)) + " to "
+                     + system.output_labels().at(static_cast<std::size_t>(output_index));
+  result.system_description = system.description;
+
+  std::ostringstream summary;
+  summary << "alpha " << format(result.margin.alpha, 4) << " at skew " << format(skew, 2)
+          << ", peak at " << format(result.margin.critical_frequency_rad_s, 4) << " rad/s";
+
+  Artifact artifact;
+  artifact.kind = "disk_margin";
+  artifact.summary = summary.str();
+  artifact.payload = result;
+  return artifact;
+}
+
+// --- Markdown writers for the frequency-domain artefacts --------------------
+
+std::string frequency_or_dash(bool present, double value) {
+  return present ? format(value, 4) : "—";
+}
+
+void write_frequency_response_section(std::ostream& out,
+                                      const FrequencyResponseArtifact& artifact) {
+  const analyze::FrequencyResponse& response = artifact.response;
+  if (!artifact.system_description.empty()) {
+    out << "**Model.** " << artifact.system_description << "\n\n";
+  }
+  out << "**Loop.** `" << response.input_names.front() << "` to `" << response.output_names.front()
+      << "`\n\n";
+  out << "**Grid.** " << response.frequencies_rad_s.size() << " frequencies from "
+      << format(response.frequencies_rad_s.front(), 5) << " to "
+      << format(response.frequencies_rad_s.back(), 2) << " rad/s.\n\n";
+
+  // A Bode table, decade by decade. The whole grid would be hundreds of rows
+  // and no reader would look at it; a decade sample is a plot until there is a
+  // plot.
+  const std::vector<double> magnitude_db = response.magnitude_db();
+  const std::vector<double> phase = response.phase_deg();
+  out << "| w (rad/s) | \\|G\\| (dB) | phase (deg) |\n";
+  out << "| ---: | ---: | ---: |\n";
+  const std::size_t stride = std::max<std::size_t>(1, response.frequencies_rad_s.size() / 20);
+  for (std::size_t index = 0; index < response.frequencies_rad_s.size(); index += stride) {
+    out << "| " << format(response.frequencies_rad_s[index], 5) << " | "
+        << format(magnitude_db[index], 3) << " | " << format(phase[index], 3) << " |\n";
+  }
+  out << "\n*Sampled every " << stride << " points of the grid.*\n\n";
+}
+
+void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
+  const analyze::StabilityMargins& margins = artifact.margins;
+  if (!artifact.system_description.empty()) {
+    out << "**Model.** " << artifact.system_description << "\n\n";
+  }
+  out << "**Loop.** " << artifact.loop_name << "\n\n";
+
+  out << "| margin | value | at (rad/s) |\n";
+  out << "| --- | ---: | ---: |\n";
+  out << "| Gain | "
+      << (margins.has_gain_margin
+              ? format(margins.gain_margin, 4) + " (" + format(margins.gain_margin_db, 2) + " dB)"
+              : std::string("infinite"))
+      << " | " << frequency_or_dash(margins.has_gain_margin, margins.gain_margin_frequency_rad_s)
+      << " |\n";
+  out << "| Phase | "
+      << (margins.has_phase_margin ? format(margins.phase_margin_deg, 3) + " deg"
+                                   : std::string("infinite"))
+      << " | " << frequency_or_dash(margins.has_phase_margin, margins.phase_margin_frequency_rad_s)
+      << " |\n";
+  out << "| Delay | "
+      << (margins.has_delay_margin ? format(margins.delay_margin_s, 5) + " s" : std::string("none"))
+      << " | " << frequency_or_dash(margins.has_delay_margin, margins.delay_margin_frequency_rad_s)
+      << " |\n\n";
+
+  // Every crossover, not only the governing one. A loop that crosses unity
+  // three times has three phase margins, and a report that showed one would be
+  // hiding the other two.
+  if (margins.gain_crossings.size() > 1 || margins.phase_crossings.size() > 1) {
+    out << "All crossovers:\n\n";
+    out << "| kind | w (rad/s) | margin |\n| --- | ---: | ---: |\n";
+    for (const auto& crossing : margins.gain_crossings) {
+      out << "| \\|L\\| = 1 | " << format(crossing.frequency_rad_s, 5) << " | "
+          << format(crossing.phase_margin_deg, 3) << " deg |\n";
+    }
+    for (const auto& crossing : margins.phase_crossings) {
+      out << "| phase = -180 | " << format(crossing.frequency_rad_s, 5) << " | "
+          << format(crossing.gain_margin_db, 3) << " dB |\n";
+    }
+    out << "\n";
+  }
+
+  if (!margins.has_delay_margin && margins.has_phase_margin && margins.phase_margin_deg < 0.0) {
+    out << "*The phase margin is negative: this loop closes unstable, and no delay is what is "
+           "wrong with it.*\n\n";
+  }
+  out << "*Searched " << format(margins.searched_from_rad_s, 5) << " to "
+      << format(margins.searched_to_rad_s, 2) << " rad/s over " << margins.grid_points
+      << " points. A crossover narrower than that spacing would not be found.*\n\n";
+}
+
+void write_disk_margin_section(std::ostream& out, const DiskMarginArtifact& artifact) {
+  const analyze::DiskMargin& margin = artifact.margin;
+  if (!artifact.system_description.empty()) {
+    out << "**Model.** " << artifact.system_description << "\n\n";
+  }
+  out << "**Loop.** " << artifact.loop_name << " — skew sigma = " << format(margin.skew, 2)
+      << (margin.skew == 0.0 ? " (symmetric)" : "") << "\n\n";
+
+  out << "| quantity | value |\n| --- | ---: |\n";
+  out << "| Disk margin alpha | " << format(margin.alpha, 5) << " |\n";
+  out << "| Peak of \\|S + (sigma-1)/2\\| | " << format(margin.peak_gain, 5) << " |\n";
+  out << "| Critical frequency | " << format(margin.critical_frequency_rad_s, 5) << " rad/s |\n";
+  out << "| Guaranteed gain range | "
+      << (margin.gain_variation_is_bounded
+              ? format(margin.gain_variation_min, 4) + " to " + format(margin.gain_variation_max, 4)
+                    + " (" + format(margin.gain_variation_min_db, 2) + " to "
+                    + format(margin.gain_variation_max_db, 2) + " dB)"
+              : format(margin.gain_variation_min, 4) + " upwards, unbounded")
+      << " |\n";
+  out << "| Guaranteed phase range | "
+      << (margin.phase_variation_is_bounded
+              ? "+/- " + format(margin.phase_variation_deg, 3) + " deg"
+              : std::string("any phase"))
+      << " |\n\n";
+
+  out << "A perturbation on the boundary that destabilises this loop: f = "
+      << format(margin.destabilising_perturbation.real(), 4) << " "
+      << (margin.destabilising_perturbation.imag() < 0.0 ? "-" : "+") << " "
+      << format(std::abs(margin.destabilising_perturbation.imag()), 4) << "j, which places a "
+      << "closed-loop pole at s = j" << format(margin.critical_frequency_rad_s, 4) << ".\n\n";
+
+  out << "*The guaranteed gain and phase ranges are SMALLER than the classical margins by "
+         "construction: the disk is inscribed in the stable region, and buys tolerance to "
+         "combined gain and phase variation with some of the room the classical margins claim "
+         "for each alone.*\n\n";
+  out << "*The peak was found by searching " << format(margin.searched_from_rad_s, 5) << " to "
+      << format(margin.searched_to_rad_s, 2) << " rad/s over " << margin.grid_points
+      << " points and refining. A grid maximum understates the true peak, so this alpha is an "
+         "upper bound on the true disk margin — the error is optimistic. Treat a marginal "
+         "result as marginal.*\n\n";
+}
+
 Artifact write_markdown_report(const StageContext& context) {
   const std::string relative = context.input->string_at("path");
   const std::string path = context.resolve_output_path(relative);
@@ -355,6 +662,13 @@ Artifact write_markdown_report(const StageContext& context) {
       write_trim_section(out, std::any_cast<const TrimArtifact&>(artifact.payload));
     } else if (artifact.kind == "linear_system") {
       write_linear_system_section(out, std::any_cast<const model::LinearSystem&>(artifact.payload));
+    } else if (artifact.kind == "frequency_response") {
+      write_frequency_response_section(
+          out, std::any_cast<const FrequencyResponseArtifact&>(artifact.payload));
+    } else if (artifact.kind == "stability_margins") {
+      write_margins_section(out, std::any_cast<const MarginArtifact&>(artifact.payload));
+    } else if (artifact.kind == "disk_margin") {
+      write_disk_margin_section(out, std::any_cast<const DiskMarginArtifact&>(artifact.payload));
     } else {
       // Reporting an artefact kind this writer does not understand is a gap in
       // the writer, and it says so rather than silently omitting the section.
@@ -423,6 +737,30 @@ Registry build_registry() {
                           "linear_system",
                           Capability::State::Implemented,
                           linearize_capability});
+
+  registry.add(
+      Capability{"analyze.freqresp",
+                 "Frequency response of one loop of a linear model, evaluated by Hessenberg solves "
+                 "with the grid refined around the system's own lightly damped modes",
+                 "frequency_response",
+                 Capability::State::Implemented,
+                 frequency_response_capability});
+
+  registry.add(
+      Capability{"analyze.margins",
+                 "Gain, phase and delay margins of one loop, with every crossover reported and the "
+                 "frequency at which each occurs",
+                 "stability_margins",
+                 Capability::State::Implemented,
+                 margins_capability});
+
+  registry.add(Capability{
+      "analyze.diskmargin",
+      "Disk margin of one loop — robustness to simultaneous gain and phase variation — with "
+      "the guaranteed gain and phase range and a destabilising perturbation on the boundary",
+      "disk_margin",
+      Capability::State::Implemented,
+      disk_margin_capability});
 
   registry.add(Capability{"report.markdown",
                           "Write a Markdown report from upstream results",

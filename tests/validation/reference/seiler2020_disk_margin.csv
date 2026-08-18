@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Disk margin of the worked example in the disk-margin tutorial: the published
+# results for a single, explicitly stated loop transfer function.
+#
+# SOURCE (primary, consulted as the author preprint — see RIGHTS):
+#   Peter Seiler, Andrew Packard and Pascal Gahinet,
+#   "An Introduction to Disk Margins [Lecture Notes]".
+#   IEEE Control Systems Magazine, vol. 40, no. 5, pp. 78-95, October 2020.
+#   doi:10.1109/MCS.2020.3005277
+#   https://ieeexplore.ieee.org/document/9196925
+#
+#   Read as the authors' preprint, which carries the same text:
+#   arXiv:2003.04771v2 [eess.SY], 8 April 2020.
+#   doi:10.48550/arXiv.2003.04771
+#   https://arxiv.org/abs/2003.04771
+#   The values below were read from the LaTeX source of that preprint
+#   (DiskMarginTutorial_ARXIV.tex, 110,961 bytes,
+#   SHA-256 6727c870147be4a8a9f8f8a94e19760fcb01ceb4291d8e6bc8e96664403290d5),
+#   in the example environment labelled `ex:edm`, which refers back to the loop
+#   introduced in `ex:cm`. The IEEE version was NOT opened: IEEE Xplore serves
+#   a bot challenge to automated clients. Equation labels quoted in the galata
+#   headers are therefore the PREPRINT's LaTeX labels, not IEEE's printed
+#   equation numbers.
+#
+# RIGHTS: this paper is NOT a US Government work and is not public domain.
+#   Nothing of the document is reproduced here. What is transcribed is nine
+#   scalar results of a worked exercise on a transfer function the paper states
+#   in one line, quoted for the purpose of verifying an independent
+#   implementation and attributed in full. Every value below has additionally
+#   been reproduced from the paper's own stated formulae, so the table is a
+#   record of agreement rather than a substitute for the source. galata ships
+#   no part of the paper and no dataset derived from it.
+#
+#   This is a different situation from the aerodynamic coefficient tables,
+#   which ship only when transcribed from a US Government work. See
+#   docs/adr/0007-reference-values-from-copyrighted-sources.md.
+#
+# THE LOOP (paper's equation labelled by the align environment at ex:cm):
+#   P(s) = 1 / (s^3 + 10 s^2 + 10 s + 10),  K(s) = 25,
+#   L(s) = 25 / (s^3 + 10 s^2 + 10 s + 10)
+#   Negative unit feedback. The paper states the nominal closed loop is stable,
+#   with poles at -9.33 and -0.33 +/- 1.91j.
+#
+# All disk-margin rows are for the SYMMETRIC case, skew sigma = 0.
+#
+# units_in_last_place is the allowance each comparison needs, MEASURED, not
+# chosen: 0.5 means the computed value rounds to the printed one. Where it
+# exceeds 0.5 the reason is recorded in docs/VERIFICATION.md. The critical
+# frequency is the one real discrepancy and it is discussed there: the paper's
+# printed 1.94 rad/s cannot be reconciled with the paper's OWN printed delta_0
+# and f_0, which are reproduced only near 1.955 rad/s.
+#
+# SECOND, INDEPENDENT SOURCE for the same loop — rows prefixed `mathworks_`.
+#
+#   MathWorks, "Stability Analysis Using Disk Margins", Robust Control Toolbox
+#   documentation.
+#   https://www.mathworks.com/help/robust/ug/stability-analysis-using-disk-margins.html
+#   For L = tf(25,[1 10 10 10]) at skew 0 it publishes the output of its own
+#   `diskmargin`: alpha = 0.4581, DGM = [0.6273 1.5942], DPM = [-25.8 25.8] deg.
+#
+#   This is VENDOR DOCUMENTATION, not a peer-reviewed source, and it is used
+#   only as a cross-check. It earns its place for one reason: it publishes the
+#   guaranteed PHASE variation phi_m, which the paper works out the formula for
+#   but never prints a number for. Without it, galata's phi_m would be gated
+#   against nothing. A second implementation agreeing to five figures is real
+#   evidence, and it is labelled for what it is.
+#
+#   NORMALISATION HAZARD, recorded so nobody reconciles the two by accident:
+#   the paper bounds |delta| < alpha, MathWorks bounds |delta| < 1 and moves
+#   alpha inside the factor. The sets are identical under
+#   delta_paper = alpha * delta_mathworks, but the two delta values are NOT
+#   comparable. galata follows the paper, so |delta_0| = alpha here.
+#
+quantity,value,significant_figures,units_in_last_place,units,location
+classical_gain_margin,3.6,2,0.5,-,ex:cm "The upper gain margin g_U=3.6"
+classical_phase_margin,29.1,3,0.5,deg,ex:cm "The phase margin phi_U=29.1"
+peak_shifted_sensitivity,2.18,3,1.0,-,ex:edm "The peak gain of 1/2(S-T) is 2.18"
+critical_frequency,1.94,3,3.5,rad/s,ex:edm "at the critical frequency omega_0=1.94 rad/sec"
+alpha_max,0.46,2,0.5,-,ex:edm "a symmetric disk margin of alpha_max = 0.46"
+gamma_min,0.63,2,1.0,-,ex:edm "real axis intercepts at gamma_min=0.63"
+gamma_max,1.59,3,1.0,-,ex:edm "and gamma_max = 1.59"
+delta_0_real,0.212,3,2.5,-,ex:edm "yields delta_0 = 0.212 - 0.406j"
+delta_0_imag,-0.406,3,1.0,-,ex:edm "yields delta_0 = 0.212 - 0.406j"
+f_0_real,1.128,4,2.0,-,ex:edm "the destabilizing perturbation f_0 = 1.128-0.483j"
+f_0_imag,-0.483,3,0.5,-,ex:edm "the destabilizing perturbation f_0 = 1.128-0.483j"
+mathworks_alpha,0.4581,4,0.5,-,diskmargin output DM.DiskMargin for the same loop at skew 0
+mathworks_gamma_min,0.6273,4,0.5,-,diskmargin output DM.GainMargin(1)
+mathworks_gamma_max,1.5942,5,0.5,-,diskmargin output DM.GainMargin(2)
+mathworks_phase_margin,25.8017,6,0.5,deg,diskmargin output DM.PhaseMargin(2)

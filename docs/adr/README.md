@@ -14,3 +14,4 @@ The format is in [0000-template.md](0000-template.md).
 | [0004](0004-determinism-policy.md) | Determinism policy, and what it does not cover | accepted |
 | [0005](0005-single-source-of-version.md) | One source of version truth | accepted |
 | [0006](0006-equations-of-motion-about-the-cg.md) | The equations of motion are written about the centre of gravity | accepted |
+| [0007](0007-reference-values-from-copyrighted-sources.md) | Scalar reference values may be quoted from copyrighted sources; datasets may not | accepted |

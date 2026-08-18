@@ -15,6 +15,10 @@ const char* const kUssa =
     "COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335";
 const char* const kCr2144 =
     "Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972)";
+const char* const kSeiler =
+    "Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020)";
+const char* const kMathWorks =
+    "MathWorks, *Stability Analysis Using Disk Margins*, Robust Control Toolbox documentation";
 const char* const kEuler =
     "Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz)";
 
@@ -313,6 +317,93 @@ const std::vector<Case>& validation_cases() {
        "instead — {det.tier1_only} of the {det.total} values — because dividing by h amplifies a "
        "libm disagreement by 1/h."},
 
+      // --- Frequency response and margins -----------------------------------
+      {"analyze.freqresp",
+       "Frequency response G(jw) against closed-form transfer functions",
+       {"analyze.freqresp"},
+       "Closed-form evaluation of rational transfer functions at s = jw",
+       Status::Validated,
+       {E{kUnit, "FrequencyResponse.FirstOrderLagMatchesItsClosedForm"},
+        E{kUnit, "FrequencyResponse.SecondOrderResonantPeakMatchesItsClosedForm"},
+        E{kUnit, "FrequencyResponse.RationalTransferFunctionWithZerosMatchesItsRatio"},
+        E{kUnit, "FrequencyResponse.PhaseIsUnwrappedAcrossTheHalfTurnBoundary"}},
+       "The reference is arithmetic, not a document: for a system whose transfer function can be "
+       "written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding."},
+
+      {"analyze.freqresp.hessenberg",
+       "The hand-written Hessenberg solver against a general LU on the unreduced matrix",
+       {"analyze.freqresp"},
+       "Laub, *Efficient multivariable frequency response computations*, IEEE TAC 26(2) (1981)",
+       Status::Validated,
+       {E{kUnit, "FrequencyResponse.HessenbergSolveAgreesWithADirectlyFormedSolve"}},
+       "Two different eliminations of the same system over a grid reaching a condition number "
+       "above 1e6. The gate is kappa * eps — the conditioning of the problem — not a chosen "
+       "tolerance."},
+
+      {"analyze.margins",
+       "Gain, phase and delay margins against loops whose margins are exact",
+       {"analyze.margins"},
+       "Franklin, Powell & Emami-Naeini, *Feedback Control of Dynamic Systems*; "
+       "Astrom & Murray, *Feedback Systems*, ch. 10",
+       Status::Validated,
+       {E{kUnit, "Margins.ThirdOrderIntegratorChainMatchesItsClosedFormMargins"},
+        E{kUnit, "Margins.RepeatedPoleChainMatchesItsClosedFormMargins"},
+        E{kUnit, "Margins.PureDelayLoopIsMeasuredThroughTheEvaluator"},
+        E{kUnit, "Margins.GainMarginBelowUnityMeansTheGainMustComeDown"},
+        E{kValidation,
+          "DiskMarginSeiler2020.ClassicalMarginsMatchThePublishedValuesAndTheClosedForm"}},
+       "1/(s(s+1)(s+2)) has gain margin exactly 6 at exactly sqrt(2) rad/s, and 1/(s(s+1)^2) "
+       "exactly 2 at exactly 1 rad/s. The delay margin is checked by PROPERTY as well as by "
+       "formula: applying the reported delay must land the loop on the critical point."},
+
+      {"analyze.diskmargin",
+       "Disk margin — robustness to simultaneous gain and phase variation",
+       {"analyze.diskmargin"},
+       std::string(kSeiler) + ", worked example `ex:edm`",
+       Status::Validated,
+       {E{kValidation, "DiskMarginSeiler2020.SymmetricDiskMarginMatchesThePublishedValues"},
+        E{kValidation,
+          "DiskMarginSeiler2020.TheConstructedPerturbationActuallyDestabilisesTheLoop"},
+        E{kValidation, "DiskMarginSeiler2020.NamedSkewsHaveThePublishedInterceptClosedForms"},
+        E{kValidation,
+          "DiskMarginSeiler2020.GainInterceptsFollowTheDiskParameterisationAtEverySkew"},
+        E{kUnit, "DiskMargin.ConstructedPerturbationDestabilisesWhateverTheSkew"}},
+       "Eight published values reproduced. The strongest evidence is not a value at all: the "
+       "perturbation the theorem constructs must actually destabilise the loop, placing a "
+       "closed-loop pole on the imaginary axis at the critical frequency. See ADR-0007 for why "
+       "values from a copyrighted paper may be committed."},
+
+      {"analyze.diskmargin.phase",
+       "Disk margin — the guaranteed PHASE variation phi_m",
+       {"analyze.diskmargin"},
+       kMathWorks,
+       Status::ValidatedWithCaveat,
+       {E{kValidation,
+          "DiskMarginSeiler2020.AgreesWithASecondImplementationIncludingThePhaseMargin"}},
+       "Against VENDOR DOCUMENTATION, not a peer-reviewed source, and marked as such. The paper "
+       "derives phi_m but prints no number for it, so without a second source this output would "
+       "be gated against nothing. galata computes {disk.phi_m} degrees and MathWorks' published "
+       "diskmargin output for the same loop agrees to every figure it prints — see "
+       "tests/validation/reference/seiler2020_disk_margin.csv, which carries that value and its "
+       "location. A second implementation agreeing is real evidence; it is not a published "
+       "derivation."},
+
+      {"analyze.diskmargin.critical_frequency",
+       "Disk margin — the critical frequency, against the paper's printed value",
+       {"analyze.diskmargin"},
+       std::string(kSeiler) + ", worked example `ex:edm`",
+       Status::KnownDiscrepancy,
+       {E{kValidation,
+          "DiskMarginSeiler2020."
+          "PublishedCriticalFrequencyDisagreesWithItsOwnPublishedPerturbation"}},
+       "The discrepancy is in the SOURCE, not in galata. The paper prints omega_0 = 1.94 rad/s, "
+       "but its own printed delta_0 and f_0 are evaluated at omega_0 and are reproduced only near "
+       "{disk.omega0} rad/s, which is where |S - 1/2| actually peaks. At the printed 1.94 the "
+       "construction gives Re delta_0 = {disk.delta_real_at_printed} against a printed 0.212, out "
+       "by {disk.omega0_units_off} units in its last printed figure. galata reports the "
+       "self-consistent value. A test asserts the inconsistency, so that a future resolution of "
+       "it fails loudly rather than passing quietly."},
+
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
        "Riccati solvers against the CAREX and DAREX benchmark collections",
@@ -322,13 +413,6 @@ const std::vector<Case>& validation_cases() {
        {},
        "Named in the v0.2 milestone."},
 
-      {"analyze.margins",
-       "Gain, phase, delay and disk margins",
-       {},
-       "",
-       Status::NotImplemented,
-       {},
-       "Named in the v0.2 milestone."},
   };
   return cases;
 }

@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Frequency response and all four margins for a bank-angle loop.
+#
+# Run it with:
+#   galata run examples/nt33a-bank-loop-margins/margin-study.yaml
+
+version: 1
+
+stages:
+  - id: loop
+    capability: model.linear.statespace
+    input:
+      path: nt33a-bank-loop.yaml
+
+  - id: response
+    capability: analyze.freqresp
+    input:
+      system: { from: loop }
+      input: delta_a
+      output: bank_feedback
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+      points: 400
+
+  - id: margins
+    capability: analyze.margins
+    input:
+      system: { from: loop }
+      input: delta_a
+      output: bank_feedback
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+
+  - id: disk
+    capability: analyze.diskmargin
+    input:
+      system: { from: loop }
+      input: delta_a
+      output: bank_feedback
+      # The balanced case: gain increase and decrease weighted alike.
+      skew: 0.0
+      from_rad_s: 0.01
+      to_rad_s: 100.0
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A bank-angle loop — frequency response and margins
+      sections:
+        - { from: response }
+        - { from: margins }
+        - { from: disk }
+      path: bank-loop-margins.md

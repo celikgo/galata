@@ -10,6 +10,8 @@
 // Usage:  galata-validation-report <reference-directory>
 // CI regenerates and diffs against the committed file.
 
+#include "galata/analyze/disk_margin.hpp"
+#include "galata/analyze/margins.hpp"
 #include "galata/analyze/modes.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
@@ -29,6 +31,7 @@
 #include "reference_table.hpp"
 
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <iostream>
 #include <map>
@@ -490,6 +493,47 @@ int main(int argc, char** argv) {
         galata::determinism::amplification_study();
     measured["fingerprint.min_amplification"] = format(amplification.smallest);
     measured["fingerprint.max_amplification"] = format(amplification.largest);
+  }
+
+  // --- The disk-margin worked example ---------------------------------------
+  //
+  // Recomputed here rather than quoted, so that every disk-margin number in
+  // this document and in the case notes is a number this build produced. The
+  // loop is the one the tutorial states:
+  //   L(s) = 25 / (s^3 + 10 s^2 + 10 s + 10)
+  {
+    const galata::analyze::LoopEvaluator loop = [](double w) {
+      const std::complex<double> s{0.0, w};
+      return 25.0 / (s * s * s + 10.0 * s * s + 10.0 * s + 10.0);
+    };
+    galata::analyze::MarginOptions options;
+    options.start_rad_s = 1.0e-2;
+    options.stop_rad_s = 1.0e3;
+    options.grid_points = 4000;
+
+    const auto disk = galata::analyze::disk_margin(loop, 0.0, options);
+    const auto classical = galata::analyze::stability_margins(loop, options);
+
+    measured["disk.alpha"] = format_significant(disk.alpha, 5);
+    measured["disk.peak"] = format_significant(disk.peak_gain, 5);
+    measured["disk.omega0"] = format_significant(disk.critical_frequency_rad_s, 5);
+    measured["disk.gamma_min"] = format_significant(disk.gain_variation_min, 5);
+    measured["disk.gamma_max"] = format_significant(disk.gain_variation_max, 5);
+    measured["disk.phi_m"] = format_significant(disk.phase_variation_deg, 6);
+    measured["disk.classical_gm"] = format_significant(classical.gain_margin, 5);
+    measured["disk.classical_pm"] = format_significant(classical.phase_margin_deg, 6);
+
+    // How far the paper's PRINTED critical frequency is from reproducing the
+    // paper's own printed delta_0, expressed in units of delta_0's last
+    // printed figure. A unit in the last figure of 0.212 is 0.001.
+    constexpr double kPrintedOmega0 = 1.94;
+    constexpr double kPrintedDeltaReal = 0.212;
+    constexpr double kUnitInLastFigure = 0.001;
+    const std::complex<double> sensitivity_at_printed = 1.0 / (1.0 + loop(kPrintedOmega0));
+    const double delta_real_at_printed = (1.0 / (sensitivity_at_printed - 0.5)).real();
+    measured["disk.omega0_units_off"] = format_significant(
+        std::fabs(delta_real_at_printed - kPrintedDeltaReal) / kUnitInLastFigure, 3);
+    measured["disk.delta_real_at_printed"] = format_significant(delta_real_at_printed, 4);
   }
 
   measured["det.total"] = std::to_string(fingerprint_counts.total);
@@ -1105,6 +1149,120 @@ discrepancy rather than as validated, and a **regression lock** — labelled as
 one, per charter rule 8 — holds the gap at its measured size so it cannot grow
 unnoticed, and fails if it shrinks, since that would mean the cause has been
 found and the lock should become a validation.
+
+)",
+                          measured);
+
+  std::cout << substitute(R"(## Frequency response and stability margins
+
+**References.** G. F. Franklin, J. D. Powell and A. Emami-Naeini, *Feedback
+Control of Dynamic Systems*, and K. J. Astrom and R. M. Murray, *Feedback
+Systems*, for the classical margins. A. J. Laub, "Efficient multivariable
+frequency response computations", IEEE TAC 26(2), 1981, for the Hessenberg
+method. P. Seiler, A. Packard and P. Gahinet, "An Introduction to Disk Margins",
+IEEE Control Systems Magazine 40(5), pp. 78-95, 2020,
+doi:10.1109/MCS.2020.3005277, for the disk margin — consulted as the authors'
+preprint <https://arxiv.org/abs/2003.04771>, since the published version is
+paywalled.
+
+### What is compared against what
+
+Frequency response is gated against **arithmetic, not a document**. For a system
+whose transfer function can be written down, G(jw) is a ratio of polynomials
+evaluated at s = jw, and the state-space result must equal it to rounding. That
+is a stronger reference than any printed table, because it has no precision of
+its own to hide behind.
+
+The same is true of two of the margin cases. The loop `1/(s(s+1)(s+2))` has a
+phase crossover at exactly sqrt(2) rad/s — the phase reaches -180 degrees when
+`1 - w^2/2` vanishes — and a gain margin of exactly 6, since
+`|L(j sqrt2)| = 1/(sqrt2 sqrt3 sqrt6) = 1/6`. The loop `1/(s(s+1)^2)` crosses at
+exactly 1 rad/s with a gain margin of exactly 2. Their gain crossovers are the
+roots of stated cubics, solved in the test by an independent bisection.
+
+The **delay margin** is checked twice over, and the second check is the one that
+matters: applying exactly the reported delay must put the loop exactly on the
+critical point, `1 + L(jw) e^(-jw tau) = 0`. A delay margin computed by the
+wrong formula can still satisfy the formula it was computed from; it cannot
+satisfy this.
+
+### The disk margin
+
+Gated against the tutorial's worked example, the loop
+`L(s) = 25 / (s^3 + 10 s^2 + 10 s + 10)`.
+
+| Quantity | galata | published | note |
+|---|---|---|---|
+| Classical gain margin | {disk.classical_gm} | 3.6 | Also exactly 90/25, since Im L = 0 at w = sqrt(10) |
+| Classical phase margin | {disk.classical_pm} deg | 29.1 deg | |
+| Peak of \|S - 1/2\| | {disk.peak} | 2.18 | |
+| Disk margin alpha (skew 0) | {disk.alpha} | 0.46 | |
+| Guaranteed gain range | {disk.gamma_min} to {disk.gamma_max} | 0.63 to 1.59 | |
+| Guaranteed phase range | +/- {disk.phi_m} deg | — | Not printed by the paper; see below |
+| Critical frequency | {disk.omega0} rad/s | 1.94 rad/s | **Discrepancy — see below** |
+
+Every allowance is measured rather than chosen, in
+`tests/validation/reference/seiler2020_disk_margin.csv`, which also records the
+exact location of each value in the source and the rights position. ADR-0007
+sets out why scalar results from a copyrighted paper may be committed at all
+and what the limits on that are.
+
+**The strongest evidence here is not a number.** The theorem's proof constructs
+a perturbation on the boundary of the disk that destabilises the loop, placing a
+closed-loop pole on the imaginary axis at the critical frequency. galata
+computes that perturbation and the test closes the loop with it: the pole has to
+land where the theorem says. That check fails for any transcription error in
+alpha, delta_0 or f_0, individually or together, in a way that comparing
+printed digits does not.
+
+**A gap that had to be closed deliberately.** At skew 0 the factors
+`(1 - sigma)` and `(1 + sigma)` are both 1, so the published example says
+nothing about which is which. Swapping them in `gamma_min` was verified to leave
+every skew-0 result identical. The intercepts are therefore additionally gated
+against the disk parameterisation itself at six skews, and against the paper's
+published closed forms for the two named one-sided margins.
+
+**The guaranteed phase variation** is the one output with no peer-reviewed
+reference: the paper derives the formula for phi_m but prints no number for this
+example. It is gated against MathWorks' published `diskmargin` output for the
+same loop, which is vendor documentation and is labelled as such in the table
+above and in the reference file.
+
+### A discrepancy in the source
+
+The paper prints a critical frequency of 1.94 rad/s. Its own printed
+`delta_0 = 0.212 - 0.406j` and `f_0 = 1.128 - 0.483j` are evaluated at that
+frequency, and neither is reproduced there: at 1.94 the construction gives
+`Re delta_0 = {disk.delta_real_at_printed}`, out by {disk.omega0_units_off} units
+in the last figure the paper prints. Both are reproduced near {disk.omega0}
+rad/s, which is where `|S - 1/2|` actually peaks, and which is the value galata
+reports.
+
+The printed critical frequency is therefore inconsistent with the rest of the
+example. Because `|S - 1/2|` is flat near its maximum — a peak's location is
+always more weakly determined than its height — this costs almost nothing in
+the margin itself, which is why the published alpha, gamma_min and gamma_max all
+agree. A test asserts the inconsistency directly, so that if a future reading of
+the paper resolves it, the test fails rather than passing quietly.
+
+### What these margins do not establish
+
+Gain and phase margins are **separately-varied** margins: the tolerable gain
+change with no phase change, and the reverse. A loop can show a comfortable
+figure for each and still be fragile to a small simultaneous change in both.
+That is the whole reason the disk margin is computed alongside them, and
+`examples/nt33a-bank-loop-margins` is built to show it on a real aircraft — a
+loop whose gain margin is infinite and whose disk margin is not.
+
+Applied one loop at a time to a multi-loop system, all four are optimistic.
+galata has no structured singular value, so it has no MIMO disk margin.
+
+The disk margin's peak is found by **searching a frequency grid** and refining,
+not by the exact Hamiltonian-eigenvalue method. A grid maximum is a lower bound
+on the true peak, so the reported margin is an upper bound on the true one: the
+error is in the optimistic direction. The grid is refined around the
+closed-loop system's own lightly damped modes, which is where such peaks are,
+and every result records the band and point count that were searched.
 
 )",
                           measured);

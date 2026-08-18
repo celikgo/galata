@@ -10,10 +10,14 @@ rather than by frequency. From non-dimensional derivatives and geometry alone,
 it reproduces NASA CR-2144's published dimensional derivatives to 0.26% and its
 published modes to 1.0%.
 
-Control synthesis, frequency response, margins and the nonlinear simulation
-loop are the point of the project and are **not built yet**. The status table
-below is the authority on what exists; the roadmap is the authority on what is
-intended.
+It evaluates frequency response and reports all four margin types — gain,
+phase, delay and disk — with every crossover and the frequency at which it
+occurs, gated against closed-form transfer functions and a published worked
+example.
+
+Control synthesis and the nonlinear simulation loop are the point of the
+project and are **not built yet**. The status table below is the authority on
+what exists; the roadmap is the authority on what is intended.
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
@@ -60,6 +64,9 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 <!-- BEGIN GENERATED CAPABILITY TABLE -->
 | Capability | What it does | Produces | State |
 |---|---|---|---|
+| `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with the guaranteed gain and phase range and a destabilising perturbation on the boundary | `disk_margin` | implemented and validated |
+| `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
+| `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
@@ -138,11 +145,12 @@ Read the Status table above for what actually works.
 The workflow is trim → linearise → analyse → synthesise → verify, expressed as a
 YAML pipeline that the CLI and (later) the desktop application both execute, so
 that a study is a file rather than a sequence of clicks. Planned surfaces include
-a nonlinear 6-DOF simulation with actuator rate limits in the loop, automatic
-modal classification by eigenvector participation, gain/phase/delay and disk
-margins, MIL-STD-1797A handling-qualities assessment, a stable C plugin ABI for
-user-supplied aerodynamic and sensor models, and an AI layer that composes and
-runs these pipelines without ever producing a number itself.
+a nonlinear 6-DOF simulation with actuator rate limits in the loop,
+MIL-STD-1797A handling-qualities assessment, LQR and Riccati synthesis, a stable
+C plugin ABI for user-supplied aerodynamic and sensor models, and an AI layer
+that composes and runs these pipelines without ever producing a number itself.
+Automatic modal classification by eigenvector participation and the four margin
+types are built; see the table below.
 
 Milestones and their contents are in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

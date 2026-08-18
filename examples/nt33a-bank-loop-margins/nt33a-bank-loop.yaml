@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A lateral-directional dynamics, closed as a proportional bank-angle
+# loop: the OPEN-LOOP transfer function from aileron to commanded bank angle,
+# with a proportional gain of 0.5 rad aileron per rad of bank error.
+#
+# WHAT THIS IS. The A and B matrices are the aircraft, identical to
+# examples/nt33a-lateral-modes/nt33a-lateral.yaml. What is added is the C row,
+# and the C row is the CONTROL LAW, not the aircraft: it selects bank angle as
+# the measured output and applies the gain. Margins are a property of a LOOP,
+# and an aircraft on its own is not one.
+#
+# WHERE THE LOOP IS BROKEN. At the plant input, between the gain and the
+# aileron. Breaking it at the output instead would give a different transfer
+# function and different margins for the same closed-loop system; galata cannot
+# choose for you, which is why include/galata/analyze/margins.hpp says so.
+#
+# WHY 0.5. It is not tuned and it is not from a document — it is chosen to make
+# this example show something. At this gain the magnitude crosses unity THREE
+# times, so the loop has three phase margins — 101, 165 and 48 degrees — and
+# reporting only the first would call this loop comfortable at 101 degrees. A
+# higher gain has a single crossover and makes a duller example.
+
+description: >-
+  NT-33A lateral-directional, flight condition 1 — proportional bank-angle loop,
+  broken at the aileron, gain 0.5 rad/rad
+citation: >-
+  Aircraft dynamics: R. K. Heffley and W. F. Jewell, "Aircraft Handling
+  Qualities Data", NASA CR-2144, Systems Technology Inc., December 1972,
+  Tables II-1, II-2, II-7 and Appendix C p.C-3. NTRS 19730003312.
+  Distribution: Unclassified - Unlimited.
+  The bank-angle feedback gain is NOT from that report; it is chosen for this
+  example, as the file header explains.
+units: beta rad, p rad/s, r rad/s, phi rad; aileron and rudder deflections rad
+
+states: [beta, p, r, phi]
+inputs: [delta_a, delta_r]
+outputs: [bank_feedback]
+
+a:
+  - [-0.125,        0.0383878091, -0.9992629164,  0.1410102351]
+  - [-5.49,        -2.03,          0.641,         0.0         ]
+  - [ 0.667,       -0.116,        -0.207,         0.0         ]
+  - [ 0.0,          1.0,           0.0384161250,  0.0         ]
+b:
+  - [ 0.0,    0.0295 ]
+  - [ 6.01,  -0.0125 ]
+  - [ 0.0286, -1.24  ]
+  - [ 0.0,    0.0    ]
+# The control law: measure bank angle, apply a gain of 0.5.
+c:
+  - [ 0.0, 0.0, 0.0, 0.5 ]
+d:
+  - [ 0.0, 0.0 ]

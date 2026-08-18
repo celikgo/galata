@@ -6,6 +6,9 @@
 galata_find_eigen()
 
 add_library(galata_analyze
+  disk_margin.cpp
+  frequency_response.cpp
+  margins.cpp
   modes.cpp
 )
 add_library(galata::analyze ALIAS galata_analyze)
@@ -13,6 +16,7 @@ add_library(galata::analyze ALIAS galata_analyze)
 target_link_libraries(galata_analyze
   PUBLIC
     galata::public_headers
+    galata::model
     Eigen3::Eigen
   PRIVATE
     galata::core

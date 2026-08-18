@@ -25,6 +25,7 @@ add_executable(galata_validation_tests
   test_rigid_body_dynamics.cpp
   test_nt33a_modes.cpp
   test_nt33a_trim_linearize.cpp
+  test_disk_margin_seiler.cpp
   test_case_registry.cpp
 )
 
