@@ -17,9 +17,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# The numerical core. UI code and file-format adapters are deliberately absent:
-# converting is their job.
+# The numerical core, headers as well as sources. Scanning only src/ would leave
+# the obvious hole: an inline conversion in a header is still a conversion in the
+# core, and headers are where inline arithmetic tends to live.
+#
+# UI code and file-format adapters are deliberately absent: converting is their
+# job. include/galata/units.hpp is deliberately absent too — it is the definition
+# site, and it sits outside include/galata/core/ precisely so that this list does
+# not have to carve out an exception for it.
 CORE_DIRS="src/core src/model src/numerics src/trim src/linearize src/synth src/analyze src/sim src/ident"
+CORE_DIRS="$CORE_DIRS include/galata/core include/galata/model include/galata/numerics"
+CORE_DIRS="$CORE_DIRS include/galata/trim include/galata/linearize include/galata/synth"
+CORE_DIRS="$CORE_DIRS include/galata/analyze include/galata/sim include/galata/ident"
 
 # Conversion factors from ADR-0003's table, plus the reciprocals and the
 # rounded forms that appear in hand-written code. Matched as substrings of a

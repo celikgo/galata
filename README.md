@@ -7,6 +7,8 @@ traceable to the routine that produced it.
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
+[![CI](https://github.com/celikgo/galata/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/celikgo/galata/actions/workflows/ci.yml)
+
 
 ---
 

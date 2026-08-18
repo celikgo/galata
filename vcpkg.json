@@ -39,5 +39,12 @@
       "baseline": "56bb2411609227288b70117ead2c47585ba07713",
       "repository": "https://github.com/microsoft/vcpkg"
     }
-  }
+  },
+  "overrides": [
+    {
+      "name": "eigen3",
+      "version": "3.4.1",
+      "port-version": 1
+    }
+  ]
 }

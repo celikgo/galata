@@ -2,6 +2,10 @@
 
 add_executable(galata_unit_tests
   test_version.cpp
+  test_units.cpp
+  test_quaternion.cpp
+  test_frames.cpp
+  test_state.cpp
 )
 
 target_link_libraries(galata_unit_tests
