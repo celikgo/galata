@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The pre-merge gate. Charter rule 1: this file exists before feature #1, and
+# there is never a commit that adds source without adding to this graph.
+#
+# Every job here checks something a reader of the repository cannot otherwise
+# verify. Jobs are added in the same commit as the surface they gate, never in
+# advance — a workflow that tests a capability which does not exist is the
+# aspirational-documentation failure that charter rule 2 forbids.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  merge_group:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to an exact build, from pip rather than apt. clang-format's
+      # output changes between major versions, so an unpinned gate flaps
+      # whenever the runner image rolls, and a developer cannot reproduce the
+      # failure locally. The pip package is the same binary on every platform.
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Install clang-format 20.1.8
+        run: |
+          python -m pip install --quiet 'clang-format==20.1.8'
+          clang-format --version
+
+      - name: C++ sources match .clang-format
+        run: |
+          files="$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.c')"
+          if [ -z "$files" ]; then
+            echo "::error::no C/C++ sources found — this job would be vacuously green"
+            exit 1
+          fi
+          printf '%s\n' "$files" | xargs clang-format --dry-run --Werror
+
+      - name: Shell scripts
+        run: |
+          sudo apt-get install -y --no-install-recommends shellcheck
+          scripts="$(git ls-files '*.sh')"
+          [ -n "$scripts" ] || exit 0
+          printf '%s\n' "$scripts" | xargs shellcheck --severity=warning
+
+  engine:
+    name: Engine (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-gcc,   os: ubuntu-24.04,  preset: ci-linux-gcc }
+          - { name: linux-clang, os: ubuntu-24.04,  preset: ci-linux-clang }
+          - { name: macos,       os: macos-14,      preset: ci-macos }
+          - { name: windows,     os: windows-2022,  preset: ci-windows }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp
+        with:
+          preset: ${{ matrix.preset }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  # Charter gates. Seconds, not minutes — a PR that violates one should hear
+  # about it before the compilers have finished warming up. Each step maps to a
+  # numbered rule in docs/CHARTER.md.
+  governance:
+    name: Charter gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rule 3 — one source of version truth
+        run: scripts/check-version-consistency.sh
+
+      - name: Rule 5 — strict SI in the numerical core
+        run: scripts/check-si-boundary.sh
+
+      - name: Rule 4 — every URL in every document resolves
+        run: scripts/check-doc-links.sh
+
+  # The single required status check. Branch protection points here, so adding
+  # a job above never means editing branch settings, and a skipped job can
+  # never be mistaken for a passing one.
+  ci-ok:
+    name: CI
+    if: always()
+    needs: [format, governance, engine]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no required job failed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS_JSON"
+          bad="$(printf '%s' "$NEEDS_JSON" | python3 -c 'import json,sys; print(" ".join(k for k,v in json.load(sys.stdin).items() if v["result"] not in ("success","skipped")))')"
+          if [ -n "$bad" ]; then
+            echo "::error::failing jobs: $bad"
+            exit 1
+          fi
+          echo "All required jobs passed."

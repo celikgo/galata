@@ -1,0 +1,41 @@
+* text=auto eol=lf
+
+# Always LF for source
+*.c            text eol=lf
+*.cc           text eol=lf
+*.cpp          text eol=lf
+*.h            text eol=lf
+*.hpp          text eol=lf
+*.in           text eol=lf
+*.cmake        text eol=lf
+CMakeLists.txt text eol=lf
+*.py           text eol=lf
+*.ts           text eol=lf
+*.tsx          text eol=lf
+*.js           text eol=lf
+*.json         text eol=lf
+*.toml         text eol=lf
+*.yaml         text eol=lf
+*.yml          text eol=lf
+*.md           text eol=lf
+*.sh           text eol=lf
+
+# Windows scripts must remain CRLF
+*.bat          text eol=crlf
+*.cmd          text eol=crlf
+*.ps1          text eol=crlf
+
+# Reference data files are transcribed by hand and diffed by humans: LF, text.
+*.ref          text eol=lf
+*.csv          text eol=lf
+
+# Treat as binary
+*.png          binary
+*.jpg          binary
+*.pdf          binary
+*.zip          binary
+*.h5           binary
+*.so           binary
+*.dylib        binary
+*.dll          binary
+*.exe          binary

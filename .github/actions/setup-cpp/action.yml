@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Set up the C++ toolchain
+description: >
+  CMake, Ninja, a vcpkg root and (on Windows) the MSVC developer environment.
+  Every workflow that configures the engine goes through here so the four
+  platforms cannot drift apart one workflow at a time.
+
+inputs:
+  preset:
+    description: CMake configure preset the caller will use.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Pinned rather than 'latest': the toolchain that produces a determinism
+    # fingerprint is part of the fingerprint's meaning (ADR-0004).
+    - name: CMake and Ninja
+      uses: lukka/get-cmake@v3.31.6
+
+    # ubuntu images ship versioned clang but the unversioned symlink is not
+    # guaranteed; the metapackage provides it. No-op when already present.
+    - name: Unversioned clang (Linux)
+      if: runner.os == 'Linux' && endsWith(inputs.preset, 'clang')
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends clang
+        clang --version
+
+    # The Ninja generator needs cl.exe on PATH; the VS shell provides it.
+    - name: MSVC developer environment (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    # GitHub's images preinstall vcpkg and export VCPKG_INSTALLATION_ROOT.
+    # CMakePresets.json reads VCPKG_ROOT, so bridge the two here rather than
+    # in every workflow.
+    - name: Point VCPKG_ROOT at the preinstalled vcpkg
+      shell: bash
+      run: |
+        if [ -z "${VCPKG_INSTALLATION_ROOT:-}" ]; then
+          echo "::error::VCPKG_INSTALLATION_ROOT is not set on this runner image"
+          exit 1
+        fi
+        echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+        echo "VCPKG_DISABLE_METRICS=1" >> "$GITHUB_ENV"
+        "$VCPKG_INSTALLATION_ROOT/vcpkg" version
+
+    # Manifest-mode dependency builds dominate cold CI time. The key includes
+    # the manifest hash and the runner image, so a dependency bump or an image
+    # roll invalidates it and nothing stale is ever reused.
+    - name: Cache vcpkg build trees
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/vcpkg/archives
+          ${{ env.LOCALAPPDATA }}/vcpkg/archives
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-
+          vcpkg-${{ runner.os }}-${{ runner.arch }}-

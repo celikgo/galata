@@ -1,0 +1,44 @@
+# Build trees
+build/
+out/
+cmake-build-*/
+_deps/
+CMakeUserPresets.json
+
+# vcpkg
+vcpkg_installed/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.cache/
+compile_commands.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Node (desktop shell)
+node_modules/
+
+# Rust (desktop shell)
+target/
+
+# Secrets — the AI layer stores keys in the OS keychain, never on disk.
+# This entry exists so a per-project provider override cannot be committed
+# by accident.
+galata.ai.toml
+*.key
+*.pem
+
+# Local run output
+*.log
