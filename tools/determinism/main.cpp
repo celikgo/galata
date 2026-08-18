@@ -32,13 +32,28 @@
 // Determinism.TheFingerprintTrajectoryIsNotChaotic asserts this, so a future
 // change that makes the battery chaotic fails there rather than as an
 // intermittently red workflow.
+//
+// A SECOND CONSTRAINT, and it is why some keys below carry a "tier1." prefix.
+// A central-difference Jacobian divides by the perturbation h, so it amplifies
+// a platform libm disagreement by 1/h. With f of order 10 and h of 1e-6 that
+// turns a 2e-15 disagreement into 2e-9 absolute, which on a small matrix entry
+// is 2e-8 relative — past the 1e-9 cross-platform gate, through no fault of
+// anyone's arithmetic.
+//
+// So linearisation output is fingerprinted for TIER 1 only, where it is held
+// byte-identical, and excluded from the tier 2 comparison, which skips any key
+// beginning "tier1.". Trim outputs carry no such amplification — a root is a
+// root — and are compared across platforms like everything else.
 
 #include "galata/analyze/modes.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
+#include "galata/linearize/finite_difference.hpp"
+#include "galata/model/aircraft.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/sim/rigid_body.hpp"
+#include "galata/trim/level.hpp"
 #include "galata/version.hpp"
 
 #include <cmath>
@@ -47,6 +62,8 @@
 #include <vector>
 
 namespace {
+
+using namespace galata;
 
 // %.17g round-trips a double exactly, so a byte-identical fingerprint means
 // bit-identical values and not merely values that print the same.
@@ -148,6 +165,53 @@ void fingerprint_modes() {
   }
 }
 
+void fingerprint_trim_and_linearisation() {
+  const model::Aircraft aircraft = model::load_aircraft(GALATA_DETERMINISM_MODEL);
+
+  trim::LevelTrimRequest request;
+  request.altitude_m = 0.0;
+  request.airspeed_m_s = 69.4944;
+  const trim::TrimPoint point = trim::trim_level(aircraft, request);
+
+  // Trim outputs are roots. Solving to a residual of zero lands on the same
+  // point regardless of which libm got you there, so these are compared across
+  // platforms like everything else.
+  emit("trim.alpha_rad", point.alpha_rad);
+  emit("trim.elevator_rad", point.controls.elevator_rad);
+  emit("trim.thrust_n", point.controls.thrust_n);
+  emit("trim.lift_coefficient", point.lift_coefficient);
+  emit("trim.dynamic_pressure_pa", point.dynamic_pressure_pa);
+  emit("trim.mach", point.mach);
+
+  // Everything below is downstream of a finite difference. Tier 1 only.
+  for (const bool longitudinal : {true, false}) {
+    linearize::LinearisationOptions options;
+    options.state_subset =
+        longitudinal ? linearize::longitudinal_states() : linearize::lateral_states();
+    const linearize::Linearisation linearisation =
+        linearize::linearize_finite_difference(aircraft, point, options);
+    const std::string axis = longitudinal ? "longitudinal" : "lateral";
+
+    for (Eigen::Index i = 0; i < linearisation.a.rows(); ++i) {
+      for (Eigen::Index j = 0; j < linearisation.a.cols(); ++j) {
+        emit("tier1.linearise." + axis + ".a." + std::to_string(i) + "." + std::to_string(j),
+             linearisation.a(i, j));
+      }
+    }
+
+    const auto modes =
+        analyze::analyze_modes(linearisation.a,
+                               linearisation.state_names,
+                               analyze::StateRoles::from_names(linearisation.state_names));
+    for (const auto& mode : modes.modes) {
+      const std::string prefix = "tier1.modes." + axis + "." + analyze::to_string(mode.label) + ".";
+      emit(prefix + "real", mode.eigenvalue.real());
+      emit(prefix + "imag", mode.eigenvalue.imag());
+      emit(prefix + "zeta", mode.damping_ratio);
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -158,5 +222,6 @@ int main() {
   fingerprint_atmosphere();
   fingerprint_rigid_body();
   fingerprint_modes();
+  fingerprint_trim_and_linearisation();
   return 0;
 }
