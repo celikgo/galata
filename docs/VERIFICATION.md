@@ -25,7 +25,10 @@ and it is preferred to a number invented to fill the gap.
 | Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
 | Six-degree-of-freedom equations with aerodynamic forces | — | **not implemented** — there is no aerodynamic model yet |
 | Riccati solvers | — | **not implemented** |
-| Aircraft modal characteristics | — | **not implemented** |
+| Aircraft lateral modes (spiral, roll subsidence, Dutch roll) | Heffley & Jewell, NASA CR-2144 (1972), Table II-8 | **validated** |
+| Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO | same, Table II-4 | **open discrepancy**, see below |
+| Modal classification into the five classical modes | same; labels checked against the report's own identification | **validated** |
 | Determinism, cross-platform | — | **not implemented** |
 
 ## U.S. Standard Atmosphere, 1976
@@ -174,6 +177,76 @@ non-positive mass, an asymmetric inertia tensor, an indefinite one, and one
 whose principal moments violate the triangle inequality `Ia + Ib >= Ic`. The
 last of these is the one that catches a moment quoted about the wrong axis,
 which passes every other check.
+
+## Aircraft modal characteristics
+
+**Reference.** R. K. Heffley and W. F. Jewell, *Aircraft Handling Qualities
+Data*, NASA CR-2144, Systems Technology Inc., December 1972.
+NTRS 19730003312, <https://ntrs.nasa.gov/citations/19730003312>. The report's
+own documentation page prints "Distribution Statement: Unclassified -
+Unlimited", with no copyright notice and no limited-rights legend.
+
+Aircraft NT-33A at flight condition 1 — sea level, M = 0.204, power approach.
+The derivatives, the flight condition and the published modal results are
+transcribed in `tests/validation/reference/nt33a_fc1.csv`; the state matrices
+are assembled from the report's own equations (Appendix C pages C-1 and C-3),
+because that is the only way to compare against the report's own answers.
+
+**What is being validated.** The eigenvalue decomposition, the modal metrics,
+the participation factors and the classification. Not a trim-and-linearise
+chain — neither capability exists yet.
+
+**How the tolerance is set.** Both sides of the comparison are rounded: the
+report prints its derivatives to three significant figures and its modal
+results to three. So the test perturbs each input by half a unit in its own
+last printed digit, accumulates the resulting spread in each modal quantity,
+and adds the published value's own rounding. The gate is that the disagreement
+falls inside that band. The tolerance is therefore a property of the source
+document rather than of the author's patience.
+
+One subtlety that is easy to get wrong and does change the answer: the step
+must be taken on the value AS PRINTED and then carried through whatever unit
+conversion the value went through. `M_u*` is printed per second-foot; taking
+half a unit in the last digit of its per-second-metre form understates its
+uncertainty by the conversion factor of 3.28.
+
+**Result.** Six of the seven published modal quantities reproduce within that
+band: the spiral root, the roll-subsidence root, the Dutch-roll frequency and
+damping, the phugoid frequency, and the short-period frequency and damping. All
+five modes are also labelled correctly by participation factor alone, with
+scores between 0.72 and 0.99. The Dutch-roll period, published separately in
+Table II-10, agrees to within 1%.
+
+### Open discrepancy: the phugoid damping ratio
+
+The phugoid damping ratio does **not** reproduce within the source's precision.
+It disagrees by about 2% relative, which is roughly three times the band the
+inputs' own rounding allows.
+
+The mode itself is in very nearly the right place. Published, the phugoid
+eigenvalue is −0.016306 ± 0.171226j; galata computes −0.015974 ± 0.171170j.
+The imaginary part agrees to 6e-5, three parts in ten thousand. The
+disagreement is concentrated in a derived quantity: ζ = |Re| / |λ| divides a
+small real part by a small natural frequency, so a 3.3e-4 residual in the real
+part becomes 0.0019 in the ratio — which is the entire discrepancy, accounted
+for but not explained.
+
+Two candidate explanations, neither confirmed:
+
+1. **Terms read as zero that may mean "not supplied".** `X_udot`, `X_wdot`,
+   `X_q`, `Z_udot` and `M_udot` are blank in the report's table for this
+   aircraft and are taken as zero. `X_q` enters the phugoid directly through
+   the `(−X_q + W_o)s` term of Appendix C's first row.
+2. **Untranscribed coefficients.** The report's own longitudinal quartic is
+   written in terms of `M_alpha` and `M_alpha_dot`, and its `D` and `E`
+   coefficients were not transcribed. The phugoid roots are set by the
+   low-order coefficients, so an omitted term would show there first.
+
+Until this is resolved the phugoid damping ratio is listed as an open
+discrepancy rather than as validated, and a **regression lock** — labelled as
+one, per charter rule 8 — holds the gap at its measured size so it cannot grow
+unnoticed, and fails if it shrinks, since that would mean the cause has been
+found and the lock should become a validation.
 
 ---
 

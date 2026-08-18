@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A longitudinal state-space model, flight condition 1.
+#
+# Derivatives from NASA CR-2144 (Heffley and Jewell, 1972), Table II-3;
+# equations from the same report's Appendix C page C-1. The transcription lives
+# in tests/validation/reference/nt33a_fc1.csv with its full provenance.
+#
+# THREE THINGS THAT ARE EASY TO GET WRONG HERE.
+#
+# The second state is w in METRES PER SECOND, not angle of attack. The report
+# tabulates w-derivatives (X_w, Z_w, M_w), and a reader who assumes alpha gets
+# every entry of the second column wrong by a factor of the trim speed.
+#
+# The report's equations are a descriptor system: M_wdot couples w_dot into the
+# pitching-moment row, so the system is implicit and had to be rearranged before
+# it became the matrix below. That term is small and carries the downwash lag;
+# dropping it moves the short-period damping by more than the published value's
+# own precision, which the validation suite asserts.
+#
+# The moment derivatives M_u*, M_w and M_wdot are PER FOOT in the source, so
+# unlike the lateral model this matrix is not invariant under a change of length
+# unit. They are divided by 0.3048 here. Getting that wrong is a factor of 3.28
+# on the whole third row.
+#
+# The asterisk on X_u*, Z_u* and M_u* is not a normalisation: Appendix A p.A-16
+# defines X_u* = X_u + T_u cos(xi_o), the derivative with the thrust-speed
+# contribution included. The tables print the starred forms, so they go in
+# directly.
+#
+# Derivatives the report leaves blank for this aircraft — X_udot, X_wdot, X_q,
+# Z_udot, M_udot — are taken as zero here. That is an assumption, not a
+# statement the document makes, and docs/VERIFICATION.md records that it is one
+# candidate explanation for the phugoid-damping discrepancy noted there.
+
+description: NT-33A longitudinal, flight condition 1 — sea level, M = 0.204, power approach
+
+citation: >-
+  R. K. Heffley and W. F. Jewell, "Aircraft Handling Qualities Data",
+  NASA CR-2144, Systems Technology Inc., December 1972, Table II-3 and
+  Appendix C p.C-1. NTRS 19730003312. Distribution: Unclassified - Unlimited.
+
+units: u m/s, w m/s, q rad/s, theta rad; elevator deflection rad
+
+states: [u, w, q, theta]
+inputs: [delta_e]
+
+a:
+  - [-0.0391000000,  0.0815000000, -2.6677377599, -9.7994216792]
+  - [-0.2480000000, -0.9360000000, 69.4431768182, -0.3764558080]
+  - [ 0.0022800525, -0.0224648294, -1.0403045563,  0.0018773387]
+  - [ 0.0000000000,  0.0000000000,  1.0000000000,  0.0000000000]
+
+b:
+  - [ 0.1572768000]
+  - [-4.0843200000]
+  - [-4.1900000000]
+  - [ 0.0000000000]

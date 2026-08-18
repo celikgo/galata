@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The phugoid and the short period of the NT-33A.
+#
+#   galata run examples/nt33a-longitudinal-modes/modal-study.yaml
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.linear.statespace
+    input:
+      path: nt33a-longitudinal.yaml
+
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: { from: aircraft }
+      classify: true
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A longitudinal modes, flight condition 1
+      sections:
+        - { from: modes }
+      path: longitudinal-modes.md

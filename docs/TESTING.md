@@ -7,7 +7,7 @@ failure means.
 |---|---|---|---|
 | Unit | `tests/unit/` | One algorithm against a closed-form answer | yes |
 | Property | `tests/property/` | Invariants over many generated inputs, seeded | yes |
-| Integration | `tests/integration/` | One pipeline stage against a frozen capability contract | no |
+| Integration | `tests/integration/` | One pipeline stage against a frozen capability contract | yes |
 | Validation | `tests/validation/` | Output against published reference data | yes |
 | Determinism | `tests/determinism/` | Bit-identical repeat runs; cross-platform agreement | no |
 | Evals | `evals/` | Agent behaviour against checkable outcomes | no |

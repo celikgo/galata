@@ -42,3 +42,10 @@ galata.ai.toml
 
 # Local run output
 *.log
+
+# Example outputs are produced by running the example, not committed. A
+# committed copy of generated output is a second source of truth that
+# drifts silently the first time the code changes.
+examples/**/*.md.out
+examples/nt33a-lateral-modes/lateral-modes.md
+examples/nt33a-longitudinal-modes/longitudinal-modes.md

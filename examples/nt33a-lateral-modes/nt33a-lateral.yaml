@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A lateral-directional state-space model, flight condition 1.
+#
+# Derived from NASA CR-2144 (Heffley and Jewell, 1972) — see `citation` below.
+# The stability derivatives are transcribed in
+# tests/validation/reference/nt33a_fc1.csv, which carries the full provenance
+# and the transcription method.
+#
+# HOW THE ENTRIES BELOW WERE OBTAINED. The report prints its lateral equations
+# in Appendix C page C-3 as a Laplace matrix equation. Written as a state-space
+# system with x = [beta, p, r, phi]:
+#
+#   beta_dot = Y_v beta + sin(a0) p - cos(a0) r + (g cos(th0) / V) phi
+#   p_dot    = L_beta' beta + L_p' p + L_r' r
+#   r_dot    = N_beta' beta + N_p' p + N_r' r
+#   phi_dot  = p + tan(th0) r
+#
+# with a0 = 2.20 deg (trim alpha), gamma0 = 0, th0 = a0 + gamma0, and
+# V = 228 ft/s = 69.4944 m/s. Note that the p and r coefficients in the first
+# row are W_o/V_To and -U_o/V_To, which reduce exactly to sin(a0) and -cos(a0),
+# so the matrix is the same in SI as in the report's own feet and seconds. Only
+# g/V carries a unit, and it is computed here in SI per ADR-0003.
+#
+# The trigonometric entries, to ten places:
+#   sin(2.20 deg)                 =  0.0383878091
+#   -cos(2.20 deg)                = -0.9992629164
+#   9.80665 / 69.4944 * cos(2.20 deg) = 0.1410102351
+#   tan(2.20 deg)                 =  0.0384161250
+#
+# These numbers are checked, not merely stated: an integration test runs this
+# model through the pipeline and compares the resulting modes against the
+# report's published values.
+
+description: NT-33A lateral-directional, flight condition 1 — sea level, M = 0.204, power approach
+
+citation: >-
+  R. K. Heffley and W. F. Jewell, "Aircraft Handling Qualities Data",
+  NASA CR-2144, Systems Technology Inc., December 1972, Tables II-1, II-2, II-7
+  and Appendix C p.C-3. NTRS 19730003312. Distribution: Unclassified - Unlimited.
+
+units: beta rad, p rad/s, r rad/s, phi rad; aileron and rudder deflections rad
+
+states: [beta, p, r, phi]
+inputs: [delta_a, delta_r]
+
+# Row order matches `states`.
+a:
+  - [-0.125,        0.0383878091, -0.9992629164,  0.1410102351]
+  - [-5.49,        -2.03,          0.641,         0.0         ]
+  - [ 0.667,       -0.116,        -0.207,         0.0         ]
+  - [ 0.0,          1.0,           0.0384161250,  0.0         ]
+
+# Control derivatives, Table II-7. Y*DA is printed as zero for this condition.
+b:
+  - [ 0.0,    0.0295 ]
+  - [ 6.01,  -0.0125 ]
+  - [ 0.0286, -1.24  ]
+  - [ 0.0,    0.0    ]

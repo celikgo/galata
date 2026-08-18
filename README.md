@@ -32,12 +32,29 @@ gates are built first and the physics lands against them. What exists today:
 | U.S. Standard Atmosphere 1976, −5000 m to 86 km | implemented and **validated** against the published tables |
 | Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
 | Nonlinear 6-DOF rigid body, general inertia tensor | implemented and **validated** against closed-form solutions of Euler's equations |
+| YAML pipeline runner and the `galata` CLI | working |
+| One runnable example, checked by CI | working |
 | Everything else in §"What it will do" below | **not built** |
 
-The table above is maintained by hand and is checked in review. When the
-capability registry exists, this table is generated from it so that it cannot
-drift — that is the point of a registry, and until it exists this sentence is
-the honest disclosure that the table is hand-maintained.
+The table above is maintained by hand and checked in review. The capability
+table below is not: it is generated from the registry the CLI dispatches
+through, by `scripts/gen-status-table.sh`, and CI fails if the committed copy
+disagrees. Run `galata capabilities` to get the same list from your own build.
+
+### Capabilities in this build
+
+<!-- BEGIN GENERATED CAPABILITY TABLE -->
+| Capability | What it does | Produces | State |
+|---|---|---|---|
+| `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
+| `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
+| `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
+<!-- END GENERATED CAPABILITY TABLE -->
+
+*implemented and validated* means the output has been compared against a
+published reference; see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+*implemented, unvalidated* means it works and is tested, but no published
+reference has been compared against.
 
 ## What this is NOT
 
@@ -76,7 +93,20 @@ export VCPKG_ROOT=/path/to/vcpkg
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
+
+# Then run the shipped study: it turns a linear aircraft model into a
+# labelled modal table, and every number in it is checked against a
+# published NASA report.
+./build/dev/src/cli/galata run examples/nt33a-lateral-modes/modal-study.yaml
 ```
+
+That writes `lateral-modes.md` next to the study. It reports the NT-33A's
+spiral, roll subsidence and Dutch roll — labelled, not just listed — with the
+participation factors the labelling rests on. See
+[`examples/nt33a-lateral-modes/`](examples/nt33a-lateral-modes/README.md).
+
+`galata capabilities` lists what your build can do and how far each capability
+has been checked.
 
 Requires CMake 3.24+, Ninja, a C++20 compiler and a vcpkg checkout. Tested on
 Linux (GCC and Clang), macOS (AppleClang) and Windows (MSVC) — see

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Load a linear model, decompose it into modes, and write a report.
+#
+# Run it with:
+#   galata run examples/nt33a-lateral-modes/modal-study.yaml
+#
+# The CLI and — when it exists — the desktop application execute this identical
+# document. The graphical surface is a view over this file, never a second code
+# path.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.linear.statespace
+    input:
+      path: nt33a-lateral.yaml
+
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: { from: aircraft }
+      classify: true
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A lateral-directional modes, flight condition 1
+      sections:
+        - { from: modes }
+      path: lateral-modes.md

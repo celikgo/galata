@@ -104,6 +104,26 @@ jobs:
           scripts/gen-verification.sh \
             "build/${{ matrix.preset }}/tools/validation/galata-validation-report" --check
 
+      # Charter rule 2. The README's capability table is generated from the
+      # registry the CLI dispatches through, so it cannot describe a capability
+      # that does not exist — provided this check runs.
+      - name: README capability table matches the registry
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: scripts/gen-status-table.sh "build/${{ matrix.preset }}/src/cli/galata" --check
+
+      # The quickstart in the README is a promise. This is the only thing that
+      # keeps it true.
+      - name: The shipped example runs
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: |
+          "build/${{ matrix.preset }}/src/cli/galata" --version
+          "build/${{ matrix.preset }}/src/cli/galata" capabilities
+          "build/${{ matrix.preset }}/src/cli/galata" run \
+            examples/nt33a-lateral-modes/modal-study.yaml --output-dir "$RUNNER_TEMP"
+          test -s "$RUNNER_TEMP/lateral-modes.md"
+
   # Charter gates. Seconds, not minutes — a PR that violates one should hear
   # about it before the compilers have finished warming up. Each step maps to a
   # numbered rule in docs/CHARTER.md.

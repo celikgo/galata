@@ -15,4 +15,5 @@ include(GoogleTest)
 
 add_subdirectory(unit)
 add_subdirectory(property)
+add_subdirectory(integration)
 add_subdirectory(validation)
