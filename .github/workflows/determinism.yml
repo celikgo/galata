@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Charter rule 6 / ADR-0004. Determinism is a tested property, in two tiers,
+# and this workflow is where the second tier is measured — it needs three
+# machines, which a unit test cannot have.
+#
+#   TIER 1  same binary, same platform, twice: BYTE-IDENTICAL.
+#           Gated absolutely, on every platform.
+#
+#   TIER 2  same source, different platform: agreement to a published bound,
+#           with the OBSERVED deviation reported, not merely bounded.
+#
+# Tier 2 is not bit-identity and this project does not claim it is. sqrt is
+# correctly rounded by IEEE 754 and agrees everywhere; sin, cos, atan2, exp,
+# log and pow come from the platform's math library and do not. galata cannot
+# avoid them — angle of attack is an atan2, the atmosphere's pressure profile
+# is a pow — so the honest claim is the two-tier one.
+
+name: Determinism
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  merge_group:
+  schedule:
+    # Nightly, so a libm update on a runner image is noticed as a change in the
+    # observed cross-platform deviation rather than as a surprise in a PR.
+    - cron: "17 4 * * *"
+
+concurrency:
+  group: determinism-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  fingerprint:
+    name: Fingerprint (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux,   os: ubuntu-24.04, preset: ci-linux-gcc }
+          - { name: macos,   os: macos-14,     preset: ci-macos }
+          - { name: windows, os: windows-2022, preset: ci-windows }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp
+        with:
+          preset: ${{ matrix.preset }}
+
+      - name: Configure and build
+        run: |
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
+
+      - name: Determinism test tier
+        run: ctest --preset ${{ matrix.preset }} -L determinism
+
+      # Tier 1. Absolute, on this platform, with this binary.
+      - name: Tier 1 — byte-identical across two runs
+        shell: bash
+        run: |
+          engine="build/${{ matrix.preset }}/tools/determinism/galata-determinism"
+          [ -x "$engine" ] || engine="$engine.exe"
+          scripts/check-determinism.sh "$engine" "fingerprint-${{ matrix.name }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.name }}
+          path: fingerprint-${{ matrix.name }}.txt
+          if-no-files-found: error
+
+  compare:
+    name: Tier 2 — cross-platform agreement
+    needs: [fingerprint]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - uses: actions/download-artifact@v4
+        with: { pattern: fingerprint-*, path: fingerprints, merge-multiple: true }
+
+      - name: Compare every platform against every other
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(fingerprints/fingerprint-*.txt)
+          if [ "${#files[@]}" -lt 2 ]; then
+            echo "::error::need at least two platform fingerprints, found ${#files[@]}"
+            exit 1
+          fi
+
+          # Every pair, not just each-against-a-reference: with a reference,
+          # a platform that agrees with nothing would still be compared only
+          # once, and which platform is "the reference" is an arbitrary choice
+          # that shows up in the numbers.
+          status=0
+          for ((i = 0; i < ${#files[@]}; i++)); do
+            for ((j = i + 1; j < ${#files[@]}; j++)); do
+              echo "::group::$(basename "${files[$i]}") vs $(basename "${files[$j]}")"
+              # The bound is 1e-9 relative. That is far above the ~1e-16 a
+              # single libm call costs and far below the ~1e-5 that any real
+              # divergence in the physics would produce, so it discriminates
+              # between "different math library" and "different answer".
+              scripts/compare-determinism.sh "${files[$i]}" "${files[$j]}" 1e-9 || status=1
+              echo "::endgroup::"
+            done
+          done
+          exit $status

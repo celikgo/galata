@@ -127,16 +127,17 @@ so it buys nothing over `/fp:precise` and costs measurable performance.
   build identification, so a number can be re-derived. This is a requirement on
   every capability that emits a result, enforced at the point each one is
   written; `build_identification()` is the part of it that exists today.
-- The determinism test suite is a first-class tier. `tests/determinism/` and
-  `.github/workflows/determinism.yml` land in the same commit as the first
-  fixed-step integrator, and gate on all three platforms from that commit on.
-  *Neither exists as of this record: there is no integrator to gate yet.*
+- The determinism test suite is a first-class tier. `tests/determinism/` holds
+  the tier 1 checks, and `.github/workflows/determinism.yml` gates tier 1 on
+  Linux, macOS and Windows and measures tier 2 between every pair of them.
+  `tools/determinism/` emits the fingerprint both tiers compare.
 - Introducing threading into the numerical core requires revisiting the fixed
   reduction order, and any such commit cites this ADR.
-- When a determinism badge appears in the README it links here, so that a
-  reader who wants to know what is actually promised gets the two-tier answer
-  rather than a green rectangle. No such badge is displayed until the workflow
-  behind it exists.
+- The README's determinism badge links here rather than to the workflow run, so
+  that a reader who wants to know what is actually promised gets the two-tier
+  answer rather than a green rectangle. The badge is added once the workflow has
+  a run behind it — until then its URL does not resolve, and the documentation
+  link gate correctly rejects it.
 
 ## Revisit when
 

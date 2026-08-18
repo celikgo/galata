@@ -9,7 +9,7 @@ failure means.
 | Property | `tests/property/` | Invariants over many generated inputs, seeded | yes |
 | Integration | `tests/integration/` | One pipeline stage against a frozen capability contract | yes |
 | Validation | `tests/validation/` | Output against published reference data | yes |
-| Determinism | `tests/determinism/` | Bit-identical repeat runs; cross-platform agreement | no |
+| Determinism | `tests/determinism/` | Bit-identical repeat runs; cross-platform agreement | yes |
 | Evals | `evals/` | Agent behaviour against checkable outcomes | no |
 
 The "Exists" column is the honest state of this repository right now. A

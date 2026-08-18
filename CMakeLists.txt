@@ -60,6 +60,7 @@ add_subdirectory(src)
 
 # Operator-facing binaries that pair with the runtime libraries.
 add_subdirectory(tools/validation)
+add_subdirectory(tools/determinism)
 
 if(BUILD_TESTING AND GALATA_BUILD_TESTS)
   add_subdirectory(tests)

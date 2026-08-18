@@ -33,7 +33,8 @@ gates are built first and the physics lands against them. What exists today:
 | Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
 | Nonlinear 6-DOF rigid body, general inertia tensor | implemented and **validated** against closed-form solutions of Euler's equations |
 | YAML pipeline runner and the `galata` CLI | working |
-| One runnable example, checked by CI | working |
+| One runnable example, checked by CI | working (two of them) |
+| Determinism: bit-identical repeat runs, cross-platform bound measured | working |
 | Everything else in §"What it will do" below | **not built** |
 
 The table above is maintained by hand and checked in review. The capability
