@@ -17,6 +17,7 @@ add_library(galata_core
   quaternion.cpp
   frames.cpp
   state.cpp
+  atmosphere.cpp
 )
 add_library(galata::core ALIAS galata_core)
 

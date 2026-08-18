@@ -90,6 +90,20 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+      # docs/VERIFICATION.md is generated, not written. Regenerating it here and
+      # diffing is what makes its numbers trustworthy: a V&V report that has
+      # drifted from the implementation is worse than none, because it still
+      # looks like evidence. Run on one platform only — the report is
+      # build-independent by construction, and checking it four times would only
+      # add three chances for a platform-specific formatting difference to break
+      # an unrelated job.
+      - name: Published V&V report matches what the code produces
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: |
+          scripts/gen-verification.sh \
+            "build/${{ matrix.preset }}/tools/validation/galata-validation-report" --check
+
   # Charter gates. Seconds, not minutes — a PR that violates one should hear
   # about it before the compilers have finished warming up. Each step maps to a
   # numbered rule in docs/CHARTER.md.

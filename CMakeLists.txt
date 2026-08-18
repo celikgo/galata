@@ -57,6 +57,9 @@ configure_file(
 
 add_subdirectory(src)
 
+# Operator-facing binaries that pair with the runtime libraries.
+add_subdirectory(tools/validation)
+
 if(BUILD_TESTING AND GALATA_BUILD_TESTS)
   add_subdirectory(tests)
 endif()

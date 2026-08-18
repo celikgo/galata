@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Validation: output against PUBLISHED reference data (charter rule 8).
+#
+# Distinct from the unit tier in what a failure means. A unit-test failure says
+# the code does not do what the author intended. A validation failure says the
+# code does not agree with a document that a stranger can go and read.
+#
+# Every case cites a file in reference/, and every file in reference/ carries a
+# citation header naming the document, its report number, its rights position
+# and how the values were transcribed.
+
+# The reference data is read at run time rather than compiled in, so that a
+# reviewer can diff the transcription against the source document without
+# recompiling, and so the citation header travels with the numbers.
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/validation_config.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/validation_config.hpp"
+  @ONLY
+)
+
+add_executable(galata_validation_tests
+  test_atmosphere_ussa1976.cpp
+)
+
+target_include_directories(galata_validation_tests
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
+target_link_libraries(galata_validation_tests
+  PRIVATE
+    galata::core
+    galata::validation_reference
+    galata::warnings
+    GTest::gtest_main
+)
+
+set_target_properties(galata_validation_tests PROPERTIES FOLDER "tests")
+
+gtest_discover_tests(galata_validation_tests
+  PROPERTIES LABELS "validation"
+  DISCOVERY_TIMEOUT 30
+)
