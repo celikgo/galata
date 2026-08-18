@@ -20,7 +20,10 @@ and it is preferred to a number invented to fill the gap.
 | U.S. Standard Atmosphere 1976 — derived layer base temperatures | same, Table I at each breakpoint | **validated** |
 | U.S. Standard Atmosphere 1976 — dynamic viscosity | same, equation (51) | **unvalidated** — no tabulated viscosity values were transcribed |
 | Quaternion, frame and state conventions | ADR-0002; cross-checked against Eigen's independent implementation | **self-consistent, not externally validated** |
-| Rigid-body dynamics | — | **not implemented** |
+| Torque-free precession of a symmetric top | Closed-form solution of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** |
+| Intermediate-axis instability (Dzhanibekov) | Closed-form linearised solution of Euler's equations | **validated** |
+| Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
+| Six-degree-of-freedom equations with aerodynamic forces | — | **not implemented** — there is no aerodynamic model yet |
 | Riccati solvers | — | **not implemented** |
 | Aircraft modal characteristics | — | **not implemented** |
 | Determinism, cross-platform | — | **not implemented** |
@@ -114,6 +117,63 @@ it against published values.
 
 **Everything above 86 km.** Out of scope: galata refuses the query rather than
 extrapolating.
+
+## Rigid-body dynamics
+
+**Reference.** These cases carry no transcribed numbers: the reference is an
+analytic solution of Euler's equations, with the derivation written out in
+`tests/validation/test_rigid_body_dynamics.cpp` so a reader can check it against
+the equations rather than against a table. That makes them the strongest
+validation in the suite — there is no transcription step to get wrong, and the
+expected values are exact rather than rounded.
+
+H. Goldstein, C. P. Poole and J. L. Safko, *Classical Mechanics*, 3rd ed.,
+Addison Wesley, 2002; L. D. Landau and E. M. Lifshitz, *Mechanics*, 3rd ed.,
+Butterworth-Heinemann, 1976.
+
+**Conservation under torque-free motion.** Asymmetric body with a non-zero
+product of inertia, 60 s of integration at a 1 ms fixed step — 60,000 RK4 steps.
+
+| Invariant | Worst relative drift over 60 s |
+|---|---|
+| Rotational kinetic energy | 1.5225e-14 |
+| Angular momentum vector, resolved in NED | 5.12662e-14 |
+
+The angular-momentum figure is the vector in the NAVIGATION frame, not its
+magnitude in body axes. That is deliberate and it is the stronger claim: the
+magnitude is conserved by the rotational dynamics alone, whereas the vector
+being fixed in NED requires the attitude kinematics and the rotational dynamics
+to agree with each other. A transposed direction-cosine matrix conserves the
+magnitude and fails this.
+
+RK4 is not symplectic, so this drift is secular rather than oscillatory — it
+grows with integration length rather than staying bounded. Over the tens of
+seconds a flight simulation runs it is far below every other error in the
+model; over an orbit it would not be, and this is the wrong integrator for that.
+
+**Torque-free precession.** For a body symmetric about its z-axis the
+transverse angular-velocity vector rotates in the body frame at
+`lambda = (Ia - It) n / It` with constant magnitude. Both an oblate case
+(`lambda > 0`) and a prolate case (`lambda < 0`, where the precession runs the
+other way round the body) are checked, and the check is that the error falls
+like `h^4` as the step halves — not merely that it is small at one step. A
+solution converging to the *wrong* closed form would sit at a small constant
+error and pass an absolute check while failing this one outright.
+
+**Intermediate-axis instability.** Rotation about the intermediate principal
+axis is unstable with growth rate
+`sigma = W sqrt((I3 - I2)(I2 - I1) / (I1 I3))`. Starting from a perturbation in
+`e1` with `e3 = 0` gives `e1(t) = a cosh(sigma t)` and
+`e3(t) = a sigma I1 sinh(sigma t) / ((I2 - I3) W)` — a cosh, not an exponential.
+Both are asserted pointwise to a relative tolerance of 1e-4 over four
+e-foldings. Rotation about the major and minor axes is checked to remain
+bounded.
+
+**Mass-property guard rails.** `MassProperties::validate()` rejects a
+non-positive mass, an asymmetric inertia tensor, an indefinite one, and one
+whose principal moments violate the triangle inequality `Ia + Ib >= Ic`. The
+last of these is the one that catches a moment quoted about the wrong axis,
+which passes every other check.
 
 ---
 

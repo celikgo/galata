@@ -21,6 +21,7 @@ configure_file(
 
 add_executable(galata_validation_tests
   test_atmosphere_ussa1976.cpp
+  test_rigid_body_dynamics.cpp
 )
 
 target_include_directories(galata_validation_tests
@@ -32,6 +33,8 @@ target_include_directories(galata_validation_tests
 target_link_libraries(galata_validation_tests
   PRIVATE
     galata::core
+    galata::numerics
+    galata::sim
     galata::validation_reference
     galata::warnings
     GTest::gtest_main

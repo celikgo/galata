@@ -30,6 +30,8 @@ gates are built first and the physics lands against them. What exists today:
 | ADRs 0001–0005: ABI relationship, conventions, units, determinism, versioning | written |
 | Frames, quaternions, state vector, unit boundary (ADR-0002, ADR-0003) | implemented, property-tested |
 | U.S. Standard Atmosphere 1976, −5000 m to 86 km | implemented and **validated** against the published tables |
+| Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
+| Nonlinear 6-DOF rigid body, general inertia tensor | implemented and **validated** against closed-form solutions of Euler's equations |
 | Everything else in §"What it will do" below | **not built** |
 
 The table above is maintained by hand and is checked in review. When the

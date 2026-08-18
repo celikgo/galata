@@ -11,6 +11,10 @@
 // CI regenerates and diffs against the committed file.
 
 #include "galata/core/atmosphere.hpp"
+#include "galata/core/quaternion.hpp"
+#include "galata/core/state.hpp"
+#include "galata/numerics/integrator.hpp"
+#include "galata/sim/rigid_body.hpp"
 #include "galata/version.hpp"
 
 #include "reference_table.hpp"
@@ -143,7 +147,10 @@ and it is preferred to a number invented to fill the gap.
 | U.S. Standard Atmosphere 1976 — derived layer base temperatures | same, Table I at each breakpoint | **validated** |
 | U.S. Standard Atmosphere 1976 — dynamic viscosity | same, equation (51) | **unvalidated** — no tabulated viscosity values were transcribed |
 | Quaternion, frame and state conventions | ADR-0002; cross-checked against Eigen's independent implementation | **self-consistent, not externally validated** |
-| Rigid-body dynamics | — | **not implemented** |
+| Torque-free precession of a symmetric top | Closed-form solution of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** |
+| Intermediate-axis instability (Dzhanibekov) | Closed-form linearised solution of Euler's equations | **validated** |
+| Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
+| Six-degree-of-freedom equations with aerodynamic forces | — | **not implemented** — there is no aerodynamic model yet |
 | Riccati solvers | — | **not implemented** |
 | Aircraft modal characteristics | — | **not implemented** |
 | Determinism, cross-platform | — | **not implemented** |
@@ -260,6 +267,119 @@ it against published values.
 extrapolating.
 
 )";
+
+  // --- Rigid-body dynamics, measured -----------------------------------
+  {
+    using galata::core::State;
+    using galata::core::StateVector;
+    using galata::sim::MassProperties;
+    using galata::sim::Wrench;
+
+    // Asymmetric body with a non-zero product of inertia, so the general
+    // tensor path is what is measured rather than a convenient special case.
+    MassProperties mass;
+    mass.mass_kg = 4000.0;
+    mass.inertia_cg_body_kg_m2 << 12000.0, 0.0, -1500.0,  //
+        0.0, 40000.0, 0.0,                                //
+        -1500.0, 0.0, 48000.0;
+
+    State initial;
+    initial.attitude_body_to_ned = galata::core::quaternion_from_euler({0.3, -0.2, 1.1});
+    initial.angular_rate_body_rad_s = Eigen::Vector3d(0.9, -0.4, 0.6);
+
+    const galata::numerics::DerivativeFunction derivative =
+        [&mass](double, const Eigen::VectorXd& x) -> Eigen::VectorXd {
+      return galata::sim::rigid_body_derivative(
+          State::from_vector(StateVector(x)), mass, Wrench{}, Eigen::Vector3d::Zero());
+    };
+    const galata::numerics::ProjectionFunction project = [](Eigen::VectorXd& x) {
+      State state = State::from_vector(StateVector(x));
+      state.renormalise_attitude();
+      x = state.to_vector();
+    };
+
+    const double energy_0 = galata::sim::rotational_kinetic_energy(initial, mass);
+    const Eigen::Vector3d momentum_0 = galata::sim::angular_momentum_ned(initial, mass);
+
+    const double step = 1e-3;
+    const int steps = 60000;  // 60 s
+    const auto trajectory = galata::numerics::integrate_fixed_step(
+        derivative, initial.to_vector(), 0.0, step, steps, 100, project);
+
+    double worst_energy = 0.0;
+    double worst_momentum = 0.0;
+    for (const Eigen::VectorXd& raw : trajectory.states) {
+      const State state = State::from_vector(StateVector(raw));
+      worst_energy = std::fmax(
+          worst_energy,
+          std::fabs(galata::sim::rotational_kinetic_energy(state, mass) - energy_0) / energy_0);
+      worst_momentum = std::fmax(
+          worst_momentum,
+          (galata::sim::angular_momentum_ned(state, mass) - momentum_0).norm() / momentum_0.norm());
+    }
+
+    std::cout << R"(## Rigid-body dynamics
+
+**Reference.** These cases carry no transcribed numbers: the reference is an
+analytic solution of Euler's equations, with the derivation written out in
+`tests/validation/test_rigid_body_dynamics.cpp` so a reader can check it against
+the equations rather than against a table. That makes them the strongest
+validation in the suite — there is no transcription step to get wrong, and the
+expected values are exact rather than rounded.
+
+H. Goldstein, C. P. Poole and J. L. Safko, *Classical Mechanics*, 3rd ed.,
+Addison Wesley, 2002; L. D. Landau and E. M. Lifshitz, *Mechanics*, 3rd ed.,
+Butterworth-Heinemann, 1976.
+
+**Conservation under torque-free motion.** Asymmetric body with a non-zero
+product of inertia, 60 s of integration at a 1 ms fixed step — 60,000 RK4 steps.
+
+| Invariant | Worst relative drift over 60 s |
+|---|---|
+)";
+    std::cout << "| Rotational kinetic energy | " << format(worst_energy) << " |\n";
+    std::cout << "| Angular momentum vector, resolved in NED | " << format(worst_momentum)
+              << " |\n";
+
+    std::cout << R"(
+The angular-momentum figure is the vector in the NAVIGATION frame, not its
+magnitude in body axes. That is deliberate and it is the stronger claim: the
+magnitude is conserved by the rotational dynamics alone, whereas the vector
+being fixed in NED requires the attitude kinematics and the rotational dynamics
+to agree with each other. A transposed direction-cosine matrix conserves the
+magnitude and fails this.
+
+RK4 is not symplectic, so this drift is secular rather than oscillatory — it
+grows with integration length rather than staying bounded. Over the tens of
+seconds a flight simulation runs it is far below every other error in the
+model; over an orbit it would not be, and this is the wrong integrator for that.
+
+**Torque-free precession.** For a body symmetric about its z-axis the
+transverse angular-velocity vector rotates in the body frame at
+`lambda = (Ia - It) n / It` with constant magnitude. Both an oblate case
+(`lambda > 0`) and a prolate case (`lambda < 0`, where the precession runs the
+other way round the body) are checked, and the check is that the error falls
+like `h^4` as the step halves — not merely that it is small at one step. A
+solution converging to the *wrong* closed form would sit at a small constant
+error and pass an absolute check while failing this one outright.
+
+**Intermediate-axis instability.** Rotation about the intermediate principal
+axis is unstable with growth rate
+`sigma = W sqrt((I3 - I2)(I2 - I1) / (I1 I3))`. Starting from a perturbation in
+`e1` with `e3 = 0` gives `e1(t) = a cosh(sigma t)` and
+`e3(t) = a sigma I1 sinh(sigma t) / ((I2 - I3) W)` — a cosh, not an exponential.
+Both are asserted pointwise to a relative tolerance of 1e-4 over four
+e-foldings. Rotation about the major and minor axes is checked to remain
+bounded.
+
+**Mass-property guard rails.** `MassProperties::validate()` rejects a
+non-positive mass, an asymmetric inertia tensor, an indefinite one, and one
+whose principal moments violate the triangle inequality `Ia + Ib >= Ic`. The
+last of these is the one that catches a moment quoted about the wrong axis,
+which passes every other check.
+
+)";
+  }
 
   // Version only, deliberately NOT build_identification(): the report is
   // regenerated and diffed by CI on a different compiler and build type from a

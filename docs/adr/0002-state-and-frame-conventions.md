@@ -35,6 +35,13 @@ point fixed to the airframe, *not* the centre of gravity. The CG is carried as
 an explicit offset from that reference point so that CG position is a parameter
 that can be swept, which is the entire point of a CG sweep study.
 
+> This fixes where geometry and aerodynamic data are referenced. It does not by
+> itself say which point the *equations of motion* are written about, and this
+> record originally left that ambiguous.
+> [ADR-0006](0006-equations-of-motion-about-the-cg.md) resolves it: the
+> dynamics are written about the centre of gravity, and the CG offset appears
+> only in the transfer of the aerodynamic wrench from the reference point.
+
 **Stability frame.** The body frame rotated by **−α** about the body y-axis, so
 that its x-axis lies along the projection of the velocity vector into the body
 xz-plane.

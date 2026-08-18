@@ -29,6 +29,8 @@ add_executable(galata-validation-report
 target_link_libraries(galata-validation-report
   PRIVATE
     galata::core
+    galata::numerics
+    galata::sim
     galata::validation_reference
     galata::warnings
 )
