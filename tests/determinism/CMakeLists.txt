@@ -6,6 +6,7 @@
 # .github/workflows/determinism.yml, because it needs three machines.
 
 add_executable(galata_determinism_tests
+  ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_bit_identical.cpp
 )
 
@@ -18,6 +19,12 @@ target_link_libraries(galata_determinism_tests
     galata::warnings
     GTest::gtest_main
 )
+
+target_compile_definitions(galata_determinism_tests
+  PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Determinism
+)
+
+target_link_libraries(galata_determinism_tests PRIVATE galata::validation_case_check)
 
 set_target_properties(galata_determinism_tests PROPERTIES FOLDER "tests")
 

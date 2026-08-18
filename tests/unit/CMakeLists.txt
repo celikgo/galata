@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 add_executable(galata_unit_tests
+  ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_version.cpp
   test_units.cpp
   test_quaternion.cpp
@@ -20,6 +21,12 @@ target_link_libraries(galata_unit_tests
     galata::warnings
     GTest::gtest_main
 )
+
+target_compile_definitions(galata_unit_tests
+  PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Unit
+)
+
+target_link_libraries(galata_unit_tests PRIVATE galata::validation_case_check)
 
 set_target_properties(galata_unit_tests PROPERTIES FOLDER "tests")
 

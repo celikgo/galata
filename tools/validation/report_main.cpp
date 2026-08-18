@@ -14,9 +14,11 @@
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
 #include "galata/numerics/integrator.hpp"
+#include "galata/pipeline/registry.hpp"
 #include "galata/sim/rigid_body.hpp"
 #include "galata/version.hpp"
 
+#include "case_registry.hpp"
 #include "reference_table.hpp"
 
 #include <cmath>
@@ -66,6 +68,23 @@ double last_place_units(double computed, double published, int significant_figur
 // also happens to be the honest precision, since quoting six digits of a
 // quantity whose last three are toolchain noise overstates what was measured.
 // ---------------------------------------------------------------------------
+
+// A vertical bar ends a cell in a Markdown table, so any that appear inside
+// generated text must be escaped. Applied to every cell rather than to the one
+// note that currently needs it: the notes are prose written by whoever adds a
+// case, and "remember to avoid pipes" is not a property anything checks.
+std::string escape_table_cell(const std::string& text) {
+  std::string escaped;
+  escaped.reserve(text.size());
+  for (const char character : text) {
+    if (character == '|') {
+      escaped += "\\|";
+    } else {
+      escaped += character;
+    }
+  }
+  return escaped;
+}
 
 // Fixed number of significant figures.
 std::string format_significant(double value, int figures) {
@@ -180,29 +199,106 @@ and it is preferred to a number invented to fill the gap.
 
 ## Summary
 
+The table below is GENERATED from `tools/validation/case_registry.cpp` and is
+reconciled against the capability registry the CLI dispatches through. It used
+to be typed by hand and it drifted three times, most memorably by still saying
+"there is no aerodynamic model yet" in the commit that added one.
+
+Four checks stand behind it, each a test rather than a convention:
+
+* every case claiming a comparison names a reference and names its evidence;
+* every piece of evidence names a test that is **actually registered** in the
+  binary the case says it lives in, so a renamed or deleted test breaks the
+  build rather than leaving a fictional citation;
+* every capability declaring *implemented and validated* is backed by at least
+  one validating case, which makes that declaration unfalsifiable by hand;
+* a case marked *not implemented* may not name a capability that exists, so
+  the row cannot outlive the thing being built.
+
 | Case | Reference | Status |
 |---|---|---|
-| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | COESA, NOAA-S/T 76-1562 / NASA-TM-X-74335 (1976), Tables I and III | **validated** |
-| U.S. Standard Atmosphere 1976 — derived layer base temperatures | same, Table I at each breakpoint | **validated** |
-| U.S. Standard Atmosphere 1976 — dynamic viscosity | same, equation (51) | **unvalidated** — no tabulated viscosity values were transcribed |
-| Quaternion, frame and state conventions | ADR-0002; cross-checked against Eigen's independent implementation | **self-consistent, not externally validated** |
-| Torque-free precession of a symmetric top | Closed-form solution of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** |
-| Intermediate-axis instability (Dzhanibekov) | Closed-form linearised solution of Euler's equations | **validated** |
-| Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
-| Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated** indirectly — the linearised derivatives match to 0.26%, which the equations of motion, the coefficient buildup and the wind-to-body rotation all feed |
-| Nonlinear simulation with aerodynamic forces, over time | — | **not implemented** — there is no simulation loop yet, only the derivative |
-| Riccati solvers | — | **not implemented** |
-| Aircraft lateral modes (spiral, roll subsidence, Dutch roll) | Heffley & Jewell, NASA CR-2144 (1972), Table II-8 | **validated** |
-| Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | same, Table II-4 | **known discrepancy**, localised — see below |
-| Trim of a nonlinear model against the published flight condition | same, Table II-2 | **validated** |
-| Linearised dimensional derivatives from a nonlinear model | same, Table II-7 | **validated** to 0.26% |
-| All five modes from trim + linearise of a nonlinear model | same, Tables II-4 and II-8 | **validated** to 1.0% |
-| Modal classification into the five classical modes | same; labels checked against the report's own identification | **validated** |
-| Determinism, tier 1 (same platform, byte-identical) | ADR-0004 | **validated** on Linux, macOS and Windows |
-| Determinism, tier 2 (cross-platform, bounded) | ADR-0004 | **validated** against a 1e-9 relative gate |
-
 )";
+
+  for (const auto& validation_case : galata::validation::validation_cases()) {
+    std::cout << "| " << escape_table_cell(validation_case.title) << " | "
+              << (validation_case.reference.empty() ? "—"
+                                                    : escape_table_cell(validation_case.reference))
+              << " | " << galata::validation::to_string(validation_case.status);
+    if (!validation_case.note.empty()) {
+      std::cout << " — " << escape_table_cell(validation_case.note);
+    }
+    std::cout << " |\n";
+  }
+
+  // --- Evidence -------------------------------------------------------------
+  std::cout << R"(
+### Evidence
+
+Every case above, and the tests that stand behind it. These names are checked
+against the tests actually registered in each binary, so they can be run:
+
+```
+ctest --preset dev -R '<test name>'
+```
+
+| Case | Evidence |
+|---|---|
+)";
+  for (const auto& validation_case : galata::validation::validation_cases()) {
+    std::cout << "| " << escape_table_cell(validation_case.title) << " | ";
+    if (validation_case.evidence.empty()) {
+      std::cout << "— |\n";
+      continue;
+    }
+    bool first = true;
+    for (const auto& evidence : validation_case.evidence) {
+      if (!first) {
+        std::cout << "<br>";
+      }
+      std::cout << "`" << evidence.test << "` (" << galata::validation::to_string(evidence.binary)
+                << ")";
+      first = false;
+    }
+    std::cout << " |\n";
+  }
+
+  // --- Reconciliation with the capability registry --------------------------
+  std::cout << R"(
+### Capabilities, and the cases that validate them
+
+Read straight out of the registry the CLI dispatches through, so a capability
+cannot appear here without existing, and cannot claim validation without a case
+backing it. A capability may legitimately be *implemented, unvalidated* — that
+is an honest state, and it means no published reference has been compared
+against.
+
+| Capability | Declared state | Validated by |
+|---|---|---|
+)";
+  for (const auto* capability : galata::pipeline::builtin_registry().all()) {
+    std::cout << "| `" << capability->id << "` | " << galata::pipeline::to_string(capability->state)
+              << " | ";
+    std::vector<std::string> backing;
+    for (const auto& validation_case : galata::validation::validation_cases()) {
+      if (!galata::validation::claims_a_comparison(validation_case.status)) {
+        continue;
+      }
+      for (const std::string& named : validation_case.capabilities) {
+        if (named == capability->id) {
+          backing.push_back(validation_case.id);
+        }
+      }
+    }
+    if (backing.empty()) {
+      std::cout << "— |\n";
+    } else {
+      for (std::size_t i = 0; i < backing.size(); ++i) {
+        std::cout << (i == 0 ? "" : ", ") << "`" << backing[i] << "`";
+      }
+      std::cout << " |\n";
+    }
+  }
+  std::cout << "\n";
 
   std::cout << "## U.S. Standard Atmosphere, 1976\n\n";
   std::cout << "**Reference.** U.S. Committee on Extension to the Standard Atmosphere (COESA),\n"

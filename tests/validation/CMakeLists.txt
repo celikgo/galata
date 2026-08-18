@@ -20,10 +20,12 @@ configure_file(
 )
 
 add_executable(galata_validation_tests
+  ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_atmosphere_ussa1976.cpp
   test_rigid_body_dynamics.cpp
   test_nt33a_modes.cpp
   test_nt33a_trim_linearize.cpp
+  test_case_registry.cpp
 )
 
 target_include_directories(galata_validation_tests
@@ -41,9 +43,16 @@ target_link_libraries(galata_validation_tests
     galata::trim
     galata::linearize
     galata::validation_reference
+    galata::pipeline
     galata::warnings
     GTest::gtest_main
 )
+
+target_compile_definitions(galata_validation_tests
+  PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Validation
+)
+
+target_link_libraries(galata_validation_tests PRIVATE galata::validation_case_check)
 
 set_target_properties(galata_validation_tests PROPERTIES FOLDER "tests")
 

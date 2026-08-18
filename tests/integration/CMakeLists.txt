@@ -12,6 +12,7 @@ configure_file(
 )
 
 add_executable(galata_integration_tests
+  ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_pipeline.cpp
   test_example_studies.cpp
 )
@@ -26,6 +27,12 @@ target_link_libraries(galata_integration_tests
     galata::warnings
     GTest::gtest_main
 )
+
+target_compile_definitions(galata_integration_tests
+  PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Integration
+)
+
+target_link_libraries(galata_integration_tests PRIVATE galata::validation_case_check)
 
 set_target_properties(galata_integration_tests PROPERTIES FOLDER "tests")
 

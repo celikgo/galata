@@ -34,6 +34,17 @@ Round-trip conversions, quaternion normalisation, frame-transformation
 composition and associativity. These are the tests that catch a transposed
 rotation matrix, which no single hand-picked example reliably does.
 
+**The V&V report's summary table is generated, and its claims are checked.**
+`docs/VERIFICATION.md` is produced from `tools/validation/case_registry.cpp`,
+which declares every validation case: its reference, its status, and the tests
+that stand behind it. Four tests reconcile that declaration with reality —
+evidence must name a test that is actually registered in the binary it claims
+to live in; a capability declaring *implemented and validated* must be backed
+by a case that validates it; a case marked *not implemented* may not name a
+capability that exists. The reasoning is in that file's header, and it comes
+down to this: a hand-typed status line is a claim nothing checks, and this one
+drifted three times before it was generated.
+
 **Coverage is a diagnostic, not a target.** The project aims at a test-to-source
 line ratio of 0.3 or better and treats a sudden drop as a signal to look, not as
 a gate to satisfy.

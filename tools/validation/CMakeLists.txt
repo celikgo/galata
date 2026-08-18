@@ -7,6 +7,7 @@
 
 add_library(galata_validation_reference
   reference_table.cpp
+  case_registry.cpp
 )
 add_library(galata::validation_reference ALIAS galata_validation_reference)
 
@@ -20,6 +21,29 @@ target_link_libraries(galata_validation_reference
 
 set_target_properties(galata_validation_reference PROPERTIES FOLDER "tools")
 
+# The GoogleTest-dependent half of the case registry. Linked by the test
+# binaries only; the report generator has no business linking a test framework.
+# Built only when tests are, since nothing else can use it.
+if(GALATA_BUILD_TESTS)
+find_package(GTest CONFIG REQUIRED)
+
+add_library(galata_validation_case_check
+  case_registry_check.cpp
+)
+add_library(galata::validation_case_check ALIAS galata_validation_case_check)
+
+target_include_directories(galata_validation_case_check
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_link_libraries(galata_validation_case_check
+  PUBLIC galata::validation_reference GTest::gtest
+  PRIVATE galata::warnings
+)
+
+set_target_properties(galata_validation_case_check PROPERTIES FOLDER "tools")
+endif()
+
 # Emits docs/VERIFICATION.md on stdout. CI regenerates and diffs, so the
 # published deviations cannot drift away from the code that produced them.
 add_executable(galata-validation-report
@@ -32,6 +56,7 @@ target_link_libraries(galata-validation-report
     galata::numerics
     galata::sim
     galata::validation_reference
+    galata::pipeline
     galata::warnings
 )
 

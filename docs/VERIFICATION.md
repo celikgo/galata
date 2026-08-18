@@ -14,27 +14,99 @@ and it is preferred to a number invented to fill the gap.
 
 ## Summary
 
+The table below is GENERATED from `tools/validation/case_registry.cpp` and is
+reconciled against the capability registry the CLI dispatches through. It used
+to be typed by hand and it drifted three times, most memorably by still saying
+"there is no aerodynamic model yet" in the commit that added one.
+
+Four checks stand behind it, each a test rather than a convention:
+
+* every case claiming a comparison names a reference and names its evidence;
+* every piece of evidence names a test that is **actually registered** in the
+  binary the case says it lives in, so a renamed or deleted test breaks the
+  build rather than leaving a fictional citation;
+* every capability declaring *implemented and validated* is backed by at least
+  one validating case, which makes that declaration unfalsifiable by hand;
+* a case marked *not implemented* may not name a capability that exists, so
+  the row cannot outlive the thing being built.
+
 | Case | Reference | Status |
 |---|---|---|
-| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | COESA, NOAA-S/T 76-1562 / NASA-TM-X-74335 (1976), Tables I and III | **validated** |
-| U.S. Standard Atmosphere 1976 — derived layer base temperatures | same, Table I at each breakpoint | **validated** |
-| U.S. Standard Atmosphere 1976 — dynamic viscosity | same, equation (51) | **unvalidated** — no tabulated viscosity values were transcribed |
-| Quaternion, frame and state conventions | ADR-0002; cross-checked against Eigen's independent implementation | **self-consistent, not externally validated** |
-| Torque-free precession of a symmetric top | Closed-form solution of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** |
-| Intermediate-axis instability (Dzhanibekov) | Closed-form linearised solution of Euler's equations | **validated** |
-| Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated**, drift measured below |
-| Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated** indirectly — the linearised derivatives match to 0.26%, which the equations of motion, the coefficient buildup and the wind-to-body rotation all feed |
-| Nonlinear simulation with aerodynamic forces, over time | — | **not implemented** — there is no simulation loop yet, only the derivative |
-| Riccati solvers | — | **not implemented** |
-| Aircraft lateral modes (spiral, roll subsidence, Dutch roll) | Heffley & Jewell, NASA CR-2144 (1972), Table II-8 | **validated** |
-| Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | same, Table II-4 | **known discrepancy**, localised — see below |
-| Trim of a nonlinear model against the published flight condition | same, Table II-2 | **validated** |
-| Linearised dimensional derivatives from a nonlinear model | same, Table II-7 | **validated** to 0.26% |
-| All five modes from trim + linearise of a nonlinear model | same, Tables II-4 and II-8 | **validated** to 1.0% |
-| Modal classification into the five classical modes | same; labels checked against the report's own identification | **validated** |
-| Determinism, tier 1 (same platform, byte-identical) | ADR-0004 | **validated** on Linux, macOS and Windows |
-| Determinism, tier 2 (cross-platform, bounded) | ADR-0004 | **validated** against a 1e-9 relative gate |
+| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, Tables I and III | **validated** — Temperature and speed of sound round to the printed value everywhere; pressure and density do not, at 3 of 32 cells, by at most 0.96 units in the last printed place. Every deviation is listed below. |
+| U.S. Standard Atmosphere 1976 — derived layer base temperatures and the pressure recurrence | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, Table I at each breakpoint | **validated** — Table 4 has no base-temperature column, so these are derived rather than transcribed. The pressure recurrence is checked at the top of the seven-layer chain, where any per-layer error would have accumulated. |
+| U.S. Standard Atmosphere 1976 — dynamic viscosity | COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335, equation (51) | unvalidated — Implemented, but no tabulated viscosity values were transcribed, so there is nothing to compare against. It also inherits the source's own S = 110 K versus 110.4 K ambiguity, worth about 0.1%. |
+| Quaternion, frame and state conventions | ADR-0002, cross-checked against Eigen's independent implementation | self-consistent, not externally validated — The rotation matrix is written out by hand from ADR-0002 and compared against Eigen over the whole rotation group. That checks the documented convention against the implemented one; it is not a comparison against a document. |
+| Numerical Jacobians against analytically known Jacobians | Charter validation case 4; analytic derivatives of closed-form functions | **validated** — Agreement to the cancellation limit, eps \|f\| / h, which is the floor a central difference has even on a linear function. The Richardson estimate is checked to bound the actual error rather than understate it. |
+| Fixed-step RK4 — method order | Hairer, Norsett & Wanner (1993); exact solutions of closed-form problems | **validated** — Exact on cubics, as Simpson's rule must be; error falls by 16 per halving on the exponential. |
+| Newton's method — convergence and failure reporting | Nocedal & Wright (2006); systems with closed-form roots | **validated** — Quadratic convergence on a smooth system; a system with no real root is reported as unconverged rather than returned as a least-bad point. |
+| Torque-free precession of a symmetric top | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Checked for fourth-order CONVERGENCE to the closed form, not proximity to it. A solution converging to the wrong closed form sits at a small constant error and passes an absolute check. |
+| Intermediate-axis instability (the Dzhanibekov effect) | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Asserted against the cosh/sinh closed form pointwise, including the sign the (I2 - I3) < 0 factor forces. Fitting a log-slope instead measures 0.70 sigma and looks like a defect in the dynamics. |
+| Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated** — The angular-momentum figure is the VECTOR resolved in NED, not its body-axis magnitude. A transposed direction-cosine matrix conserves the magnitude and fails this. Drift measured below. |
+| Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated**, with a caveat — Validated INDIRECTLY: the linearised derivatives that match Table II-7 to 0.26% run through these equations, the coefficient buildup and the wind-to-body rotation. There is no case comparing the equations in isolation. |
+| Nonlinear simulation with aerodynamic forces, over time | — | not implemented — There is a state derivative, not a loop flying an aircraft through time. |
+| Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-8 | **validated** — Tolerance measured, not chosen: each input is perturbed by half a unit in its own last printed digit and the published value's own rounding is added. |
+| Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **validated** — Three of the four longitudinal quantities. The fourth is the row below. |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, about three times what the inputs' rounding allows. Localised to the hand assembly — the full chain reproduces it. Held by a labelled regression lock; see below. |
+| Modal classification into the five classical modes | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), labels checked against the report's own identification | **validated** — By eigenvector participation, not by frequency. A unit test builds a system whose phugoid block is deliberately faster than its short-period block; a frequency-based classifier gets both labels backwards on it. |
+| Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.05 deg below the published 2.20, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
+| Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
+| All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.0%, worst case the Dutch roll damping. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
+| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 145 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
+| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead: dividing by h amplifies a libm disagreement by 1/h. |
+| Riccati solvers against the CAREX and DAREX benchmark collections | — | not implemented — Named in the v0.2 milestone. |
+| Gain, phase, delay and disk margins | — | not implemented — Named in the v0.2 milestone. |
+
+### Evidence
+
+Every case above, and the tests that stand behind it. These names are checked
+against the tests actually registered in each binary, so they can be run:
+
+```
+ctest --preset dev -R '<test name>'
+```
+
+| Case | Evidence |
+|---|---|
+| U.S. Standard Atmosphere 1976 — temperature, pressure, density, speed of sound | `Ussa1976.TemperatureMatchesThePublishedTable` (validation)<br>`Ussa1976.PressureMatchesThePublishedTable` (validation)<br>`Ussa1976.DensityMatchesThePublishedTable` (validation)<br>`Ussa1976.SpeedOfSoundMatchesThePublishedTable` (validation) |
+| U.S. Standard Atmosphere 1976 — derived layer base temperatures and the pressure recurrence | `Ussa1976.DerivedBaseTemperaturesMatchTheStandardsOwnTabulation` (validation)<br>`Ussa1976.PressureAtTheTopOfTheModelMatchesAfterSevenLayers` (validation) |
+| U.S. Standard Atmosphere 1976 — dynamic viscosity | — |
+| Quaternion, frame and state conventions | `Quaternion.DcmMatchesEigensOwnRotationMatrix` (unit)<br>`QuaternionProperties.HandWrittenDcmAlwaysAgreesWithEigen` (property) |
+| Numerical Jacobians against analytically known Jacobians | `Jacobian.QuadraticFunctionMatchesItsAnalyticJacobian` (unit)<br>`Jacobian.LinearFunctionIsDifferentiatedToTheCancellationLimit` (unit)<br>`Jacobian.TruncationEstimateBoundsTheActualError` (unit) |
+| Fixed-step RK4 — method order | `Rk4.IntegratesCubicsInTimeExactly` (unit)<br>`Rk4.IsFourthOrderOnTheExponential` (unit)<br>`Rk4.StepSizeStudyRecoversTheMethodOrder` (unit) |
+| Newton's method — convergence and failure reporting | `Newton.SolvesALinearSystemInOneStep` (unit)<br>`Newton.ConvergesQuadraticallyOnASmoothNonlinearSystem` (unit)<br>`Newton.ReportsFailureRatherThanReturningAWrongRoot` (unit) |
+| Torque-free precession of a symmetric top | `Shapes/SymmetricTop.ConvergesToTheClosedFormPrecessionAtFourthOrder/oblate` (validation)<br>`Shapes/SymmetricTop.ConvergesToTheClosedFormPrecessionAtFourthOrder/prolate` (validation) |
+| Intermediate-axis instability (the Dzhanibekov effect) | `IntermediateAxis.PerturbationFollowsTheClosedFormHyperbolicGrowth` (validation)<br>`IntermediateAxis.RotationAboutTheMajorAndMinorAxesIsStable` (validation) |
+| Energy and angular-momentum conservation, general inertia tensor | `TorqueFreeConservation.EnergyAndAngularMomentumDriftIsBounded` (validation)<br>`TorqueFreeConservation.AngularMomentumRotatesInBodyAxesButNotInNed` (validation) |
+| Six-degree-of-freedom equations with aerodynamic forces | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation) |
+| Nonlinear simulation with aerodynamic forces, over time | — |
+| Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | `Nt33aLateral.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation)<br>`Nt33aLateral.TheDutchRollPeriodAgreesWithThePublishedPeriod` (validation) |
+| Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | `Nt33aLongitudinal.ModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation) |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | `Nt33aLongitudinal.PhugoidDampingDiscrepancyDoesNotGrow` (validation) |
+| Modal classification into the five classical modes | `Nt33aLateral.AllThreeLateralModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aLongitudinal.BothLongitudinalModesAreFoundAndCorrectlyLabelled` (validation)<br>`Nt33aChain.ModesAreLabelledCorrectlyFromParticipationAlone` (validation)<br>`Modes.ClassifiesLongitudinalModesByParticipationNotByFrequency` (unit) |
+| Trim of a nonlinear model against the published flight condition | `Nt33aChain.TrimConvergesToMachinePrecision` (validation)<br>`Nt33aChain.TrimSatisfiesTheClosedFormForceBalanceExactly` (validation)<br>`Nt33aChain.DynamicPressureAndMachMatchThePublishedFlightCondition` (validation)<br>`Nt33aChain.TrimAlphaDiffersFromThePublishedValueByExactlyTheDragInclinationTerm` (validation) |
+| Linearised dimensional derivatives from a nonlinear model | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation)<br>`Nt33aChain.TruncationErrorIsNegligible` (validation)<br>`Nt33aChain.TheLongitudinalAndLateralAxesDecoupleAtThisTrim` (validation) |
+| All five classical modes from trim and linearisation of a nonlinear model | `Nt33aChain.AllFiveClassicalModesMatchThePublishedValues` (validation)<br>`Nt33aChain.ThePhugoidDampingThatTheHandAssembledMatrixMissedIsRecovered` (validation) |
+| Determinism tier 1 — same platform, byte-identical | `Determinism.LongIntegrationIsBitIdenticalAcrossRuns` (determinism)<br>`Determinism.SplittingAnIntegrationInTwoGivesTheSameResult` (determinism)<br>`Determinism.ModalDecompositionIsBitIdenticalAndOrderStable` (determinism)<br>`Determinism.AtmosphereDoesNotDependOnQueryOrder` (determinism) |
+| Determinism tier 2 — cross-platform, bounded | `Determinism.TheFingerprintTrajectoryIsNotChaotic` (determinism) |
+| Riccati solvers against the CAREX and DAREX benchmark collections | — |
+| Gain, phase, delay and disk margins | — |
+
+### Capabilities, and the cases that validate them
+
+Read straight out of the registry the CLI dispatches through, so a capability
+cannot appear here without existing, and cannot claim validation without a case
+backing it. A capability may legitimately be *implemented, unvalidated* — that
+is an honest state, and it means no published reference has been compared
+against.
+
+| Capability | Declared state | Validated by |
+|---|---|---|
+| `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
+| `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `model.linear.statespace` | implemented, unvalidated | — |
+| `report.markdown` | implemented, unvalidated | — |
+| `trim.level` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 
 ## U.S. Standard Atmosphere, 1976
 

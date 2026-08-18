@@ -9,6 +9,7 @@
 # failure message is reproducible by anyone, forever.
 
 add_executable(galata_property_tests
+  ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   property_generators.cpp
   test_quaternion_properties.cpp
   test_frame_properties.cpp
@@ -21,6 +22,12 @@ target_link_libraries(galata_property_tests
     galata::warnings
     GTest::gtest_main
 )
+
+target_compile_definitions(galata_property_tests
+  PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Property
+)
+
+target_link_libraries(galata_property_tests PRIVATE galata::validation_case_check)
 
 set_target_properties(galata_property_tests PROPERTIES FOLDER "tests")
 
