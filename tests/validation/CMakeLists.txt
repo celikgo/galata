@@ -23,6 +23,7 @@ add_executable(galata_validation_tests
   test_atmosphere_ussa1976.cpp
   test_rigid_body_dynamics.cpp
   test_nt33a_modes.cpp
+  test_nt33a_trim_linearize.cpp
 )
 
 target_include_directories(galata_validation_tests
@@ -37,6 +38,8 @@ target_link_libraries(galata_validation_tests
     galata::numerics
     galata::sim
     galata::analyze
+    galata::trim
+    galata::linearize
     galata::validation_reference
     galata::warnings
     GTest::gtest_main

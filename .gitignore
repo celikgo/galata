@@ -49,3 +49,4 @@ galata.ai.toml
 examples/**/*.md.out
 examples/nt33a-lateral-modes/lateral-modes.md
 examples/nt33a-longitudinal-modes/longitudinal-modes.md
+examples/nt33a-trim-and-linearise/trim-and-modes.md

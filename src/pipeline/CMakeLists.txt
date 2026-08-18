@@ -19,6 +19,8 @@ target_link_libraries(galata_pipeline
     galata::public_headers
     galata::model
     galata::analyze
+    galata::trim
+    galata::linearize
     Eigen3::Eigen
   PRIVATE
     galata::core

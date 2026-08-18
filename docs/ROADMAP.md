@@ -21,18 +21,18 @@ that tag and run something real.
 | `analyze.modes` | done, validated against NASA CR-2144 |
 | Pipeline runner and CLI | done |
 | `ci.yml`, `determinism.yml` | done |
-| A reference aircraft model | done as a **linear** model; the nonlinear one is not built |
-| `trim.level` | **not built** |
-| `linearize.finitediff` | **not built** |
-| One example: YAML file to modal table | done, two of them, both checked by CI |
+| A reference aircraft model | done, nonlinear, validated |
+| `trim.level` | done, validated |
+| `linearize.finitediff` | done, validated |
+| One example: YAML file to modal table | done, three of them, all checked by CI |
 
-The two missing capabilities are the same missing thing: there is no nonlinear
-aircraft model to trim or to linearise. `analyze.modes` is validated against a
-published aircraft, but the state matrix it consumes is read from a file rather
-than produced by trimming and linearising a nonlinear model. Closing that gap
-means an aerodynamic coefficient model, a trim formulation as a constrained
-root-find with a reported residual and Jacobian condition number, and
-central-difference linearisation with a Richardson truncation-error estimate.
+**v0.1 is complete.** The chain runs end to end: a nonlinear aircraft model
+built from non-dimensional derivatives, trimmed by a constrained root-find that
+reports its residual and Jacobian conditioning and refuses to return a
+best-effort answer, linearised by central differences with a Richardson
+truncation estimate per entry, and analysed into a labelled modal table. It
+reproduces NASA CR-2144's published dimensional derivatives to 0.26% and its
+published modes to 1.0%.
 
 No AI. No GUI.
 

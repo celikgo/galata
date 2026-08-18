@@ -39,6 +39,16 @@ namespace galata::core {
 // R_stability<-body = Ry(-alpha).
 [[nodiscard]] Eigen::Matrix3d dcm_stability_from_body(double alpha_rad) noexcept;
 
+// R_body<-stability, the transpose of the above.
+//
+// This is the rotation an aerodynamic buildup needs, and it is NOT the same as
+// dcm_body_from_wind. Lift and drag are conventionally referred to the
+// STABILITY axes — rotated from body by alpha alone — with the side force given
+// directly in body axes. Rotating the lift/drag/side triple through the full
+// wind rotation instead adds a spurious -D sin(beta) to the body y force, which
+// shows up as a side-force derivative roughly 19% too large.
+[[nodiscard]] Eigen::Matrix3d dcm_body_from_stability(double alpha_rad) noexcept;
+
 // R_wind<-body = Rz(beta) Ry(-alpha).
 //
 // Fixed by the requirement that it map the body-axis velocity components

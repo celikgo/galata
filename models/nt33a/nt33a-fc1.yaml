@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NT-33A nonlinear model, flight condition 1.
+#
+# Provenance, rights and the transcription method: models/nt33a/PROVENANCE.md.
+# The source values in their original units are in
+# tests/validation/reference/nt33a_fc1.csv.
+#
+# ALL VALUES ARE SI (ADR-0003). The source publishes feet, slugs and
+# pounds-force; the conversion is recorded in PROVENANCE.md and is exact, since
+# every factor involved is exact by definition.
+#
+# WHAT THIS MODEL IS NOT — read models/nt33a/PROVENANCE.md before using it. In
+# short: it is a first-order expansion about ONE flight condition, it has no
+# stall, no Mach effects, and no engine.
+
+description: >-
+  NT-33A, flight condition 1 — sea level, M = 0.204, power approach
+  (230 gal tip tanks, 25% internal fuel, full flaps, gear down, 1.4 Vs)
+
+citation: >-
+  R. K. Heffley and W. F. Jewell, "Aircraft Handling Qualities Data",
+  NASA CR-2144, Systems Technology Inc., December 1972, Tables II-1 and II-2.
+  NTRS 19730003312. Distribution: Unclassified - Unlimited.
+
+geometry:
+  # 234.8 ft^2, 37.54 ft, 6.72 ft  (Table II-2 header)
+  wing_area_m2: 21.8136337920
+  wing_span_m: 11.4421920000
+  mean_aerodynamic_chord_m: 2.0482560000
+
+mass:
+  # 11,800 lbf weight; 12700 / 20700 / 32001 / 480 slug-ft^2  (Table II-2)
+  #
+  # The product of inertia is quoted here as the source prints it. galata
+  # negates it when forming the tensor, because in the aerospace convention a
+  # positive I_xz is a NEGATIVE off-diagonal entry.
+  mass_kg: 5352.3899660000
+  inertia_xx_kg_m2: 17218.8879438088
+  inertia_yy_kg_m2: 28065.4315304600
+  inertia_zz_kg_m2: 43387.5301645531
+  product_of_inertia_xz_kg_m2: 650.7926151991
+
+thrust_incidence_rad: 0.0  # Table II-2 gives ITH = 0 for this condition
+
+aero:
+  # The expansion point. 2.20 degrees (Table II-2, ALPHA).
+  reference_alpha_rad: 0.0383972435
+  reference_mach: 0.204
+
+  # Longitudinal, Table II-1. Per radian.
+  lift_ref: 0.813
+  drag_ref: 0.135
+  # The source publishes no trim pitching moment and no trim elevator, so the
+  # model is DEFINED to be trimmed at its reference condition with the elevator
+  # centred. This is a choice, not a transcription — see PROVENANCE.md. It
+  # means the trimmed elevator this model produces is near zero by
+  # construction and is not evidence of anything.
+  pitching_moment_ref: 0.0
+  lift_alpha: 5.22
+  drag_alpha: 0.54
+  pitching_moment_alpha: -0.401
+  # C_L_q is not tabulated for this aircraft, and Table II-3 gives Z_q = 0,
+  # which is consistent with it being zero.
+  lift_pitch_rate: 0.0
+  pitching_moment_pitch_rate: -10.0
+  pitching_moment_alpha_dot: -5.0
+  lift_elevator: 0.34
+  pitching_moment_elevator: -0.89
+
+  # Lateral-directional, Table II-1.
+  #
+  # THE SOURCE GIVES THESE IN STABILITY AXES, so they are declared as such and
+  # galata rotates them into body axes about the reference angle of attack.
+  #
+  # It is tempting to skip that rotation on the grounds that the trim angle of
+  # attack is only 2.2 degrees and cos(2.2 deg) is 0.9993. That reasoning is
+  # wrong, and it was made here before the comparison against the published
+  # dimensional derivatives caught it. The rotation MIXES the rolling and
+  # yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross term
+  # dominates the cosine: C_n_beta moves by 10%, not 0.07%. Left unrotated, the
+  # Dutch roll damping came out 35% high.
+  lateral_axes: stability
+
+  side_force_beta: -0.72
+  rolling_moment_beta: -0.127
+  yawing_moment_beta: 0.049
+  rolling_moment_roll_rate: -0.57
+  yawing_moment_roll_rate: -0.045
+  rolling_moment_yaw_rate: 0.20
+  yawing_moment_yaw_rate: -0.16
+  rolling_moment_aileron: 0.14
+  yawing_moment_aileron: -0.009
+  side_force_rudder: 0.17
+  rolling_moment_rudder: -0.002
+  yawing_moment_rudder: -0.073

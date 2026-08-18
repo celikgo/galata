@@ -699,9 +699,16 @@ TEST_F(Nt33aLongitudinal, ModesMatchThePublishedValuesWithinTheSourcesOwnPrecisi
 //     assembly omits, the phugoid is where it would show, since the phugoid
 //     roots are set by the low-order coefficients.
 //
-// Resolving this needs the rest of Appendix C, and until it is resolved
-// docs/VERIFICATION.md lists the phugoid damping ratio as an open discrepancy
-// rather than as validated.
+// SINCE RESOLVED, in the sense that matters. test_nt33a_trim_linearize.cpp
+// reaches the same published number by a route that shares no arithmetic with
+// this one — build a nonlinear model from the NON-dimensional derivatives, trim
+// it, linearise it — and gets 0.0949 against the published 0.0948. So the
+// discrepancy lives in THIS hand assembly, not in the eigen-analysis and not in
+// the published value.
+//
+// Which term the hand assembly omits is still not established, so this lock
+// stays. It is now anchored to a validated result rather than to a bare
+// measurement, which is what charter rule 8 asks of a regression lock.
 TEST_F(Nt33aLongitudinal, PhugoidDampingDiscrepancyDoesNotGrow) {
   const LongitudinalModes computed = extract_longitudinal(assemble_longitudinal(*inputs_));
   ASSERT_TRUE(computed.complete);

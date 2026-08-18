@@ -3,15 +3,17 @@
 Flight dynamics, control-law design and simulation — reproducibly, from a file
 you can read, with every number traceable to the routine that produced it.
 
-Today it computes the atmosphere, integrates a nonlinear six-degree-of-freedom
-rigid body, and turns a linear aircraft model into a **labelled** modal table:
-short period, phugoid, Dutch roll, roll subsidence and spiral, identified by
-eigenvector participation rather than by frequency. Those results are checked
-against published NASA documents, and the disagreements are published too.
+Today it takes a nonlinear aircraft model, **trims** it, **linearises** about
+that trim, and produces a **labelled** modal table — short period, phugoid,
+Dutch roll, roll subsidence and spiral, identified by eigenvector participation
+rather than by frequency. From non-dimensional derivatives and geometry alone,
+it reproduces NASA CR-2144's published dimensional derivatives to 0.26% and its
+published modes to 1.0%.
 
-Trim, linearisation, control synthesis and the nonlinear simulation loop are
-the point of the project and are **not built yet**. The status table below is
-the authority on what exists; the roadmap is the authority on what is intended.
+Control synthesis, frequency response, margins and the nonlinear simulation
+loop are the point of the project and are **not built yet**. The status table
+below is the authority on what exists; the roadmap is the authority on what is
+intended.
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
@@ -40,7 +42,9 @@ first and the physics has been landing against them. What exists today:
 | YAML pipeline runner and the `galata` CLI | working |
 | One runnable example, checked by CI | working (two of them) |
 | Determinism: bit-identical repeat runs, cross-platform bound measured | working |
-| `trim.level`, `linearize.finitediff`, and a nonlinear aircraft model | **not built** — see [the roadmap](docs/ROADMAP.md) |
+| Nonlinear aircraft model from a derivative buildup | implemented and **validated** |
+| `trim.level` — Newton on a square residual, fixed iteration count | implemented and **validated** |
+| `linearize.finitediff` — central differences with Richardson error estimates | implemented and **validated** |
 | Everything else in §"What it will do" below | **not built** |
 
 The table above is maintained by hand and checked in review. The capability
@@ -54,8 +58,11 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | Capability | What it does | Produces | State |
 |---|---|---|---|
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
+| `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
+| `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
+| `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->
 
 *implemented and validated* means the output has been compared against a
@@ -101,16 +108,16 @@ cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 
-# Then run the shipped study: it turns a linear aircraft model into a
-# labelled modal table, and every number in it is checked against a
+# Then run the shipped study: it trims a nonlinear NT-33A, linearises it,
+# and reports all five classical modes — every number checked against a
 # published NASA report.
-./build/dev/src/cli/galata run examples/nt33a-lateral-modes/modal-study.yaml
+./build/dev/src/cli/galata run examples/nt33a-trim-and-linearise/study.yaml
 ```
 
-That writes `lateral-modes.md` next to the study. It reports the NT-33A's
-spiral, roll subsidence and Dutch roll — labelled, not just listed — with the
+That writes `trim-and-modes.md` next to the study: the trim with its residual
+and Jacobian conditioning, the state matrices, and the modal tables with the
 participation factors the labelling rests on. See
-[`examples/nt33a-lateral-modes/`](examples/nt33a-lateral-modes/README.md).
+[`examples/nt33a-trim-and-linearise/`](examples/nt33a-trim-and-linearise/README.md).
 
 `galata capabilities` lists what your build can do and how far each capability
 has been checked.

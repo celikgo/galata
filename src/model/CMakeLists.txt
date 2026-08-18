@@ -8,15 +8,17 @@ find_package(yaml-cpp CONFIG REQUIRED)
 
 add_library(galata_model
   linear_system.cpp
+  aircraft.cpp
 )
 add_library(galata::model ALIAS galata_model)
 
 target_link_libraries(galata_model
   PUBLIC
     galata::public_headers
+    galata::core
+    galata::sim
     Eigen3::Eigen
   PRIVATE
-    galata::core
     galata::warnings
     yaml-cpp::yaml-cpp
 )

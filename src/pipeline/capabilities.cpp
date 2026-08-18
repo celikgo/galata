@@ -8,8 +8,12 @@
 // (charter rule 2).
 
 #include "galata/analyze/modes.hpp"
+#include "galata/linearize/finite_difference.hpp"
+#include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/trim/level.hpp"
+#include "galata/units.hpp"
 #include "galata/version.hpp"
 
 #include <cmath>
@@ -97,6 +101,110 @@ Artifact analyze_modes_capability(const StageContext& context) {
   return artifact;
 }
 
+// --- model.aircraft.derivatives --------------------------------------------
+
+Artifact load_aircraft_model(const StageContext& context) {
+  const std::string path = context.resolve_input_path(context.input->string_at("path"));
+  const model::Aircraft aircraft = model::load_aircraft(path);
+
+  std::ostringstream summary;
+  summary << "derivative-buildup model";
+  if (!aircraft.description.empty()) {
+    summary << " — " << aircraft.description;
+  }
+
+  Artifact artifact;
+  artifact.kind = "aircraft";
+  artifact.summary = summary.str();
+  artifact.payload = aircraft;
+  return artifact;
+}
+
+// --- trim.level ------------------------------------------------------------
+
+struct TrimArtifact {
+  trim::TrimPoint point;
+  model::Aircraft aircraft;
+};
+
+Artifact trim_level_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("aircraft");
+  const auto& aircraft = upstream.payload_as<model::Aircraft>("aircraft");
+
+  trim::LevelTrimRequest request;
+  // Units are named in every key, per ADR-0003: a pipeline never carries a
+  // bare "altitude" whose unit the reader has to guess.
+  request.altitude_m = context.input->number_at("altitude_m");
+  const ValuePtr airspeed = context.input->get("airspeed_m_s");
+  const ValuePtr mach = context.input->get("mach");
+  if (airspeed) {
+    request.airspeed_m_s = airspeed->as_number();
+  }
+  if (mach) {
+    request.mach = mach->as_number();
+  }
+  request.flight_path_angle_rad =
+      units::degrees_to_radians(context.input->number_at("flight_path_angle_deg", 0.0));
+  request.delta_isa_k = context.input->number_at("delta_isa_k", 0.0);
+  request.residual_tolerance = context.input->number_at("tolerance", 1e-10);
+
+  TrimArtifact trimmed{trim::trim_level(aircraft, request), aircraft};
+
+  std::ostringstream summary;
+  summary << std::fixed << std::setprecision(3) << "alpha "
+          << units::radians_to_degrees(trimmed.point.alpha_rad) << " deg, elevator "
+          << units::radians_to_degrees(trimmed.point.controls.elevator_rad) << " deg, thrust "
+          << std::setprecision(0) << trimmed.point.controls.thrust_n << " N; residual "
+          << std::scientific << std::setprecision(1) << trimmed.point.residual_norm;
+
+  Artifact artifact;
+  artifact.kind = "trim_point";
+  artifact.summary = summary.str();
+  artifact.payload = trimmed;
+  return artifact;
+}
+
+// --- linearize.finitediff --------------------------------------------------
+
+Artifact linearize_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("trim_point");
+  const auto& trimmed = upstream.payload_as<TrimArtifact>("trim_point");
+
+  linearize::LinearisationOptions options;
+  const std::string axes = context.input->string_at("axes", "all");
+  if (axes == "longitudinal") {
+    options.state_subset = linearize::longitudinal_states();
+  } else if (axes == "lateral") {
+    options.state_subset = linearize::lateral_states();
+  } else if (axes != "all") {
+    throw std::runtime_error("'axes' is '" + axes
+                             + "'; it must be 'longitudinal', 'lateral' or 'all'");
+  }
+  options.report_truncation_error = context.input->bool_at("report_truncation_error", true);
+
+  const linearize::Linearisation linearisation =
+      linearize::linearize_finite_difference(trimmed.aircraft, trimmed.point, options);
+
+  std::ostringstream description;
+  description << trimmed.aircraft.description << " — linearised about "
+              << units::metres_to_feet(linearisation.trim_altitude_m) << " ft, "
+              << units::radians_to_degrees(linearisation.trim_alpha_rad) << " deg alpha";
+
+  std::ostringstream summary;
+  summary << linearisation.a.rows() << " states, " << linearisation.b.cols() << " inputs (" << axes
+          << "); worst truncation " << std::scientific << std::setprecision(1)
+          << linearisation.worst_relative_truncation;
+  if (linearisation.neglected_coupling > 1e-6) {
+    summary << ", neglected coupling " << linearisation.neglected_coupling;
+  }
+
+  Artifact artifact;
+  artifact.kind = "linear_system";
+  artifact.summary = summary.str();
+  artifact.payload = linearisation.to_linear_system(description.str(), trimmed.aircraft.citation);
+  return artifact;
+}
+
 // --- report.markdown -------------------------------------------------------
 
 void write_modal_section(std::ostream& out, const ModalTable& table) {
@@ -162,6 +270,59 @@ void write_modal_section(std::ostream& out, const ModalTable& table) {
   }
 }
 
+void write_trim_section(std::ostream& out, const TrimArtifact& trimmed) {
+  const trim::TrimPoint& point = trimmed.point;
+  out << "| Quantity | Value |\n|---|---|\n";
+  out << "| Altitude | " << format(units::metres_to_feet(-point.state.position_ned_m.z()), 0)
+      << " ft |\n";
+  out << "| Airspeed | " << format(point.airspeed_m_s, 3) << " m/s |\n";
+  out << "| Mach | " << format(point.mach, 4) << " |\n";
+  out << "| Dynamic pressure | " << format(point.dynamic_pressure_pa, 1) << " Pa |\n";
+  out << "| Angle of attack | " << format(units::radians_to_degrees(point.alpha_rad), 4)
+      << " deg |\n";
+  out << "| Flight-path angle | "
+      << format(units::radians_to_degrees(point.flight_path_angle_rad), 4) << " deg |\n";
+  out << "| Elevator | " << format(units::radians_to_degrees(point.controls.elevator_rad), 4)
+      << " deg |\n";
+  out << "| Thrust | " << format(point.controls.thrust_n, 1) << " N |\n";
+  out << "| Trim lift coefficient | " << format(point.lift_coefficient, 5) << " |\n";
+  out << "\n**Evidence.** Residual norm " << format(point.residual_norm, 12)
+      << " (m/s^2 and rad/s^2); Jacobian condition number "
+      << format(point.jacobian_condition_number, 1) << ".\n\n";
+  out << "A trim is only as good as its residual, so the residual is reported rather\n"
+         "than asserted. The solver refuses to return an answer at all when it is above\n"
+         "tolerance: a linearisation about a point that is not an equilibrium produces a\n"
+         "state-space model that is plausible and wrong.\n\n";
+  if (point.envelope.outside_advisory_envelope) {
+    out << "> **Outside the model's advisory envelope.** The angle of attack is "
+        << format(units::radians_to_degrees(point.envelope.alpha_departure_rad), 2)
+        << " deg from the reference condition this derivative set was built about. A\n"
+           "> first-order model returns a confident answer at any angle of attack it is\n"
+           "> asked for, including ones where it has no stall and no business being used.\n\n";
+  }
+}
+
+void write_linear_system_section(std::ostream& out, const model::LinearSystem& system) {
+  if (!system.description.empty()) {
+    out << "**Model.** " << system.description << "\n\n";
+  }
+  if (!system.units.empty()) {
+    out << "**Units.** " << system.units << "\n\n";
+  }
+  out << "State matrix A, rows and columns in the order ";
+  for (std::size_t i = 0; i < system.state_names.size(); ++i) {
+    out << (i == 0 ? "" : ", ") << "`" << system.state_names[i] << "`";
+  }
+  out << ":\n\n```\n";
+  for (Eigen::Index i = 0; i < system.a.rows(); ++i) {
+    for (Eigen::Index j = 0; j < system.a.cols(); ++j) {
+      out << "  " << format(system.a(i, j), 6);
+    }
+    out << "\n";
+  }
+  out << "```\n\n";
+}
+
 Artifact write_markdown_report(const StageContext& context) {
   const std::string relative = context.input->string_at("path");
   const std::string path = context.resolve_output_path(relative);
@@ -190,6 +351,10 @@ Artifact write_markdown_report(const StageContext& context) {
     out << "## " << stage_id << "\n\n";
     if (artifact.kind == "modal_table") {
       write_modal_section(out, std::any_cast<const ModalTable&>(artifact.payload));
+    } else if (artifact.kind == "trim_point") {
+      write_trim_section(out, std::any_cast<const TrimArtifact&>(artifact.payload));
+    } else if (artifact.kind == "linear_system") {
+      write_linear_system_section(out, std::any_cast<const model::LinearSystem&>(artifact.payload));
     } else {
       // Reporting an artefact kind this writer does not understand is a gap in
       // the writer, and it says so rather than silently omitting the section.
@@ -236,6 +401,28 @@ Registry build_registry() {
       "modal_table",
       Capability::State::Implemented,
       analyze_modes_capability});
+
+  registry.add(
+      Capability{"model.aircraft.derivatives",
+                 "Load a nonlinear aircraft model built from a non-dimensional derivative set",
+                 "aircraft",
+                 Capability::State::Implemented,
+                 load_aircraft_model});
+
+  registry.add(Capability{
+      "trim.level",
+      "Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator "
+      "and thrust, by Newton on a square residual",
+      "trim_point",
+      Capability::State::Implemented,
+      trim_level_capability});
+
+  registry.add(Capability{"linearize.finitediff",
+                          "Linearise about a trim point by central differences, with a Richardson "
+                          "truncation-error estimate per entry",
+                          "linear_system",
+                          Capability::State::Implemented,
+                          linearize_capability});
 
   registry.add(Capability{"report.markdown",
                           "Write a Markdown report from upstream results",

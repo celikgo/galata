@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The v0.1 workflow, end to end: take a nonlinear aircraft model, find its
+# trim, linearise about it, and read off the modes.
+#
+#   galata run examples/nt33a-trim-and-linearise/study.yaml
+#
+# Nothing in this file is a matrix. The input is a set of non-dimensional
+# aerodynamic derivatives and some geometry; everything downstream is computed.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.aircraft.derivatives
+    input:
+      path: ../../models/nt33a/nt33a-fc1.yaml
+
+  # Sea level at 228 ft/s = 69.4944 m/s, which is NASA CR-2144's flight
+  # condition 1. Units are named in the key, never assumed (ADR-0003).
+  - id: trim
+    capability: trim.level
+    input:
+      aircraft: { from: aircraft }
+      altitude_m: 0.0
+      airspeed_m_s: 69.4944
+      flight_path_angle_deg: 0.0
+      tolerance: 1.0e-10
+
+  - id: longitudinal
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: longitudinal
+      report_truncation_error: true
+
+  - id: lateral
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: lateral
+      report_truncation_error: true
+
+  - id: longitudinal_modes
+    capability: analyze.modes
+    input:
+      system: { from: longitudinal }
+      classify: true
+
+  - id: lateral_modes
+    capability: analyze.modes
+    input:
+      system: { from: lateral }
+      classify: true
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A — trim, linearisation and modes at flight condition 1
+      sections:
+        - { from: trim }
+        - { from: longitudinal }
+        - { from: longitudinal_modes }
+        - { from: lateral }
+        - { from: lateral_modes }
+      path: trim-and-modes.md

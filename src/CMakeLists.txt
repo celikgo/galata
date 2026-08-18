@@ -4,6 +4,8 @@ add_subdirectory(numerics)
 add_subdirectory(sim)
 add_subdirectory(analyze)
 add_subdirectory(model)
+add_subdirectory(trim)
+add_subdirectory(linearize)
 add_subdirectory(pipeline)
 
 if(GALATA_BUILD_CLI)

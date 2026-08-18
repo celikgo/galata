@@ -56,6 +56,10 @@ Eigen::Matrix3d dcm_stability_from_body(double alpha_rad) noexcept {
   return rotation_y(-alpha_rad);
 }
 
+Eigen::Matrix3d dcm_body_from_stability(double alpha_rad) noexcept {
+  return dcm_stability_from_body(alpha_rad).transpose();
+}
+
 Eigen::Matrix3d dcm_wind_from_body(double alpha_rad, double beta_rad) noexcept {
   return rotation_z(beta_rad) * dcm_stability_from_body(alpha_rad);
 }

@@ -8,6 +8,8 @@ add_executable(galata_unit_tests
   test_state.cpp
   test_integrator.cpp
   test_modes.cpp
+  test_jacobian.cpp
+  test_newton.cpp
 )
 
 target_link_libraries(galata_unit_tests

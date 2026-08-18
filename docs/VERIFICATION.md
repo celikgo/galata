@@ -27,7 +27,10 @@ and it is preferred to a number invented to fill the gap.
 | Riccati solvers | — | **not implemented** |
 | Aircraft lateral modes (spiral, roll subsidence, Dutch roll) | Heffley & Jewell, NASA CR-2144 (1972), Table II-8 | **validated** |
 | Aircraft longitudinal modes — phugoid frequency, short-period frequency and damping | same, Table II-4 | **validated** |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO | same, Table II-4 | **open discrepancy**, see below |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | same, Table II-4 | **known discrepancy**, localised — see below |
+| Trim of a nonlinear model against the published flight condition | same, Table II-2 | **validated** |
+| Linearised dimensional derivatives from a nonlinear model | same, Table II-7 | **validated** to 0.26% |
+| All five modes from trim + linearise of a nonlinear model | same, Tables II-4 and II-8 | **validated** to 1.0% |
 | Modal classification into the five classical modes | same; labels checked against the report's own identification | **validated** |
 | Determinism, tier 1 (same platform, byte-identical) | ADR-0004 | **validated** on Linux, macOS and Windows |
 | Determinism, tier 2 (cross-platform, bounded) | ADR-0004 | **validated** against a 1e-9 relative gate |
@@ -158,6 +161,79 @@ factor between 0.06 and 1.0 over 60 s. A test asserts this, so a change that
 makes the battery chaotic fails there rather than as an intermittently red
 workflow.
 
+## Trim and linearisation
+
+**Reference.** Heffley and Jewell, NASA CR-2144, Tables II-1, II-2 and II-7.
+
+This is the end-to-end case, and it is a much stronger statement than the modal
+comparison above. There, the state matrix came from the report's own
+dimensional derivatives, so only the eigen-analysis was under test. Here the
+input is the NON-dimensional derivative set and the geometry; galata builds a
+nonlinear model, finds its trim, linearises about it, and both the dimensional
+derivatives and the modes fall out. Everything in between is under test: the
+atmosphere, every unit conversion, the coefficient buildup, the wind-to-body
+rotation, the equations of motion, the root-find and the finite differences.
+
+**Trim.** Converges to a residual of exactly zero, with quadratic convergence
+visible in the reported history. The trim is checked two ways: against the
+closed-form force balance `L = mg - D tan(a)` and `T = D/cos(a)`, which it
+satisfies to a part in 10^6; and against the published flight condition, where
+the dynamic pressure comes out 61.78 psf against a published 61.7 and the Mach
+0.2042 against 0.204.
+
+The trimmed angle of attack is 2.1481 degrees against a published 2.20, and the
+difference is understood rather than tolerated. The published pair
+(alpha = 2.20 deg, C_L = 0.813) is related by the conventional level-flight
+relation C_L = W/(qS), which neglects the vertical component of drag in body
+axes. galata solves the exact balance, which needs C_L = 0.8084. The shift is
+exactly `D tan(a)/(qS)/C_L_alpha`, and a test asserts it is that term and
+nothing else.
+
+**Linearised dimensional derivatives** against Table II-7 — seven numbers the
+report computed from the same non-dimensional set by a different route:
+
+| Derivative | galata | published | difference |
+|---|---|---|---|
+| Y_v | -0.12490 | -0.125 | 0.08% |
+| L_beta' | -5.49695 | -5.49 | 0.13% |
+| N_beta' | +0.66780 | +0.667 | 0.12% |
+| L_p' | -2.03530 | -2.03 | 0.26% |
+| N_p' | -0.11592 | -0.116 | 0.07% |
+| L_r' | +0.64184 | +0.641 | 0.13% |
+| N_r' | -0.20703 | -0.207 | 0.02% |
+
+The source prints its inputs and its outputs to three significant figures, so
+each carries up to about 0.5% of its own rounding and several combine in every
+one of these. The gate is 0.5%; the worst observed is 0.26%.
+
+**All five modes**, from the same linearisation:
+
+| Mode | galata | published | difference |
+|---|---|---|---|
+| Phugoid | zeta 0.0949, omega_n 0.1714 | 0.0948, 0.172 | 0.1%, 0.3% |
+| Short period | zeta 0.6219, omega_n 1.5950 | 0.622, 1.59 | 0.02%, 0.3% |
+| Spiral | 1/T 0.0319 | 0.0318 | 0.3% |
+| Roll subsidence | 1/T 2.1992 | 2.20 | 0.04% |
+| Dutch roll | zeta 0.0603, omega_n 1.1293 | 0.0609, 1.13 | 1.0%, 0.06% |
+
+**An error this comparison caught.** The first version of the model treated the
+report's lateral derivatives as body-axis when the report gives them in
+stability axes. At a trim angle of attack of 2.2 degrees that looks like a
+0.07% effect, since cos(2.2 deg) = 0.9993. It is not: the rotation MIXES the
+rolling and yawing moments, and C_l_beta is 2.6 times C_n_beta, so the cross
+term dominates and C_n_beta moves by 10%. The Dutch roll damping came out 35%
+high. It was the derivative-by-derivative comparison against Table II-7 that
+localised it — the modes alone said only that something was wrong.
+
+A second error was found the same way: the force assembly rotated the
+lift/drag/side triple through the full wind-axis rotation, which adds a
+`-D sin(beta)` term to the body y force that a body-axis C_Y_beta already
+contains. Double-counting it inflated the side-force derivative from -0.125 to
+-0.148.
+
+Both are the reason `models/nt33a/nt33a-fc1.yaml` must DECLARE which axes its
+lateral derivatives are in, rather than defaulting.
+
 ## Rigid-body dynamics
 
 **Reference.** These cases carry no transcribed numbers: the reference is an
@@ -254,7 +330,34 @@ five modes are also labelled correctly by participation factor alone, with
 scores between 0.72 and 0.99. The Dutch-roll period, published separately in
 Table II-10, agrees to within 1%.
 
-### Open discrepancy: the phugoid damping ratio
+### The phugoid damping ratio: localised, and no longer open
+
+**Status changed.** This was recorded as an unexplained discrepancy. It is now
+localised to the hand-assembled state matrix, and it does not appear in the
+full chain.
+
+Two independent routes to the same published number:
+
+| Route | Phugoid zeta | vs published 0.0948 |
+|---|---|---|
+| State matrix assembled by hand from the report's Table II-3 dimensional derivatives | 0.0929 | 2.0% low |
+| Nonlinear model, trimmed, then linearised by central differences | 0.0949 | 0.1% high |
+
+The second route takes the report's NON-dimensional derivatives, builds a
+nonlinear aircraft, finds its trim, and perturbs it. It shares no arithmetic
+with the first beyond the source data, and it reproduces the published value.
+
+So the discrepancy is in the hand assembly, not in the eigen-analysis and not
+in the published value. What has NOT been established is which term the hand
+assembly omits. The strongest remaining candidate is unchanged: the report
+leaves `X_udot`, `X_wdot`, `X_q`, `Z_udot` and `M_udot` blank for this aircraft
+and the hand assembly reads those blanks as zeros, while the nonlinear model
+never needs them because it differentiates the forces directly.
+
+The regression lock on the hand-assembled route stays, and is now anchored to
+the trim-and-linearise result rather than to a bare measurement.
+
+### Detail of the hand-assembled discrepancy
 
 The phugoid damping ratio does **not** reproduce within the source's precision.
 It disagrees by about 2% relative, which is roughly three times the band the

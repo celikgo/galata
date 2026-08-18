@@ -101,6 +101,40 @@ TEST(ExampleNt33aLateralModes, ModalValuesMatchThePublishedOnes) {
   EXPECT_NE(text.find("0.0607"), std::string::npos) << "Dutch roll zeta not as published";
 }
 
+TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedModes) {
+  // The example's README quotes these. If the model, the trim or the
+  // linearisation changes, this fails and the README gets corrected — which is
+  // the only mechanism that keeps a README true.
+  const auto result = run_example("nt33a-trim-and-linearise", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 7U);
+  EXPECT_EQ(result.stages[0].capability, "model.aircraft.derivatives");
+  EXPECT_EQ(result.stages[1].capability, "trim.level");
+  EXPECT_EQ(result.stages[2].capability, "linearize.finitediff");
+
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+
+  // All five classical modes, found and labelled.
+  for (const char* mode : {"phugoid", "short period", "spiral", "roll subsidence", "Dutch roll"}) {
+    EXPECT_NE(text.find(mode), std::string::npos) << "missing mode: " << mode;
+  }
+
+  // The trim reports its own evidence rather than asserting itself.
+  EXPECT_NE(text.find("Residual norm"), std::string::npos);
+  EXPECT_NE(text.find("Jacobian condition number"), std::string::npos);
+  EXPECT_NE(text.find("2.1481"), std::string::npos) << "trim alpha changed";
+
+  // The numbers the README quotes.
+  EXPECT_NE(text.find("0.0949"), std::string::npos) << "phugoid zeta changed";
+  EXPECT_NE(text.find("0.6219"), std::string::npos) << "short period zeta changed";
+  EXPECT_NE(text.find("0.0603"), std::string::npos) << "Dutch roll zeta changed";
+  EXPECT_NE(text.find("-2.1992"), std::string::npos) << "roll subsidence root changed";
+
+  // The state matrix is printed, so a reader can check it by hand.
+  EXPECT_NE(text.find("State matrix A"), std::string::npos);
+}
+
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {
   // A study nobody can read is a study nobody will run.
   for (const auto& entry :
