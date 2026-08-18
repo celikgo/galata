@@ -90,7 +90,9 @@ evidence instead of speculation.
   its own `scripts/check-frozen-headers.sh`, landing in the same commit as the
   first ABI header rather than before it. These are structurally the same tools
   as souxmar's and are written independently.
-  *Neither exists as of this record; `include/galata-c/` is empty.*
+  *Neither exists as of this record, and neither does `include/galata-c/`: an
+  empty directory that promises a surface is the same claim as a document
+  that promises one, so it is not created until it holds a header.*
 - Nothing in galata may `#include <souxmar-c/...>`. There is no build-system
   path by which it could, and no CI gate is needed to prevent it, because
   souxmar is not a declared dependency in `vcpkg.json`.
