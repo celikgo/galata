@@ -350,6 +350,8 @@ const std::vector<Case>& validation_cases() {
         E{kUnit, "Margins.RepeatedPoleChainMatchesItsClosedFormMargins"},
         E{kUnit, "Margins.PureDelayLoopIsMeasuredThroughTheEvaluator"},
         E{kUnit, "Margins.GainMarginBelowUnityMeansTheGainMustComeDown"},
+        E{kUnit, "Margins.EveryGainCrossoverIsReportedAndTheWorstOneGoverns"},
+        E{kUnit, "Margins.ACrossingExactlyOnAGridPointIsCountedOnce"},
         E{kValidation,
           "DiskMarginSeiler2020.ClassicalMarginsMatchThePublishedValuesAndTheClosedForm"}},
        "1/(s(s+1)(s+2)) has gain margin exactly 6 at exactly sqrt(2) rad/s, and 1/(s(s+1)^2) "

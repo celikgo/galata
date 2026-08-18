@@ -58,7 +58,8 @@
 namespace galata::analyze {
 
 // Log-spaced frequencies, inclusive of both endpoints.
-[[nodiscard]] std::vector<double> logarithmic_grid(double start_rad_s, double stop_rad_s,
+[[nodiscard]] std::vector<double> logarithmic_grid(double start_rad_s,
+                                                   double stop_rad_s,
                                                    int count);
 
 // A log-spaced grid with extra points clustered around every lightly damped
@@ -73,7 +74,8 @@ namespace galata::analyze {
 // Modes with damping above `damping_threshold` get no cluster: they have no
 // peak worth resolving.
 [[nodiscard]] std::vector<double> grid_refined_for_modes(const Eigen::MatrixXd& a,
-                                                         double start_rad_s, double stop_rad_s,
+                                                         double start_rad_s,
+                                                         double stop_rad_s,
                                                          int count,
                                                          double damping_threshold = 0.7);
 
@@ -97,9 +99,16 @@ struct FrequencyResponse {
   // SISO views. Throw unless the response is 1x1.
   [[nodiscard]] std::vector<double> magnitude() const;
   [[nodiscard]] std::vector<double> magnitude_db() const;
-  // Unwrapped, in degrees, continuous across the sweep. Wrapped phase makes a
-  // margin search find crossings that are not there.
-  [[nodiscard]] std::vector<double> phase_deg() const;
+  // Unwrapped, in RADIANS, continuous across the sweep.
+  //
+  // Radians because this is the numerical core and ADR-0003 admits no other
+  // angle unit here. Degrees are a presentation choice and are applied at the
+  // boundary — in the pipeline's report writers — not in a value a solver may
+  // go on to consume.
+  //
+  // Unwrapped because a wrapped phase makes a margin search find crossings
+  // that are not there.
+  [[nodiscard]] std::vector<double> phase_rad() const;
 };
 
 // G(jw) over the given frequencies.
@@ -110,7 +119,8 @@ struct FrequencyResponse {
 // calculation needs. Names are carried through so a report can say which loop
 // it measured.
 [[nodiscard]] FrequencyResponse single_loop_response(const model::LinearSystem& system,
-                                                     int input_index, int output_index,
+                                                     int input_index,
+                                                     int output_index,
                                                      const std::vector<double>& frequencies_rad_s);
 
 }  // namespace galata::analyze

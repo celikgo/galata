@@ -454,7 +454,8 @@ Artifact margins_capability(const StageContext& context) {
   }
   summary << ", ";
   if (result.margins.has_phase_margin) {
-    summary << "PM " << format(result.margins.phase_margin_deg, 2) << " deg";
+    summary << "PM " << format(units::radians_to_degrees(result.margins.phase_margin_rad), 2)
+            << " deg";
   } else {
     summary << "PM infinite";
   }
@@ -526,13 +527,14 @@ void write_frequency_response_section(std::ostream& out,
   // and no reader would look at it; a decade sample is a plot until there is a
   // plot.
   const std::vector<double> magnitude_db = response.magnitude_db();
-  const std::vector<double> phase = response.phase_deg();
+  const std::vector<double> phase_rad = response.phase_rad();
   out << "| w (rad/s) | \\|G\\| (dB) | phase (deg) |\n";
   out << "| ---: | ---: | ---: |\n";
   const std::size_t stride = std::max<std::size_t>(1, response.frequencies_rad_s.size() / 20);
   for (std::size_t index = 0; index < response.frequencies_rad_s.size(); index += stride) {
     out << "| " << format(response.frequencies_rad_s[index], 5) << " | "
-        << format(magnitude_db[index], 3) << " | " << format(phase[index], 3) << " |\n";
+        << format(magnitude_db[index], 3) << " | "
+        << format(units::radians_to_degrees(phase_rad[index]), 3) << " |\n";
   }
   out << "\n*Sampled every " << stride << " points of the grid.*\n\n";
 }
@@ -553,8 +555,9 @@ void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
       << " | " << frequency_or_dash(margins.has_gain_margin, margins.gain_margin_frequency_rad_s)
       << " |\n";
   out << "| Phase | "
-      << (margins.has_phase_margin ? format(margins.phase_margin_deg, 3) + " deg"
-                                   : std::string("infinite"))
+      << (margins.has_phase_margin
+              ? format(units::radians_to_degrees(margins.phase_margin_rad), 3) + " deg"
+              : std::string("infinite"))
       << " | " << frequency_or_dash(margins.has_phase_margin, margins.phase_margin_frequency_rad_s)
       << " |\n";
   out << "| Delay | "
@@ -570,7 +573,7 @@ void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
     out << "| kind | w (rad/s) | margin |\n| --- | ---: | ---: |\n";
     for (const auto& crossing : margins.gain_crossings) {
       out << "| \\|L\\| = 1 | " << format(crossing.frequency_rad_s, 5) << " | "
-          << format(crossing.phase_margin_deg, 3) << " deg |\n";
+          << format(units::radians_to_degrees(crossing.phase_margin_rad), 3) << " deg |\n";
     }
     for (const auto& crossing : margins.phase_crossings) {
       out << "| phase = -180 | " << format(crossing.frequency_rad_s, 5) << " | "
@@ -579,7 +582,7 @@ void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
     out << "\n";
   }
 
-  if (!margins.has_delay_margin && margins.has_phase_margin && margins.phase_margin_deg < 0.0) {
+  if (!margins.has_delay_margin && margins.has_phase_margin && margins.phase_margin_rad < 0.0) {
     out << "*The phase margin is negative: this loop closes unstable, and no delay is what is "
            "wrong with it.*\n\n";
   }
@@ -609,7 +612,7 @@ void write_disk_margin_section(std::ostream& out, const DiskMarginArtifact& arti
       << " |\n";
   out << "| Guaranteed phase range | "
       << (margin.phase_variation_is_bounded
-              ? "+/- " + format(margin.phase_variation_deg, 3) + " deg"
+              ? "+/- " + format(units::radians_to_degrees(margin.phase_variation_rad), 3) + " deg"
               : std::string("any phase"))
       << " |\n\n";
 

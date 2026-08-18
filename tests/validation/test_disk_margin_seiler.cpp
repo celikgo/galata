@@ -34,8 +34,9 @@
 //     cannot be passed by a formula transcribed wrongly but consistently.
 
 #include "galata/analyze/disk_margin.hpp"
-#include "galata/analyze/margins.hpp"
 #include "galata/analyze/frequency_response.hpp"
+#include "galata/analyze/margins.hpp"
+#include "galata/units.hpp"
 
 #include "reference_table.hpp"
 #include "validation_config.hpp"
@@ -47,6 +48,13 @@
 #include <string>
 
 namespace {
+
+// The core reports angles in radians (ADR-0003). Tests state their
+// expectations in degrees, as the literature does, and convert here — the
+// same boundary conversion the report writers make.
+double degrees(double radians) {
+  return galata::units::radians_to_degrees(radians);
+}
 
 using galata::analyze::disk_margin;
 using galata::analyze::LoopEvaluator;
@@ -76,8 +84,8 @@ struct Published {
 };
 
 std::map<std::string, Published> published_values() {
-  const ReferenceTable table = load_reference(GALATA_VALIDATION_REFERENCE_DIR,
-                                              "seiler2020_disk_margin.csv");
+  const ReferenceTable table =
+      load_reference(GALATA_VALIDATION_REFERENCE_DIR, "seiler2020_disk_margin.csv");
   std::map<std::string, Published> values;
   for (std::size_t row = 0; row < table.rows.size(); ++row) {
     Published entry{};
@@ -98,10 +106,10 @@ MarginOptions wide_sweep() {
   return options;
 }
 
-#define EXPECT_MATCHES_PUBLISHED(computed, entry, name)                                     \
-  EXPECT_NEAR((computed), (entry).value, (entry).tolerance())                               \
-      << name << ": published " << (entry).value << " at " << (entry).location              \
-      << ", allowance " << (entry).tolerance() << " (" << (entry).units_in_last_place        \
+#define EXPECT_MATCHES_PUBLISHED(computed, entry, name)                                          \
+  EXPECT_NEAR((computed), (entry).value, (entry).tolerance())                                    \
+      << name << ": published " << (entry).value << " at " << (entry).location << ", allowance " \
+      << (entry).tolerance() << " (" << (entry).units_in_last_place                              \
       << " units in the last printed figure)"
 
 TEST(DiskMarginSeiler2020, ClassicalMarginsMatchThePublishedValuesAndTheClosedForm) {
@@ -111,10 +119,10 @@ TEST(DiskMarginSeiler2020, ClassicalMarginsMatchThePublishedValuesAndTheClosedFo
   ASSERT_TRUE(margins.has_gain_margin);
   ASSERT_TRUE(margins.has_phase_margin);
 
-  EXPECT_MATCHES_PUBLISHED(margins.gain_margin, published.at("classical_gain_margin"),
-                           "gain margin");
-  EXPECT_MATCHES_PUBLISHED(margins.phase_margin_deg, published.at("classical_phase_margin"),
-                           "phase margin");
+  EXPECT_MATCHES_PUBLISHED(
+      margins.gain_margin, published.at("classical_gain_margin"), "gain margin");
+  EXPECT_MATCHES_PUBLISHED(
+      degrees(margins.phase_margin_rad), published.at("classical_phase_margin"), "phase margin");
 
   // Independent of the paper: Im L(jw) = 0 requires 10 w - w^3 = 0, so the
   // phase crossover is exactly sqrt(10); there L(jw) = 25 / -90, so the gain
@@ -128,21 +136,21 @@ TEST(DiskMarginSeiler2020, SymmetricDiskMarginMatchesThePublishedValues) {
   const auto published = published_values();
   const auto margin = disk_margin(LoopEvaluator{published_loop}, 0.0, wide_sweep());
 
-  EXPECT_MATCHES_PUBLISHED(margin.peak_gain, published.at("peak_shifted_sensitivity"),
-                           "peak of |S - 1/2|");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.peak_gain, published.at("peak_shifted_sensitivity"), "peak of |S - 1/2|");
   EXPECT_MATCHES_PUBLISHED(margin.alpha, published.at("alpha_max"), "alpha_max");
   EXPECT_MATCHES_PUBLISHED(margin.gain_variation_min, published.at("gamma_min"), "gamma_min");
   EXPECT_MATCHES_PUBLISHED(margin.gain_variation_max, published.at("gamma_max"), "gamma_max");
-  EXPECT_MATCHES_PUBLISHED(margin.destabilising_delta.real(), published.at("delta_0_real"),
-                           "Re delta_0");
-  EXPECT_MATCHES_PUBLISHED(margin.destabilising_delta.imag(), published.at("delta_0_imag"),
-                           "Im delta_0");
-  EXPECT_MATCHES_PUBLISHED(margin.destabilising_perturbation.real(), published.at("f_0_real"),
-                           "Re f_0");
-  EXPECT_MATCHES_PUBLISHED(margin.destabilising_perturbation.imag(), published.at("f_0_imag"),
-                           "Im f_0");
-  EXPECT_MATCHES_PUBLISHED(margin.critical_frequency_rad_s, published.at("critical_frequency"),
-                           "critical frequency");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.destabilising_delta.real(), published.at("delta_0_real"), "Re delta_0");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.destabilising_delta.imag(), published.at("delta_0_imag"), "Im delta_0");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.destabilising_perturbation.real(), published.at("f_0_real"), "Re f_0");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.destabilising_perturbation.imag(), published.at("f_0_imag"), "Im f_0");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.critical_frequency_rad_s, published.at("critical_frequency"), "critical frequency");
 }
 
 TEST(DiskMarginSeiler2020, PublishedCriticalFrequencyDisagreesWithItsOwnPublishedPerturbation) {
@@ -222,9 +230,11 @@ TEST(DiskMarginSeiler2020, DiskMarginIsMoreConservativeThanTheClassicalPair) {
   EXPECT_LT(margin.gain_variation_max, classical.gain_margin)
       << "guaranteed gain increase " << margin.gain_variation_max
       << " should be below the classical gain margin " << classical.gain_margin;
-  EXPECT_LT(margin.phase_variation_deg, classical.phase_margin_deg)
-      << "guaranteed phase variation " << margin.phase_variation_deg
-      << " deg should be below the classical phase margin " << classical.phase_margin_deg
+  // Compared in radians on both sides: an inequality needs no conversion, and
+  // converting one side only is exactly the mistake ADR-0003 exists to stop.
+  EXPECT_LT(margin.phase_variation_rad, classical.phase_margin_rad)
+      << "guaranteed phase variation " << degrees(margin.phase_variation_rad)
+      << " deg should be below the classical phase margin " << degrees(classical.phase_margin_rad)
       << " deg";
 }
 
@@ -234,8 +244,8 @@ TEST(DiskMarginSeiler2020, NamedSkewsReduceToTheirPublishedSpecialCases) {
   // ||T||_inf^-1. Computing those peaks directly and comparing catches a sign
   // error in (sigma-1)/2 that the sigma = 0 case alone would not.
   const auto options = wide_sweep();
-  const auto grid = galata::analyze::logarithmic_grid(options.start_rad_s, options.stop_rad_s,
-                                                      options.grid_points);
+  const auto grid = galata::analyze::logarithmic_grid(
+      options.start_rad_s, options.stop_rad_s, options.grid_points);
 
   double peak_sensitivity = 0.0;
   double peak_complementary = 0.0;
@@ -325,20 +335,22 @@ TEST(DiskMarginSeiler2020, AgreesWithASecondImplementationIncludingThePhaseMargi
   const auto margin = disk_margin(LoopEvaluator{published_loop}, 0.0, wide_sweep());
 
   EXPECT_MATCHES_PUBLISHED(margin.alpha, published.at("mathworks_alpha"), "alpha_max");
-  EXPECT_MATCHES_PUBLISHED(margin.gain_variation_min, published.at("mathworks_gamma_min"),
-                           "gamma_min");
-  EXPECT_MATCHES_PUBLISHED(margin.gain_variation_max, published.at("mathworks_gamma_max"),
-                           "gamma_max");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.gain_variation_min, published.at("mathworks_gamma_min"), "gamma_min");
+  EXPECT_MATCHES_PUBLISHED(
+      margin.gain_variation_max, published.at("mathworks_gamma_max"), "gamma_max");
 
   ASSERT_TRUE(margin.phase_variation_is_bounded);
-  EXPECT_MATCHES_PUBLISHED(margin.phase_variation_deg, published.at("mathworks_phase_margin"),
-                           "phi_m");
+  EXPECT_MATCHES_PUBLISHED(
+      degrees(margin.phase_variation_rad), published.at("mathworks_phase_margin"), "phi_m");
 
   // The two sources must also agree with each other, or one of them is being
   // read wrongly and this test would be averaging the error.
-  EXPECT_NEAR(published.at("mathworks_alpha").value, published.at("alpha_max").value,
+  EXPECT_NEAR(published.at("mathworks_alpha").value,
+              published.at("alpha_max").value,
               published.at("alpha_max").tolerance());
-  EXPECT_NEAR(published.at("mathworks_gamma_min").value, published.at("gamma_min").value,
+  EXPECT_NEAR(published.at("mathworks_gamma_min").value,
+              published.at("gamma_min").value,
               published.at("gamma_min").tolerance());
 }
 

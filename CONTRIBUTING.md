@@ -23,7 +23,11 @@ scripts/check-si-boundary.sh
 scripts/check-doc-links.sh
 
 pip install 'clang-format==20.1.8'      # the exact version CI uses
-git ls-files '*.cpp' '*.hpp' '*.h' | xargs clang-format -i
+# Tracked AND new files: `git ls-files` alone lists only what is already
+# tracked, so a brand-new source is silently skipped and CI catches it instead.
+{ git ls-files '*.cpp' '*.hpp' '*.h'
+  git ls-files --others --exclude-standard '*.cpp' '*.hpp' '*.h'
+} | sort -u | xargs clang-format -i
 shellcheck --severity=warning scripts/*.sh
 ```
 

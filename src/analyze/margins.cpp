@@ -7,12 +7,11 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 
 namespace galata::analyze {
 namespace {
-
-constexpr double kDegreesPerRadian = 57.295779513082320876798154814105;
 
 // Bisect a sign-changing function on [low, high] for a FIXED number of steps.
 // The count is fixed rather than tolerance-driven so that the answer does not
@@ -35,14 +34,39 @@ double bisect(const Function& f, double low, double high, double value_at_low, i
   return 0.5 * (low + high);
 }
 
-// arg L + 180 degrees, reduced into (-180, 180].
-double phase_margin_at(std::complex<double> value) {
-  double margin = 180.0 + std::arg(value) * kDegreesPerRadian;
-  while (margin > 180.0) {
-    margin -= 360.0;
+// Where, if anywhere, a sign-changing function has a root in the grid interval
+// ending at `index`.
+//
+// The exact-zero case is what this exists for. A root that lands ON a grid
+// point is visible from BOTH adjacent intervals, and recording it from each
+// gives the same crossing twice. Worse, a function that is identically zero —
+// a constant, negative, real loop has Im L = 0 everywhere — would be recorded
+// at every single grid point, turning one crossing into two thousand.
+//
+// The rule: a zero belongs to the interval that ENDS at it, never the one that
+// starts there. A zero at the very first grid point has no interval ending at
+// it, so it is claimed by the first interval instead.
+enum class Bracket { None, AtLowEnd, AtHighEnd, Straddles };
+
+Bracket classify_bracket(double before, double after, std::size_t index) {
+  if (before == 0.0) {
+    return index == 1 ? Bracket::AtLowEnd : Bracket::None;
   }
-  while (margin <= -180.0) {
-    margin += 360.0;
+  if (after == 0.0) {
+    return Bracket::AtHighEnd;
+  }
+  return (before < 0.0) == (after < 0.0) ? Bracket::None : Bracket::Straddles;
+}
+
+// arg L + pi, reduced into (-pi, pi]. Radians: ADR-0003.
+double phase_margin_at(std::complex<double> value) {
+  constexpr double kPi = std::numbers::pi_v<double>;
+  double margin = kPi + std::arg(value);
+  while (margin > kPi) {
+    margin -= 2.0 * kPi;
+  }
+  while (margin <= -kPi) {
+    margin += 2.0 * kPi;
   }
   return margin;
 }
@@ -62,8 +86,9 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
     grid = logarithmic_grid(options.start_rad_s, options.stop_rad_s, options.grid_points);
   }
   if (grid.size() < 2) {
-    throw std::invalid_argument("stability_margins: need at least two frequencies to bracket a "
-                                "crossing");
+    throw std::invalid_argument(
+        "stability_margins: need at least two frequencies to bracket a "
+        "crossing");
   }
 
   std::vector<std::complex<double>> sampled;
@@ -84,21 +109,22 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   for (std::size_t index = 1; index < grid.size(); ++index) {
     const double before = std::abs(sampled[index - 1]) - 1.0;
     const double after = std::abs(sampled[index]) - 1.0;
-    if (before == 0.0) {
-      // The grid landed exactly on it; the bracket below would not see a sign
-      // change, so take the point itself.
-    } else if ((before < 0.0) == (after < 0.0)) {
+    const Bracket bracket = classify_bracket(before, after, index);
+    if (bracket == Bracket::None) {
       continue;
     }
-    const double frequency =
-        before == 0.0 ? grid[index - 1]
-                      : bisect(magnitude_excess, grid[index - 1], grid[index], before,
-                               options.bisection_iterations);
+    const double frequency = bracket == Bracket::AtLowEnd    ? grid[index - 1]
+                             : bracket == Bracket::AtHighEnd ? grid[index]
+                                                             : bisect(magnitude_excess,
+                                                                      grid[index - 1],
+                                                                      grid[index],
+                                                                      before,
+                                                                      options.bisection_iterations);
     const double phase_margin = phase_margin_at(loop(frequency));
     GainCrossing crossing{};
     crossing.frequency_rad_s = frequency;
-    crossing.phase_margin_deg = phase_margin;
-    crossing.delay_margin_s = phase_margin / kDegreesPerRadian / frequency;
+    crossing.phase_margin_rad = phase_margin;
+    crossing.delay_margin_s = phase_margin / frequency;
     margins.gain_crossings.push_back(crossing);
   }
 
@@ -113,7 +139,8 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   for (std::size_t index = 1; index < grid.size(); ++index) {
     const double before = sampled[index - 1].imag();
     const double after = sampled[index].imag();
-    if (before != 0.0 && (before < 0.0) == (after < 0.0)) {
+    const Bracket bracket = classify_bracket(before, after, index);
+    if (bracket == Bracket::None) {
       continue;
     }
     // Both ends on the negative-real side. A bracket that straddles the
@@ -122,10 +149,13 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
     if (sampled[index - 1].real() >= 0.0 || sampled[index].real() >= 0.0) {
       continue;
     }
-    const double frequency =
-        before == 0.0 ? grid[index - 1]
-                      : bisect(imaginary_part, grid[index - 1], grid[index], before,
-                               options.bisection_iterations);
+    const double frequency = bracket == Bracket::AtLowEnd    ? grid[index - 1]
+                             : bracket == Bracket::AtHighEnd ? grid[index]
+                                                             : bisect(imaginary_part,
+                                                                      grid[index - 1],
+                                                                      grid[index],
+                                                                      before,
+                                                                      options.bisection_iterations);
     const std::complex<double> value = loop(frequency);
     if (value.real() >= 0.0) {
       continue;
@@ -150,11 +180,12 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
     // Nearest 0 dB, not smallest ratio: a gain margin of 0.5 (the gain must be
     // halved) is exactly as tight as one of 2.0, and taking the smaller number
     // would call the first one worse.
-    const auto worst = std::min_element(
-        margins.phase_crossings.begin(), margins.phase_crossings.end(),
-        [](const PhaseCrossing& left, const PhaseCrossing& right) {
-          return std::abs(left.gain_margin_db) < std::abs(right.gain_margin_db);
-        });
+    const auto worst =
+        std::min_element(margins.phase_crossings.begin(),
+                         margins.phase_crossings.end(),
+                         [](const PhaseCrossing& left, const PhaseCrossing& right) {
+                           return std::abs(left.gain_margin_db) < std::abs(right.gain_margin_db);
+                         });
     margins.gain_margin = worst->gain_margin;
     margins.gain_margin_db = worst->gain_margin_db;
     margins.gain_margin_frequency_rad_s = worst->frequency_rad_s;
@@ -166,15 +197,16 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
 
   margins.has_phase_margin = !margins.gain_crossings.empty();
   if (margins.has_phase_margin) {
-    const auto worst = std::min_element(
-        margins.gain_crossings.begin(), margins.gain_crossings.end(),
-        [](const GainCrossing& left, const GainCrossing& right) {
-          return std::abs(left.phase_margin_deg) < std::abs(right.phase_margin_deg);
-        });
-    margins.phase_margin_deg = worst->phase_margin_deg;
+    const auto worst = std::min_element(margins.gain_crossings.begin(),
+                                        margins.gain_crossings.end(),
+                                        [](const GainCrossing& left, const GainCrossing& right) {
+                                          return std::abs(left.phase_margin_rad)
+                                                 < std::abs(right.phase_margin_rad);
+                                        });
+    margins.phase_margin_rad = worst->phase_margin_rad;
     margins.phase_margin_frequency_rad_s = worst->frequency_rad_s;
   } else {
-    margins.phase_margin_deg = infinity;
+    margins.phase_margin_rad = infinity;
     margins.phase_margin_frequency_rad_s = not_a_number;
   }
 
@@ -182,7 +214,7 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   margins.delay_margin_s = infinity;
   margins.delay_margin_frequency_rad_s = not_a_number;
   for (const GainCrossing& crossing : margins.gain_crossings) {
-    if (crossing.phase_margin_deg > 0.0 && crossing.delay_margin_s < margins.delay_margin_s) {
+    if (crossing.phase_margin_rad > 0.0 && crossing.delay_margin_s < margins.delay_margin_s) {
       margins.has_delay_margin = true;
       margins.delay_margin_s = crossing.delay_margin_s;
       margins.delay_margin_frequency_rad_s = crossing.frequency_rad_s;
@@ -196,21 +228,24 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   return margins;
 }
 
-StabilityMargins stability_margins(const model::LinearSystem& loop, int input_index,
-                                   int output_index, const MarginOptions& options) {
+StabilityMargins stability_margins(const model::LinearSystem& loop,
+                                   int input_index,
+                                   int output_index,
+                                   const MarginOptions& options) {
   loop.validate();
 
   MarginOptions resolved = options;
   if (resolved.frequencies.empty()) {
-    resolved.frequencies = grid_refined_for_modes(loop.a, resolved.start_rad_s,
-                                                  resolved.stop_rad_s, resolved.grid_points);
+    resolved.frequencies = grid_refined_for_modes(
+        loop.a, resolved.start_rad_s, resolved.stop_rad_s, resolved.grid_points);
   }
 
   // One evaluation per call keeps the evaluator general, at the cost of
   // repeating the Hessenberg reduction. The bisections are the only repeated
   // evaluations and there are a fixed few of them per crossing.
   const LoopEvaluator evaluator = [&loop, input_index, output_index](double frequency) {
-    return single_loop_response(loop, input_index, output_index, {frequency}).response.front()(0, 0);
+    return single_loop_response(loop, input_index, output_index, {frequency})
+        .response.front()(0, 0);
   };
   return stability_margins(evaluator, resolved);
 }

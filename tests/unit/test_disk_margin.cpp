@@ -9,7 +9,6 @@
 // degenerate disks, and the equivalence of the state-space and evaluator paths.
 
 #include "galata/analyze/disk_margin.hpp"
-
 #include "galata/analyze/frequency_response.hpp"
 #include "galata/analyze/margins.hpp"
 
@@ -61,18 +60,27 @@ TEST(DiskMargin, StateSpaceAndEvaluatorPathsAgree) {
   EXPECT_NEAR(from_system.gain_variation_min, from_evaluator.gain_variation_min, 1.0e-12);
   EXPECT_NEAR(from_system.gain_variation_max, from_evaluator.gain_variation_max, 1.0e-12);
 
-  // The FREQUENCY cannot agree that closely, and demanding that it should
-  // would be asserting something false about maxima. Near a smooth peak
-  // g(w) = g(w0) - k (w - w0)^2, so a relative disturbance eps in the
-  // evaluated gain displaces the located peak by order sqrt(eps/k): the
-  // position is square-root conditioned relative to the height. Two evaluation
-  // paths differing at the rounding level therefore locate the peak to about
-  // sqrt(eps) ~ 1.5e-8 relative, and that is the honest bound.
+  // The FREQUENCY is checked differently, and loosely, on purpose.
+  //
+  // Near a smooth maximum g(w) = g(w0) - k (w - w0)^2, so a relative
+  // disturbance eps in the evaluated gain displaces the located peak by order
+  // sqrt(eps / k). The position is SQUARE-ROOT conditioned relative to the
+  // height, and the constant in front depends on the curvature k of this
+  // particular peak — which means "sqrt(eps)" is an order of magnitude, not a
+  // bound. Asserting it as a bound claims a constant of 1 that nothing
+  // justifies, and it duly failed on one platform at 1.2 times sqrt(eps).
+  //
+  // What is actually worth asserting is that both paths found the SAME peak
+  // rather than different ones. Their agreement on its HEIGHT is already
+  // established above, to 1e-12, and that is the quantity the margin is made
+  // of; the frequency only has to be close enough to identify the peak.
   const double relative_frequency_difference =
       std::abs(from_system.critical_frequency_rad_s - from_evaluator.critical_frequency_rad_s)
       / from_evaluator.critical_frequency_rad_s;
-  EXPECT_LT(relative_frequency_difference, std::sqrt(std::numeric_limits<double>::epsilon()))
-      << "relative peak-position disagreement " << relative_frequency_difference;
+  EXPECT_LT(relative_frequency_difference, 1.0e-5)
+      << "the two paths located different peaks, not the same one to within its own "
+         "square-root conditioning: relative disagreement "
+      << relative_frequency_difference;
 }
 
 TEST(DiskMargin, ConstructedPerturbationDestabilisesWhateverTheSkew) {

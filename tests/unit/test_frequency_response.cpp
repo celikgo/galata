@@ -16,6 +16,7 @@
 //     the test that earns the right to ship a hand-rolled linear solver.
 
 #include "galata/analyze/frequency_response.hpp"
+#include "galata/units.hpp"
 
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
@@ -26,6 +27,13 @@
 #include <vector>
 
 namespace {
+
+// The core reports angles in radians (ADR-0003). Tests state their
+// expectations in degrees, as the literature does, and convert here — the
+// same boundary conversion the report writers make.
+double degrees(double radians) {
+  return galata::units::radians_to_degrees(radians);
+}
 
 using galata::analyze::frequency_response;
 using galata::analyze::grid_refined_for_modes;
@@ -86,8 +94,7 @@ TEST(LogarithmicGrid, EndpointsAreExactAndSpacingIsGeometric) {
 
   const double expected_ratio = std::pow(10.0, 4.0 / 40.0);
   for (std::size_t index = 1; index < grid.size(); ++index) {
-    EXPECT_NEAR(grid[index] / grid[index - 1], expected_ratio, 1.0e-12)
-        << "at index " << index;
+    EXPECT_NEAR(grid[index] / grid[index - 1], expected_ratio, 1.0e-12) << "at index " << index;
   }
 }
 
@@ -105,18 +112,18 @@ TEST(FrequencyResponse, FirstOrderLagMatchesItsClosedForm) {
   const auto response = frequency_response(system, grid);
 
   const std::vector<double> magnitude = response.magnitude();
-  const std::vector<double> phase = response.phase_deg();
+  const std::vector<double> phase = response.phase_rad();
   for (std::size_t index = 0; index < grid.size(); ++index) {
     const double w = grid[index];
     EXPECT_NEAR(magnitude[index], 1.0 / std::sqrt(1.0 + w * w), 1.0e-14) << "at w = " << w;
-    EXPECT_NEAR(phase[index], -std::atan(w) * 180.0 / kPi, 1.0e-12) << "at w = " << w;
+    EXPECT_NEAR(degrees(phase[index]), -std::atan(w) * 180.0 / kPi, 1.0e-12) << "at w = " << w;
   }
 
   // The corner: -3.01 dB and -45 degrees at w = 1, the two numbers every
   // textbook prints.
   const auto corner = frequency_response(system, {1.0});
   EXPECT_NEAR(corner.magnitude_db().front(), -20.0 * std::log10(std::sqrt(2.0)), 1.0e-13);
-  EXPECT_NEAR(corner.phase_deg().front(), -45.0, 1.0e-12);
+  EXPECT_NEAR(degrees(corner.phase_rad().front()), -45.0, 1.0e-12);
 }
 
 TEST(FrequencyResponse, SecondOrderResonantPeakMatchesItsClosedForm) {
@@ -139,7 +146,7 @@ TEST(FrequencyResponse, SecondOrderResonantPeakMatchesItsClosedForm) {
 
   // Phase is exactly -90 degrees at w = wn, whatever the damping is.
   const auto at_natural = frequency_response(system, {wn});
-  EXPECT_NEAR(at_natural.phase_deg().front(), -90.0, 1.0e-12);
+  EXPECT_NEAR(degrees(at_natural.phase_rad().front()), -90.0, 1.0e-12);
 
   // And the peak really is the maximum, not merely a point that matches a
   // formula: no grid point exceeds it.
@@ -189,7 +196,7 @@ TEST(FrequencyResponse, PhaseIsUnwrappedAcrossTheHalfTurnBoundary) {
   // -180 crossing that is not there.
   const LinearSystem system = canonical({1.0}, {0.0, 2.0, 3.0});
   const std::vector<double> grid = logarithmic_grid(0.01, 100.0, 400);
-  const std::vector<double> phase = frequency_response(system, grid).phase_deg();
+  const std::vector<double> phase = frequency_response(system, grid).phase_rad();
 
   // Compared against the closed form, not against the -90 and -270 asymptotes:
   // those are reached only at zero and infinity, and a test that allowed a
@@ -197,18 +204,17 @@ TEST(FrequencyResponse, PhaseIsUnwrappedAcrossTheHalfTurnBoundary) {
   // phase.
   for (std::size_t index = 0; index < grid.size(); ++index) {
     const double w = grid[index];
-    const double expected =
-        (-kPi / 2.0 - std::atan(w) - std::atan(w / 2.0)) * 180.0 / kPi;
-    EXPECT_NEAR(phase[index], expected, 1.0e-11) << "at w = " << w;
+    const double expected = -kPi / 2.0 - std::atan(w) - std::atan(w / 2.0);
+    EXPECT_NEAR(phase[index], expected, 1.0e-13) << "at w = " << w;
   }
   for (std::size_t index = 1; index < phase.size(); ++index) {
     EXPECT_LT(phase[index], phase[index - 1]) << "phase must fall monotonically here";
-    EXPECT_LT(phase[index - 1] - phase[index], 180.0) << "unwrapping missed a branch";
+    EXPECT_LT(phase[index - 1] - phase[index], kPi) << "unwrapping missed a branch";
   }
   // The half-turn boundary really is crossed inside this sweep, so the test
   // would fail if unwrapping were removed rather than merely being unexercised.
-  EXPECT_LT(phase.back(), -180.0);
-  EXPECT_GT(phase.front(), -180.0);
+  EXPECT_LT(phase.back(), -kPi);
+  EXPECT_GT(phase.front(), -kPi);
 }
 
 TEST(FrequencyResponse, HessenbergSolveAgreesWithADirectlyFormedSolve) {
@@ -221,23 +227,19 @@ TEST(FrequencyResponse, HessenbergSolveAgreesWithADirectlyFormedSolve) {
   // different matrix, so agreement is evidence and not a tautology.
   constexpr Eigen::Index n = 8;
   Eigen::MatrixXd a(n, n);
-  a << -0.30, 12.00, 0.00, -9.81, 0.00, 0.00, 0.00, 0.00,
-       -0.05, -1.20, 25.00, 0.00, 0.00, 0.00, 0.00, 0.00,
-        0.01, -3.40, -2.10, 0.00, 0.00, 0.00, 0.00, 0.00,
-        0.00, 0.00, 1.00, 0.00, 0.00, 0.00, 0.00, 0.00,
-        0.00, 0.00, 0.00, 0.00, -0.02, 1.90, 0.00, 0.00,
-        0.00, 0.00, 0.00, 0.00, -1.90, -0.02, 0.00, 0.00,
-        0.00, 0.00, 0.00, 0.00, 0.00, 0.00, -40.0, 0.00,
-        0.70, 0.00, 0.00, 0.00, 0.30, 0.00, 1.00, -0.001;
+  a << -0.30, 12.00, 0.00, -9.81, 0.00, 0.00, 0.00, 0.00, -0.05, -1.20, 25.00, 0.00, 0.00, 0.00,
+      0.00, 0.00, 0.01, -3.40, -2.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 1.00, 0.00, 0.00,
+      0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, -0.02, 1.90, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+      -1.90, -0.02, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, -40.0, 0.00, 0.70, 0.00, 0.00,
+      0.00, 0.30, 0.00, 1.00, -0.001;
 
   Eigen::MatrixXd b(n, 2);
-  b << 0.10, 0.00, -0.02, 0.50, -8.00, 1.20, 0.00, 0.00,
-       0.00, 2.00, 0.00, -1.00, 60.0, 0.00, 0.05, 0.05;
+  b << 0.10, 0.00, -0.02, 0.50, -8.00, 1.20, 0.00, 0.00, 0.00, 2.00, 0.00, -1.00, 60.0, 0.00, 0.05,
+      0.05;
 
   Eigen::MatrixXd c(3, n);
-  c << 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-       0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-       0.0, 0.5, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0;
+  c << 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5,
+      0.0, 0.0, 2.0, 0.0, 0.0, -1.0;
 
   LinearSystem system;
   system.a = a;
@@ -266,10 +268,11 @@ TEST(FrequencyResponse, HessenbergSolveAgreesWithADirectlyFormedSolve) {
         std::max(worst_condition, svd.singularValues()(0) / svd.singularValues()(n - 1));
 
     const Eigen::MatrixXcd expected =
-        c.cast<std::complex<double>>() * shifted.partialPivLu().solve(b.cast<std::complex<double>>());
+        c.cast<std::complex<double>>()
+        * shifted.partialPivLu().solve(b.cast<std::complex<double>>());
     const double scale = std::max(expected.cwiseAbs().maxCoeff(), 1.0e-300);
-    worst_relative =
-        std::max(worst_relative, (response.response[index] - expected).cwiseAbs().maxCoeff() / scale);
+    worst_relative = std::max(worst_relative,
+                              (response.response[index] - expected).cwiseAbs().maxCoeff() / scale);
   }
 
   // The gate is the CONDITIONING of the problem, not a number chosen because
@@ -373,7 +376,7 @@ TEST(FrequencyResponse, MimoResponseRefusesTheSingleLoopViews) {
   const auto response = frequency_response(system, {1.0});
   EXPECT_FALSE(response.is_single_loop());
   EXPECT_THROW((void)response.magnitude(), std::invalid_argument);
-  EXPECT_THROW((void)response.phase_deg(), std::invalid_argument);
+  EXPECT_THROW((void)response.phase_rad(), std::invalid_argument);
 }
 
 TEST(FrequencyResponse, RefusesWhatItCannotEvaluate) {

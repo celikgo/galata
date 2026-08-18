@@ -14,7 +14,6 @@
 namespace galata::analyze {
 namespace {
 
-constexpr double kDegreesPerRadian = 57.295779513082320876798154814105;
 // (3 - sqrt 5) / 2, the golden-section fraction.
 constexpr double kGoldenFraction = 0.3819660112501051517954131656344;
 
@@ -109,7 +108,7 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
     margin.gain_variation_is_bounded = false;
     margin.gain_variation_min_db = -infinity;
     margin.gain_variation_max_db = infinity;
-    margin.phase_variation_deg = infinity;
+    margin.phase_variation_rad = infinity;
     margin.phase_variation_is_bounded = false;
     margin.destabilising_delta = {infinity, infinity};
     margin.destabilising_perturbation = {infinity, infinity};
@@ -135,16 +134,16 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
   // eq:cosphim. Unbounded when the disk swallows the unit circle, which shows
   // up as the cosine leaving [-1, 1].
   if (!margin.gain_variation_is_bounded) {
-    margin.phase_variation_deg = infinity;
+    margin.phase_variation_rad = infinity;
     margin.phase_variation_is_bounded = false;
   } else {
     const double cosine = (1.0 + margin.gain_variation_min * margin.gain_variation_max)
                           / (margin.gain_variation_min + margin.gain_variation_max);
     if (!(std::abs(cosine) <= 1.0)) {
-      margin.phase_variation_deg = infinity;
+      margin.phase_variation_rad = infinity;
       margin.phase_variation_is_bounded = false;
     } else {
-      margin.phase_variation_deg = std::acos(cosine) * kDegreesPerRadian;
+      margin.phase_variation_rad = std::acos(cosine);
       margin.phase_variation_is_bounded = true;
     }
   }
@@ -155,16 +154,18 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
   margin.destabilising_delta = 1.0 / shifted;
   const std::complex<double> numerator = 2.0 + (1.0 - skew) * margin.destabilising_delta;
   const std::complex<double> denominator = 2.0 - (1.0 + skew) * margin.destabilising_delta;
-  margin.destabilising_perturbation =
-      denominator == std::complex<double>(0.0, 0.0)
-          ? std::complex<double>(infinity, infinity)
-          : numerator / denominator;
+  margin.destabilising_perturbation = denominator == std::complex<double>(0.0, 0.0)
+                                          ? std::complex<double>(infinity, infinity)
+                                          : numerator / denominator;
 
   return margin;
 }
 
-DiskMargin disk_margin(const model::LinearSystem& loop, int input_index, int output_index,
-                       double skew, const MarginOptions& options) {
+DiskMargin disk_margin(const model::LinearSystem& loop,
+                       int input_index,
+                       int output_index,
+                       double skew,
+                       const MarginOptions& options) {
   loop.validate();
 
   // The theorem assumes the NOMINAL closed loop is stable. Without that,
@@ -202,12 +203,13 @@ DiskMargin disk_margin(const model::LinearSystem& loop, int input_index, int out
   if (resolved.frequencies.empty()) {
     // Refined around the CLOSED-loop modes: the peak of S sits at a lightly
     // damped closed-loop pole, not at an open-loop one.
-    resolved.frequencies = grid_refined_for_modes(closed, resolved.start_rad_s,
-                                                  resolved.stop_rad_s, resolved.grid_points);
+    resolved.frequencies = grid_refined_for_modes(
+        closed, resolved.start_rad_s, resolved.stop_rad_s, resolved.grid_points);
   }
 
   const LoopEvaluator evaluator = [&loop, input_index, output_index](double frequency) {
-    return single_loop_response(loop, input_index, output_index, {frequency}).response.front()(0, 0);
+    return single_loop_response(loop, input_index, output_index, {frequency})
+        .response.front()(0, 0);
   };
   return disk_margin(evaluator, skew, resolved);
 }

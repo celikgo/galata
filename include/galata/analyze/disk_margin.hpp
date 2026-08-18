@@ -108,10 +108,11 @@ struct DiskMargin {
   double gain_variation_min_db;
   double gain_variation_max_db;
 
-  // Guaranteed phase-only variation, +/- this many degrees. Infinite, and
-  // phase_variation_is_bounded false, when the disk swallows the unit circle
-  // and no phase variation destabilises.
-  double phase_variation_deg;
+  // Guaranteed phase-only variation, +/- this many RADIANS (ADR-0003: the
+  // numerical core carries no degrees; the report writers convert). Infinite,
+  // and phase_variation_is_bounded false, when the disk swallows the unit
+  // circle and no phase variation destabilises.
+  double phase_variation_rad;
   bool phase_variation_is_bounded;
 
   // The construction from the theorem's proof: a perturbation ON the boundary
@@ -129,13 +130,16 @@ struct DiskMargin {
 };
 
 // Throws std::invalid_argument if the skew is not finite.
-[[nodiscard]] DiskMargin disk_margin(const LoopEvaluator& loop, double skew = 0.0,
+[[nodiscard]] DiskMargin disk_margin(const LoopEvaluator& loop,
+                                     double skew = 0.0,
                                      const MarginOptions& options = {});
 
 // Refines the search grid around the CLOSED-loop modes, which is where the
 // peak of S sits, and refuses a loop whose nominal closed loop is unstable.
-[[nodiscard]] DiskMargin disk_margin(const model::LinearSystem& loop, int input_index,
-                                     int output_index, double skew = 0.0,
+[[nodiscard]] DiskMargin disk_margin(const model::LinearSystem& loop,
+                                     int input_index,
+                                     int output_index,
+                                     double skew = 0.0,
                                      const MarginOptions& options = {});
 
 }  // namespace galata::analyze

@@ -20,9 +20,12 @@
 //                    a loop that needs its gain REDUCED, which is why this is
 //                    reported as a ratio and not only in decibels.
 //   GAIN CROSSOVER   a frequency where |L(jw)| = 1.
-//   PHASE MARGIN     180 degrees + arg L(jw_gc) at a gain crossover, reduced
-//                    into (-180, 180]: the extra phase lag the loop tolerates.
-//   DELAY MARGIN     phase_margin_in_radians / w_gc, in seconds: the smallest
+//   PHASE MARGIN     pi + arg L(jw_gc) at a gain crossover, reduced into
+//                    (-pi, pi]: the extra phase lag the loop tolerates. In
+//                    RADIANS — this is the numerical core, where ADR-0003
+//                    admits no other angle unit. Degrees are applied at the
+//                    boundary, by the report writers.
+//   DELAY MARGIN     phase_margin / w_gc, in seconds: the smallest
 //                    transport delay that consumes the phase margin. A delay
 //                    contributes -w*tau of phase, so the same phase margin at a
 //                    higher crossover frequency buys LESS time.
@@ -31,7 +34,7 @@
 // unity three times has three phase margins, and an implementation that
 // returned the first one it found could report a comfortable margin for a loop
 // that is fragile at a different frequency. The headline `gain_margin` and
-// `phase_margin_deg` are the governing ones — the smallest perturbation of
+// `phase_margin_rad` are the governing ones — the smallest perturbation of
 // either kind that destabilises, which for the gain margin means the crossing
 // nearest 0 dB rather than the numerically smallest ratio.
 //
@@ -78,8 +81,8 @@ namespace galata::analyze {
 // Where |L(jw)| = 1.
 struct GainCrossing {
   double frequency_rad_s;
-  double phase_margin_deg;
-  // phase_margin_deg in radians divided by the frequency. Negative when the
+  double phase_margin_rad;
+  // phase_margin_rad divided by the frequency. Negative when the
   // phase margin is negative: no delay makes such a loop stable, and reporting
   // a positive time there would invent a margin that does not exist.
   double delay_margin_s;
@@ -108,7 +111,7 @@ struct StabilityMargins {
   // The governing phase margin: the crossing of smallest magnitude. Infinite,
   // with has_phase_margin false, when |L| never reaches unity in range.
   bool has_phase_margin;
-  double phase_margin_deg;
+  double phase_margin_rad;
   double phase_margin_frequency_rad_s;
 
   // The smallest transport delay that destabilises: the minimum over gain
@@ -153,7 +156,8 @@ using LoopEvaluator = std::function<std::complex<double>(double frequency_rad_s)
 
 // The single loop from `input_index` to `output_index` of an open-loop system.
 [[nodiscard]] StabilityMargins stability_margins(const model::LinearSystem& loop,
-                                                 int input_index, int output_index,
+                                                 int input_index,
+                                                 int output_index,
                                                  const MarginOptions& options = {});
 
 }  // namespace galata::analyze

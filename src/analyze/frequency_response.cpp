@@ -13,7 +13,6 @@ namespace galata::analyze {
 namespace {
 
 constexpr double kTwoPi = 6.283185307179586476925286766559;
-constexpr double kDegreesPerRadian = 57.295779513082320876798154814105;
 
 struct HessenbergSolution {
   Eigen::MatrixXcd solution;
@@ -29,7 +28,8 @@ struct HessenbergSolution {
 // preserves the Hessenberg pattern of the trailing submatrix — row k+2 still
 // begins at column k+1 — so no fill-in appears and the O(n^3) of a general LU
 // never materialises.
-HessenbergSolution solve_upper_hessenberg(Eigen::MatrixXcd m, Eigen::MatrixXcd r,
+HessenbergSolution solve_upper_hessenberg(Eigen::MatrixXcd m,
+                                          Eigen::MatrixXcd r,
                                           double frequency_rad_s) {
   const Eigen::Index n = m.rows();
 
@@ -112,8 +112,10 @@ std::vector<double> logarithmic_grid(double start_rad_s, double stop_rad_s, int 
   return frequencies;
 }
 
-std::vector<double> grid_refined_for_modes(const Eigen::MatrixXd& a, double start_rad_s,
-                                           double stop_rad_s, int count,
+std::vector<double> grid_refined_for_modes(const Eigen::MatrixXd& a,
+                                           double start_rad_s,
+                                           double stop_rad_s,
+                                           int count,
                                            double damping_threshold) {
   std::vector<double> frequencies = logarithmic_grid(start_rad_s, stop_rad_s, count);
   if (a.rows() == 0 || a.rows() != a.cols()) {
@@ -124,8 +126,8 @@ std::vector<double> grid_refined_for_modes(const Eigen::MatrixXd& a, double star
   // points of a lightly damped second-order peak sit near w_n (1 +/- zeta), so
   // a band of +/- 4 zeta brackets the peak and both of its shoulders whatever
   // the damping is.
-  static constexpr double kOffsets[] = {-4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0,
-                                        0.5,  1.0,  1.5,  2.0,  3.0,  4.0};
+  static constexpr double kOffsets[] = {
+      -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0};
   // A mode with zeta below this is treated as if it had this much, so that a
   // near-undamped mode gets a narrow cluster rather than a degenerate one.
   constexpr double kMinimumEffectiveDamping = 1.0e-3;
@@ -160,10 +162,10 @@ std::vector<double> grid_refined_for_modes(const Eigen::MatrixXd& a, double star
   std::sort(frequencies.begin(), frequencies.end());
   // Relative dedup: two points a part in 10^9 apart carry no extra information
   // and would only make the response table longer.
-  const auto last = std::unique(frequencies.begin(), frequencies.end(),
-                                [](double left, double right) {
-                                  return std::abs(right - left) <= 1.0e-9 * std::abs(right);
-                                });
+  const auto last =
+      std::unique(frequencies.begin(), frequencies.end(), [](double left, double right) {
+        return std::abs(right - left) <= 1.0e-9 * std::abs(right);
+      });
   frequencies.erase(last, frequencies.end());
   return frequencies;
 }
@@ -220,7 +222,8 @@ FrequencyResponse frequency_response(const model::LinearSystem& system,
   return result;
 }
 
-FrequencyResponse single_loop_response(const model::LinearSystem& system, int input_index,
+FrequencyResponse single_loop_response(const model::LinearSystem& system,
+                                       int input_index,
                                        int output_index,
                                        const std::vector<double>& frequencies_rad_s) {
   system.validate();
@@ -290,7 +293,7 @@ std::vector<double> FrequencyResponse::magnitude_db() const {
   return values;
 }
 
-std::vector<double> FrequencyResponse::phase_deg() const {
+std::vector<double> FrequencyResponse::phase_rad() const {
   require_single_loop(*this, "phase");
   std::vector<double> values;
   values.reserve(response.size());
@@ -311,7 +314,7 @@ std::vector<double> FrequencyResponse::phase_deg() const {
       }
     }
     previous = principal;
-    values.push_back((principal + turns) * kDegreesPerRadian);
+    values.push_back(principal + turns);
   }
   return values;
 }

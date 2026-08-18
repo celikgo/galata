@@ -519,9 +519,11 @@ int main(int argc, char** argv) {
     measured["disk.omega0"] = format_significant(disk.critical_frequency_rad_s, 5);
     measured["disk.gamma_min"] = format_significant(disk.gain_variation_min, 5);
     measured["disk.gamma_max"] = format_significant(disk.gain_variation_max, 5);
-    measured["disk.phi_m"] = format_significant(disk.phase_variation_deg, 6);
+    measured["disk.phi_m"] =
+        format_significant(galata::units::radians_to_degrees(disk.phase_variation_rad), 6);
     measured["disk.classical_gm"] = format_significant(classical.gain_margin, 5);
-    measured["disk.classical_pm"] = format_significant(classical.phase_margin_deg, 6);
+    measured["disk.classical_pm"] =
+        format_significant(galata::units::radians_to_degrees(classical.phase_margin_rad), 6);
 
     // How far the paper's PRINTED critical frequency is from reproducing the
     // paper's own printed delta_0, expressed in units of delta_0's last

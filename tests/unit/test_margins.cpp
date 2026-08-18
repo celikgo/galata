@@ -25,13 +25,14 @@
 // u^3 + 5u^2 + 4u - 1 = 0 with u = w^2 for L1, and w^3 + w - 1 = 0 for L2.
 // Both are solved below by bisection on the polynomial itself.
 
-#include "galata/analyze/margins.hpp"
-
 #include "galata/analyze/frequency_response.hpp"
+#include "galata/analyze/margins.hpp"
+#include "galata/units.hpp"
 
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <functional>
@@ -39,6 +40,13 @@
 #include <vector>
 
 namespace {
+
+// The core reports angles in radians (ADR-0003). Tests state their
+// expectations in degrees, as the literature does, and convert here — the
+// same boundary conversion the report writers make.
+double degrees(double radians) {
+  return galata::units::radians_to_degrees(radians);
+}
 
 using galata::analyze::LoopEvaluator;
 using galata::analyze::MarginOptions;
@@ -112,21 +120,21 @@ TEST(Margins, ThirdOrderIntegratorChainMatchesItsClosedFormMargins) {
   EXPECT_EQ(margins.phase_crossings.size(), 1U);
 
   // Gain crossover: w^2 (1 + w^2) (4 + w^2) = 1, i.e. u^3 + 5u^2 + 4u - 1 = 0.
-  const double u = root_of([](double x) { return x * x * x + 5.0 * x * x + 4.0 * x - 1.0; },
-                           0.0, 1.0);
+  const double u =
+      root_of([](double x) { return x * x * x + 5.0 * x * x + 4.0 * x - 1.0; }, 0.0, 1.0);
   const double expected_crossover = std::sqrt(u);
-  const double expected_phase_margin =
-      90.0 - std::atan(expected_crossover) * kDegreesPerRadian
-      - std::atan(expected_crossover / 2.0) * kDegreesPerRadian;
+  const double expected_phase_margin = 90.0 - std::atan(expected_crossover) * kDegreesPerRadian
+                                       - std::atan(expected_crossover / 2.0) * kDegreesPerRadian;
 
   ASSERT_TRUE(margins.has_phase_margin);
   EXPECT_NEAR(margins.phase_margin_frequency_rad_s, expected_crossover, 1.0e-12);
-  EXPECT_NEAR(margins.phase_margin_deg, expected_phase_margin, 1.0e-10);
+  EXPECT_NEAR(degrees(margins.phase_margin_rad), expected_phase_margin, 1.0e-10);
   EXPECT_EQ(margins.gain_crossings.size(), 1U);
 
   ASSERT_TRUE(margins.has_delay_margin);
   EXPECT_NEAR(margins.delay_margin_s,
-              expected_phase_margin / kDegreesPerRadian / expected_crossover, 1.0e-11);
+              expected_phase_margin / kDegreesPerRadian / expected_crossover,
+              1.0e-11);
 }
 
 TEST(Margins, RepeatedPoleChainMatchesItsClosedFormMargins) {
@@ -144,7 +152,7 @@ TEST(Margins, RepeatedPoleChainMatchesItsClosedFormMargins) {
 
   ASSERT_TRUE(margins.has_phase_margin);
   EXPECT_NEAR(margins.phase_margin_frequency_rad_s, crossover, 1.0e-12);
-  EXPECT_NEAR(margins.phase_margin_deg, expected_phase_margin, 1.0e-10);
+  EXPECT_NEAR(degrees(margins.phase_margin_rad), expected_phase_margin, 1.0e-10);
 }
 
 TEST(Margins, DelayMarginIsTheDelayThatReachesTheCriticalPoint) {
@@ -163,8 +171,7 @@ TEST(Margins, DelayMarginIsTheDelayThatReachesTheCriticalPoint) {
       (1.0 / undelayed) * std::exp(std::complex<double>(0.0, -w * tau));
 
   EXPECT_NEAR(std::abs(value + 1.0), 0.0, 1.0e-12)
-      << "with the reported delay the loop should sit on the critical point, but L(jw) = "
-      << value;
+      << "with the reported delay the loop should sit on the critical point, but L(jw) = " << value;
 }
 
 TEST(Margins, PureDelayLoopIsMeasuredThroughTheEvaluator) {
@@ -190,7 +197,7 @@ TEST(Margins, PureDelayLoopIsMeasuredThroughTheEvaluator) {
 
   ASSERT_TRUE(margins.has_phase_margin);
   EXPECT_NEAR(margins.phase_margin_frequency_rad_s, 1.0, 1.0e-12);
-  EXPECT_NEAR(margins.phase_margin_deg, 90.0 - tau * kDegreesPerRadian, 1.0e-11);
+  EXPECT_NEAR(degrees(margins.phase_margin_rad), 90.0 - tau * kDegreesPerRadian, 1.0e-11);
 
   ASSERT_TRUE(margins.has_delay_margin);
   EXPECT_NEAR(margins.delay_margin_s, kPi / 2.0 - tau, 1.0e-12);
@@ -231,7 +238,7 @@ TEST(Margins, UnstableClosedLoopReportsANegativePhaseMargin) {
   const auto margins = stability_margins(loop, 0, 0);
 
   ASSERT_TRUE(margins.has_phase_margin);
-  EXPECT_LT(margins.phase_margin_deg, 0.0);
+  EXPECT_LT(degrees(margins.phase_margin_rad), 0.0);
   // And a loop that is already unstable has no delay margin: no amount of
   // delay is what is wrong with it.
   EXPECT_FALSE(margins.has_delay_margin);
@@ -268,7 +275,7 @@ TEST(Margins, AbsentCrossoversAreReportedAsAbsentNotAsZero) {
   quiet.c = Eigen::MatrixXd::Constant(1, 1, 0.1);
   const auto quiet_margins = stability_margins(quiet, 0, 0);
   EXPECT_FALSE(quiet_margins.has_phase_margin);
-  EXPECT_TRUE(std::isinf(quiet_margins.phase_margin_deg));
+  EXPECT_TRUE(std::isinf(degrees(quiet_margins.phase_margin_rad)));
   EXPECT_FALSE(quiet_margins.has_delay_margin);
   EXPECT_TRUE(quiet_margins.gain_crossings.empty());
 }
@@ -298,18 +305,18 @@ TEST(Margins, EveryGainCrossoverIsReportedAndTheWorstOneGoverns) {
   EXPECT_GT(margins.gain_crossings[1].frequency_rad_s, wn);
 
   ASSERT_TRUE(margins.has_phase_margin);
-  const double smaller = std::min(std::abs(margins.gain_crossings[0].phase_margin_deg),
-                                  std::abs(margins.gain_crossings[1].phase_margin_deg));
-  EXPECT_NEAR(std::abs(margins.phase_margin_deg), smaller, 1.0e-12);
-  EXPECT_NEAR(margins.phase_margin_frequency_rad_s, margins.gain_crossings[1].frequency_rad_s,
-              1.0e-12);
+  const double smaller = std::min(std::abs(degrees(margins.gain_crossings[0].phase_margin_rad)),
+                                  std::abs(degrees(margins.gain_crossings[1].phase_margin_rad)));
+  EXPECT_NEAR(std::abs(degrees(margins.phase_margin_rad)), smaller, 1.0e-12);
+  EXPECT_NEAR(
+      margins.phase_margin_frequency_rad_s, margins.gain_crossings[1].frequency_rad_s, 1.0e-12);
 
   // The delay margin is the smallest over the crossings, which need not be the
   // one with the smallest phase margin: a larger phase margin at a much higher
   // frequency can buy less time.
   double expected_delay = std::numeric_limits<double>::infinity();
   for (const auto& crossing : margins.gain_crossings) {
-    if (crossing.phase_margin_deg > 0.0) {
+    if (degrees(crossing.phase_margin_rad) > 0.0) {
       expected_delay = std::min(expected_delay, crossing.delay_margin_s);
     }
   }
@@ -356,6 +363,36 @@ TEST(Margins, ARefinedGridFindsAResonantCrossingAPlainOneMisses) {
   EXPECT_NEAR(refined.gain_crossings[1].frequency_rad_s, wn * (1.0 + 0.00458), 1.0e-3);
 }
 
+TEST(Margins, ACrossingExactlyOnAGridPointIsCountedOnce) {
+  // A root that lands ON a grid point is visible from both adjacent intervals.
+  // Recorded from each, one crossing becomes two — and a function that is
+  // identically zero becomes one crossing per grid point.
+  //
+  // The degenerate case makes the bug unmissable: L = -0.5 is real and negative
+  // at every frequency, so its phase is -180 degrees everywhere and Im L is
+  // exactly zero everywhere. Before the bracketing rule was fixed this reported
+  // 1999 phase crossovers on a 2000-point grid.
+  const LoopEvaluator constant_negative = [](double) { return std::complex<double>(-0.5, 0.0); };
+  const auto flat = stability_margins(constant_negative);
+  EXPECT_EQ(flat.phase_crossings.size(), 1U);
+  ASSERT_TRUE(flat.has_gain_margin);
+  EXPECT_NEAR(flat.gain_margin, 2.0, 1.0e-15);
+
+  // The same for a gain crossover placed deliberately on a grid point. L2's
+  // phase crossover is at exactly 1 rad/s, so a grid containing 1.0 exactly
+  // puts a root on a node.
+  MarginOptions on_a_node;
+  on_a_node.frequencies = galata::analyze::logarithmic_grid(0.01, 100.0, 401);
+  ASSERT_NE(std::find(on_a_node.frequencies.begin(), on_a_node.frequencies.end(), 1.0),
+            on_a_node.frequencies.end())
+      << "this grid must actually contain 1.0 or the test proves nothing";
+
+  const LinearSystem loop = integrator_chain({1.0, 1.0});
+  const auto margins = stability_margins(loop, 0, 0, on_a_node);
+  EXPECT_EQ(margins.phase_crossings.size(), 1U);
+  EXPECT_NEAR(margins.gain_margin, 2.0, 1.0e-11);
+}
+
 TEST(Margins, RefusesWhatItCannotSearch) {
   MarginOptions bad_iterations;
   bad_iterations.bisection_iterations = 0;
@@ -365,9 +402,9 @@ TEST(Margins, RefusesWhatItCannotSearch) {
 
   MarginOptions single_point;
   single_point.frequencies = {1.0};
-  EXPECT_THROW((void)stability_margins([](double) { return std::complex<double>(1.0, 0.0); },
-                                       single_point),
-               std::invalid_argument);
+  EXPECT_THROW(
+      (void)stability_margins([](double) { return std::complex<double>(1.0, 0.0); }, single_point),
+      std::invalid_argument);
 
   EXPECT_THROW((void)stability_margins(galata::analyze::LoopEvaluator{}), std::invalid_argument);
 }
