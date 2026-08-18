@@ -205,6 +205,59 @@ TEST(Determinism, QuaternionOperationsAreBitIdentical) {
   }
 }
 
+TEST(Determinism, TheFingerprintTrajectoryIsNotChaotic) {
+  // A cross-platform bound on a fingerprint is only meaningful if the
+  // fingerprint's dynamics do not amplify small differences. Two platforms'
+  // math libraries differ by around 1e-16 relative per call; if the trajectory
+  // in tools/determinism amplified that by ten orders of magnitude over its
+  // run, the published bound would be measuring chaos rather than agreement,
+  // and would fail or pass essentially at random.
+  //
+  // So: perturb the initial state by a known relative amount, integrate for the
+  // same duration the fingerprint uses, and require that the perturbation does
+  // not grow. Measured at the time of writing, the amplification factor over
+  // 60 s is between 0.06 and 1.0 — the motion is a bounded tumble under a
+  // constant wrench, not a chaotic one — which leaves the 1e-9 cross-platform
+  // gate about seven orders of headroom.
+  //
+  // The seed is 1e-9 rather than one ulp for a reason worth recording: a
+  // one-ulp perturbation on u is 1.4e-14 absolute, which is SMALLER than one
+  // ulp of the final value, so it rounds away entirely and the measurement
+  // reads a misleading zero.
+  const galata::sim::MassProperties mass = sample_mass();
+  galata::sim::Wrench wrench;
+  wrench.force_body_n = Eigen::Vector3d(2500.0, -400.0, -1200.0);
+  wrench.moment_cg_body_n_m = Eigen::Vector3d(800.0, -1500.0, 300.0);
+  const auto derivative = make_derivative(mass, wrench);
+  const galata::numerics::ProjectionFunction project = [](Eigen::VectorXd& x) {
+    galata::core::State state = galata::core::State::from_vector(galata::core::StateVector(x));
+    state.renormalise_attitude();
+    x = state.to_vector();
+  };
+
+  constexpr double kSeed = 1e-9;
+  const Eigen::VectorXd base = sample_state().to_vector();
+  Eigen::VectorXd nudged = base;
+  nudged(galata::core::kVelocityU) *= (1.0 + kSeed);
+  ASSERT_NE(base(galata::core::kVelocityU), nudged(galata::core::kVelocityU));
+
+  const int steps = 15000;  // the same 30 s the fingerprint integrates
+  const auto reference =
+      galata::numerics::integrate_fixed_step(derivative, base, 0.0, 0.002, steps, steps, project);
+  const auto perturbed =
+      galata::numerics::integrate_fixed_step(derivative, nudged, 0.0, 0.002, steps, steps, project);
+
+  const double divergence =
+      (reference.states.back() - perturbed.states.back()).norm() / reference.states.back().norm();
+  const double amplification = divergence / kSeed;
+
+  EXPECT_LT(amplification, 100.0)
+      << "the fingerprint trajectory amplifies perturbations by " << amplification
+      << "x over 30 s. A cross-platform determinism bound on a trajectory that "
+         "amplifies is measuring chaos, not agreement — either shorten the "
+         "integration in tools/determinism or move it to the tier-1-only battery.";
+}
+
 TEST(Determinism, NoLongDoubleInTheNumericalCore) {
   // ADR-0004 bans long double: it is 80-bit extended on x86-64 System V,
   // 64-bit on MSVC and 128-bit quad on AArch64 Linux, so a result touching it

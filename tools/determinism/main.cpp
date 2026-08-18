@@ -20,6 +20,18 @@
 //
 // Adding a line here is cheap and is the right response to any new numerical
 // path: what is not fingerprinted is not gated.
+//
+// ONE CONSTRAINT ON WHAT BELONGS HERE. A cross-platform bound is only
+// meaningful on a computation that does not amplify small differences. Two
+// platforms' math libraries disagree by around 1e-16 relative; a chaotic
+// trajectory would turn that into anything at all, and the tier 2 gate would
+// then be measuring chaos rather than agreement. The rigid-body case below was
+// measured: it amplifies a perturbation by a factor between 0.06 and 1.0 over
+// 60 s — a bounded tumble under a constant wrench — which leaves the 1e-9 gate
+// about seven orders of headroom.
+// Determinism.TheFingerprintTrajectoryIsNotChaotic asserts this, so a future
+// change that makes the battery chaotic fails there rather than as an
+// intermittently red workflow.
 
 #include "galata/analyze/modes.hpp"
 #include "galata/core/atmosphere.hpp"
