@@ -110,6 +110,34 @@ jobs:
           mkdir -p "$stage/bin"
           cp "$bin" "$stage/bin/"
 
+          # Windows links the vcpkg dependencies dynamically (the x64-windows
+          # triplet is a shared build), and the CMake toolchain deploys the DLLs
+          # next to the executable rather than into it. Copying only the .exe
+          # produces an archive whose binary cannot start at all — which is what
+          # the staged smoke test below caught. Linux and macOS need nothing
+          # here: their vcpkg triplets are static.
+          if [ -n "${{ matrix.exe }}" ]; then
+            bindir="$(dirname "$bin")"
+            echo "runtime files next to the executable:"
+            ls -la "$bindir"
+            found=0
+            for dll in "$bindir"/*.dll; do
+              [ -e "$dll" ] || continue
+              cp "$dll" "$stage/bin/"
+              found=$((found + 1))
+            done
+            # Fall back to the vcpkg install tree if the toolchain did not
+            # deploy them, rather than shipping an archive that cannot run.
+            if [ "$found" -eq 0 ]; then
+              for dll in build/${{ matrix.preset }}/vcpkg_installed/*/bin/*.dll; do
+                [ -e "$dll" ] || continue
+                cp "$dll" "$stage/bin/"
+                found=$((found + 1))
+              done
+            fi
+            echo "staged $found DLL(s) alongside the executable"
+          fi
+
           # Licence and attribution travel with the binary — Apache-2.0 section 4
           # requires it of anyone redistributing, and that includes us.
           cp LICENSE NOTICE README.md VERSION "$stage/"
