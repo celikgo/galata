@@ -238,10 +238,13 @@ const std::vector<Case>& validation_cases() {
        std::string(kCr2144) + ", Table II-4",
        Status::KnownDiscrepancy,
        {E{kValidation, "Nt33aHandAssembled.PhugoidDampingDiscrepancyDoesNotGrow"}},
-       "{hand.phugoid_zeta} against a published 0.0948, out by {hand.phugoid_percent}, about three "
-       "times what the inputs' rounding allows. "
-       "Localised to the hand assembly — the full chain reproduces it. Held by a labelled "
-       "regression lock; see below."},
+       "{hand.phugoid_zeta} against a published 0.0948, out by {hand.phugoid_percent} — outside "
+       "the "
+       "envelope of the inputs' own rounding, which reaches only -1.67%. "
+       "Localised to the hand assembly, and now to ONE entry of it: the M_wdot (-g sin theta) "
+       "coupling that closing Appendix C's descriptor form with the whole w_dot equation "
+       "manufactures, worth 98.8% of the gap. Held by a labelled regression lock; "
+       "the investigation is in [the note on this discrepancy](notes/phugoid-damping.md)."},
 
       {"analyze.classification",
        "Modal classification into the five classical modes",

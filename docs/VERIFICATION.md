@@ -46,7 +46,7 @@ Four checks stand behind it, each a test rather than a convention:
 | Nonlinear simulation with aerodynamic forces, over time | — | not implemented — There is a state derivative, not a loop flying an aircraft through time. |
 | Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-8 | **validated** — Tolerance measured, not chosen: each input is perturbed by half a unit in its own last printed digit and the published value's own rounding is added. |
 | Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **validated** — Three of the four longitudinal quantities. The fourth is the row below. |
-| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, out by 2.04%, about three times what the inputs' rounding allows. Localised to the hand assembly — the full chain reproduces it. Held by a labelled regression lock; see below. |
+| Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, out by 2.04% — outside the envelope of the inputs' own rounding, which reaches only -1.67%. Localised to the hand assembly, and now to ONE entry of it: the M_wdot (-g sin theta) coupling that closing Appendix C's descriptor form with the whole w_dot equation manufactures, worth 98.8% of the gap. Held by a labelled regression lock; the investigation is in [the note on this discrepancy](notes/phugoid-damping.md). |
 | Modal classification into the five classical modes | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), labels checked against the report's own identification | **validated** — By eigenvector participation, not by frequency. A unit test builds a system whose phugoid block is deliberately faster than its short-period block; a frequency-based classifier gets both labels backwards on it. |
 | Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
@@ -455,20 +455,39 @@ nonlinear aircraft, finds its trim, and perturbs it. It shares no arithmetic
 with the first beyond the source data, and it reproduces the published value.
 
 So the discrepancy is in the hand assembly, not in the eigen-analysis and not
-in the published value. What has NOT been established is which term the hand
-assembly omits. The strongest remaining candidate is unchanged: the report
-leaves `X_udot`, `X_wdot`, `X_q`, `Z_udot` and `M_udot` blank for this aircraft
-and the hand assembly reads those blanks as zeros, while the nonlinear model
-never needs them because it differentiates the forces directly.
+in the published value. Substituting the chain's linearisation into the hand
+assembly ONE MATRIX ENTRY AT A TIME localises it the rest of the way: the
+single entry `A(3,4) = M_wdot (-g sin theta)/(1 - Z_wdot)` carries **98.8%** of
+the gap, and zeroing that entry alone moves the hand-assembled damping ratio to
+0.094829 — +0.03% from the published value, inside its own printing precision.
+
+That entry is an artefact of closing Appendix C's descriptor form by
+substituting the WHOLE `w_dot` equation, gravity term included, into
+`M_wdot w_dot`. `M_wdot` multiplies the rate of change of AERODYNAMIC
+incidence; gravity acts at the c.g. and produces no moment about it, so no
+gravity term may reach `q_dot` at all. The chain gets exactly zero there
+because `d(alphadot)/d(theta) = g sin(alpha - theta)/V`, which vanishes
+identically in level flight.
+
+The hand assembly therefore does not OMIT a term — it INCLUDES one that should
+not be there. What was ruled out on the way to that, and the two transcriptions
+that would settle it, are in
+[the note on this discrepancy](notes/phugoid-damping.md).
 
 The regression lock on the hand-assembled route stays, and is now anchored to
-the trim-and-linearise result rather than to a bare measurement.
+the trim-and-linearise result rather than to a bare measurement. It is kept
+DELIBERATELY: the hand assembly's worth is that it is a literal reading of
+Appendix C, independent of galata's own modelling opinions, and quietly
+correcting it would turn an independent check into a second implementation of
+the opinion it is supposed to be checking.
 
 ### Detail of the hand-assembled discrepancy
 
 The phugoid damping ratio does **not** reproduce within the source's precision.
-It disagrees by about 2% relative, which is roughly three times the band the
-inputs' own rounding allows.
+It disagrees by about 2% relative. Enumerating all 2^10 corners of the inputs'
+own printed rounding simultaneously gives zeta in [0.092521, 0.093219]: the
+published 0.0948 is not reachable from ANY corner, so the inputs' rounding does
+not explain it either.
 
 The mode itself is in very nearly the right place. Published, the phugoid
 eigenvalue is -0.016306 ± 0.171225j; the hand
@@ -479,22 +498,28 @@ frequency, so a residual of a few times 1e-4 in the real part becomes
 2.04% in the ratio — the entire discrepancy, accounted for but
 not explained.
 
-Two candidate explanations, neither confirmed:
+Two things it is NOT, both checked rather than assumed:
 
-1. **Terms read as zero that may mean "not supplied".** `X_udot`, `X_wdot`,
-   `X_q`, `Z_udot` and `M_udot` are blank in the report's table for this
-   aircraft and are taken as zero. `X_q` enters the phugoid directly through
-   the `(−X_q + W_o)s` term of Appendix C's first row.
-2. **Untranscribed coefficients.** The report's own longitudinal quartic is
-   written in terms of `M_alpha` and `M_alpha_dot`, and its `D` and `E`
-   coefficients were not transcribed. The phugoid roots are set by the
-   low-order coefficients, so an omitted term would show there first.
+1. **The published value's own rounding.** `zeta = 0.0948` and
+   `omega_n = 0.172` are printed to three figures, so the published real part
+   `-zeta omega_n` carries +/- 5.6e-5. The observed gap is 6.1 times that band,
+   so the published number cannot be moved far enough to meet the assembly.
+2. **A units error in the per-foot scaling of the pitching-moment row.** The
+   obvious suspect, since that row is the one not invariant under a change of
+   length unit — and eliminated by `omega_n`, which already agrees to 0.05%:
+   omitting the scaling moves it to 0.13582 and applying it twice to 0.19001.
 
-Until this is resolved the phugoid damping ratio is listed as an open
-discrepancy rather than as validated, and a **regression lock** — labelled as
-one, per charter rule 8 — holds the gap at its measured size so it cannot grow
-unnoticed, and fails if it shrinks, since that would mean the cause has been
-found and the lock should become a validation.
+The earlier candidate — `X_q` left blank in the report and read as zero — is
+also numerically sufficient, at `X_q = -0.217` m/s per rad/s. It is rejected as
+the primary explanation because it is FITTED to the one number, while the
+`M_wdot` term above predicts 98.8% of the gap with no free parameter. The two
+are separable by experiment, and the note says how.
+
+The phugoid damping ratio stays listed as an open discrepancy rather than as
+validated, because acting on the finding is a decision about what the hand
+assembly is FOR and not an edit to a matrix. A **regression lock** — labelled
+as one, per charter rule 8 — holds the gap at its measured size so it cannot
+grow unnoticed, and fails if it shrinks.
 
 ## Frequency response and stability margins
 
