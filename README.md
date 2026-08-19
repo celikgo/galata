@@ -29,10 +29,14 @@ C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
 ---
 
-## Status: 0.1.0 — the honest spine
+## Status: 0.2.0 — trim, linearise, analyse
 
-v0.1 is complete: trim, linearise, analyse, all validated against a published
-NASA report, driven from a YAML file by a CLI.
+v0.1 was the spine: trim, linearise, and a classified modal table, validated
+against a published NASA report and driven from a YAML file by a CLI. v0.2 adds
+the frequency-domain tier on top of it — frequency response, all four margin
+types, the sensitivity peaks M_S and M_T, and principal gains for multivariable
+loops — each gated against a closed-form transfer function or a published
+worked example.
 
 The [charter](docs/CHARTER.md) requires that CI exist before the first feature
 and that no capability be documented before it works, so the gates were built
@@ -43,17 +47,18 @@ first and the physics landed against them. What exists today:
 | Build system (CMake + vcpkg, four platform/compiler combinations) | working |
 | CI: format, build, test, version consistency, SI boundary, doc links | working |
 | Version single-source-of-truth, with provenance in the build identification | working |
-| ADRs 0001–0006: ABI relationship, conventions, units, determinism, versioning, EOM reference point | written |
+| ADRs 0001–0007: ABI relationship, conventions, units, determinism, versioning, EOM reference point, reference-value rights | written |
 | Frames, quaternions, state vector, unit boundary (ADR-0002, ADR-0003) | implemented, property-tested |
 | U.S. Standard Atmosphere 1976, −5000 m to 86 km | implemented and **validated** against the published tables |
 | Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
 | Nonlinear 6-DOF rigid body, general inertia tensor | implemented and **validated** against closed-form solutions of Euler's equations |
 | YAML pipeline runner and the `galata` CLI | working |
-| One runnable example, checked by CI | working (two of them) |
+| Runnable examples, executed by the test suite | working (five, four of them executed end to end) |
 | Determinism: bit-identical repeat runs, cross-platform bound measured | working |
 | Nonlinear aircraft model from a derivative buildup | implemented and **validated** |
 | `trim.level` — Newton on a square residual, fixed iteration count | implemented and **validated** |
 | `linearize.finitediff` — central differences with Richardson error estimates | implemented and **validated** |
+| Frequency response, gain/phase/delay/disk margins, M_S and M_T, principal gains | implemented and **validated** |
 | Everything else in §"What it will do" below | **not built** |
 
 The table above is maintained by hand and checked in review. The capability
@@ -108,8 +113,8 @@ synthesis to analysis to nonlinear verification.
 
 ## Quickstart
 
-Sixty seconds, and it works today. It builds the library and runs the test
-suite; there is nothing else to run yet.
+Sixty seconds, and it works today. It builds the library, runs the test suite,
+and then runs a real study.
 
 ```bash
 git clone https://github.com/celikgo/galata.git
@@ -142,19 +147,20 @@ Linux (GCC and Clang), macOS (AppleClang) and Windows (MSVC) — see
 
 ## What it will do
 
-This section describes the intended product and **none of it is implemented**.
-It is here so that the decisions recorded in `docs/adr/` have a stated purpose.
-Read the Status table above for what actually works.
+This section describes the intended product. **Nothing named here is
+implemented** — the two capabilities that used to be listed as intentions,
+modal classification by eigenvector participation and the four margin types,
+have been built and have moved up into the Status table. This section is kept
+so that the decisions recorded in `docs/adr/` have a stated purpose. The Status
+table above is what actually works.
 
 The workflow is trim → linearise → analyse → synthesise → verify, expressed as a
 YAML pipeline that the CLI and (later) the desktop application both execute, so
-that a study is a file rather than a sequence of clicks. Planned surfaces include
-a nonlinear 6-DOF simulation with actuator rate limits in the loop,
-MIL-STD-1797A handling-qualities assessment, LQR and Riccati synthesis, a stable
-C plugin ABI for user-supplied aerodynamic and sensor models, and an AI layer
-that composes and runs these pipelines without ever producing a number itself.
-Automatic modal classification by eigenvector participation and the four margin
-types are built; see the table below.
+that a study is a file rather than a sequence of clicks. Still to come: a
+nonlinear 6-DOF simulation with actuator rate limits in the loop, MIL-STD-1797A
+handling-qualities assessment, LQR and Riccati synthesis, a stable C plugin ABI
+for user-supplied aerodynamic and sensor models, and an AI layer that composes
+and runs these pipelines without ever producing a number itself.
 
 Milestones and their contents are in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -215,6 +221,36 @@ down once, in full, in
 - [`docs/TESTING.md`](docs/TESTING.md) — the test tiers and what each proves
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — building, the pre-push gates, what review asks
+- [`SECURITY.md`](SECURITY.md) — the threat model this tool actually has, and
+  how to report a vulnerability privately
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1
+
+### Checking the validation claim yourself
+
+The agreement with NASA CR-2144 quoted at the top of this file is not a
+sentence somebody typed. It is gated:
+
+- the reference values live in
+  [`tests/validation/reference/nt33a_fc1.csv`](tests/validation/reference/nt33a_fc1.csv),
+  which carries the report number, its authors, its rights position, the
+  SHA-256 of the scan the numbers were read from, and the method by which they
+  were transcribed;
+- [`tests/validation/test_nt33a_trim_linearize.cpp`](tests/validation/test_nt33a_trim_linearize.cpp)
+  runs the whole chain from the non-dimensional derivative set and **fails** if
+  any dimensional derivative deviates by more than 0.5%;
+- [`tests/validation/test_nt33a_modes.cpp`](tests/validation/test_nt33a_modes.cpp)
+  does the same for the five classical modes;
+- [`docs/VERIFICATION.md`](docs/VERIFICATION.md) is regenerated from those runs
+  by [`scripts/gen-verification.sh`](scripts/gen-verification.sh), and CI fails
+  if the committed copy has drifted, so the report cannot describe a
+  measurement the code no longer produces.
+
+```bash
+ctest --preset dev -L validation      # the whole validation tier
+```
+
+The tier carries the ctest **label** `validation`, so `-L` is the flag; the
+tests are named after what they check, not after the tier.
 
 ## Licence
 

@@ -1,0 +1,233 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release packaging.
+#
+# Charter rule 2 applies to a release asset exactly as it applies to a document:
+# a binary attached to a release is a claim that this code, at this tag, builds
+# and passes its own gates on that platform. So this workflow does not just
+# compile — it runs the full test suite on each platform and refuses to package
+# anything that fails. An artefact that shipped without its tests run is a
+# claim nobody checked.
+#
+# The archive carries the models and the examples alongside the binary, because
+# the README's quickstart resolves its model through a relative path. A CLI
+# shipped without them downloads as a program with nothing to run.
+#
+# Two triggers:
+#   * pushing a tag matching v* — the normal path for a new release;
+#   * workflow_dispatch with a tag name — the backfill path, used to attach
+#     assets to a tag that was published before this workflow existed. The
+#     workflow definition comes from the default branch; the SOURCE comes from
+#     the tag, so the binary is built from what that tag actually contains.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach assets to (e.g. v0.1.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_DISABLE_METRICS: "1"
+
+jobs:
+  # Resolve the tag once, so the matrix jobs and the publish job cannot
+  # disagree about which commit they are talking about.
+  resolve:
+    name: Resolve tag
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - id: pick
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::'$tag' is not a v-prefixed tag"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Building release assets for $tag"
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,  os: ubuntu-24.04,   preset: ci-linux-gcc, exe: '',     archive: tar.gz }
+          - { name: macos-arm64,   os: macos-14,       preset: ci-macos,     exe: '',     archive: tar.gz }
+          - { name: windows-x86_64, os: windows-2022,  preset: ci-windows,   exe: '.exe', archive: zip }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: ./.github/actions/setup-cpp
+        with:
+          preset: ${{ matrix.preset }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # The gate that makes the asset mean something.
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Stage the archive contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ needs.resolve.outputs.tag }}'
+          stage="galata-${tag}-${{ matrix.name }}"
+          bin="build/${{ matrix.preset }}/src/cli/galata${{ matrix.exe }}"
+
+          test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
+
+          # The commit the SOURCE came from. github.sha is the ref the workflow
+          # was dispatched from, which on the backfill path is the default
+          # branch, not the tag — printing it would misattribute the build.
+          commit="$(git rev-parse HEAD)"
+
+          mkdir -p "$stage/bin"
+          cp "$bin" "$stage/bin/"
+
+          # Licence and attribution travel with the binary — Apache-2.0 section 4
+          # requires it of anyone redistributing, and that includes us.
+          cp LICENSE NOTICE README.md VERSION "$stage/"
+
+          # The quickstart's study resolves ../../models/... relative to itself,
+          # so both trees must keep their layout.
+          cp -R examples "$stage/examples"
+          cp -R models "$stage/models"
+          cp -R docs "$stage/docs"
+
+          # A one-page orientation for someone who downloaded a tarball rather
+          # than cloning. It states only what the archive contains.
+          cat > "$stage/RUNNING.txt" <<TXT
+          galata ${tag} — ${{ matrix.name }}
+
+          bin/galata${{ matrix.exe }} is a self-contained command-line binary.
+
+            bin/galata${{ matrix.exe }} --version
+            bin/galata${{ matrix.exe }} capabilities
+            bin/galata${{ matrix.exe }} run examples/nt33a-trim-and-linearise/study.yaml
+
+          'capabilities' lists what this build can do and how far each capability
+          has been checked against a published reference. docs/VERIFICATION.md is
+          the V&V report: what was compared, against which document, and what is
+          explicitly unvalidated.
+
+          Built from tag ${tag}, commit ${commit}, on ${{ matrix.os }}.
+          This binary is not DO-178C qualified and must never be used as evidence
+          in a certification package.
+
+          Apache-2.0. See LICENSE and NOTICE.
+          TXT
+
+          echo "STAGE=$stage" >> "$GITHUB_ENV"
+
+      # Smoke-test the staged tree, not the build tree: this is the thing a
+      # person actually downloads, and a packaging mistake that leaves the
+      # example unable to find its model would otherwise ship silently.
+      - name: The staged archive runs
+        shell: bash
+        working-directory: ${{ env.STAGE }}
+        run: |
+          set -euo pipefail
+          "./bin/galata${{ matrix.exe }}" --version
+          "./bin/galata${{ matrix.exe }}" capabilities
+          "./bin/galata${{ matrix.exe }}" run \
+            examples/nt33a-trim-and-linearise/study.yaml --output-dir .
+          test -s trim-and-modes.md
+          rm -f trim-and-modes.md
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ matrix.archive }}' = 'zip' ]; then
+            7z a -tzip "${STAGE}.zip" "${STAGE}" >/dev/null
+            asset="${STAGE}.zip"
+          else
+            tar --create --gzip --file "${STAGE}.tar.gz" "${STAGE}"
+            asset="${STAGE}.tar.gz"
+          fi
+          # Checksums are generated here, on the machine that built the file,
+          # so they cover the artefact as uploaded.
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$asset" > "${asset}.sha256"
+          else
+            shasum -a 256 "$asset" > "${asset}.sha256"
+          fi
+          cat "${asset}.sha256"
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach assets to the release
+    needs: [resolve, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: assets
+
+      - name: One checksum file for the whole release
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          cat ./*.sha256 | sort -k2 > SHA256SUMS.txt
+          rm -f ./*.sha256
+          cat SHA256SUMS.txt
+          ls -la
+
+      # --clobber so a re-run replaces assets rather than failing on a name
+      # that already exists. The release itself is created by hand, with notes
+      # written for the commit it points at; this workflow only attaches files
+      # and will not invent a release that a person did not intend.
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::no GitHub release exists for $TAG."
+            echo "Create it first, with notes describing what is true at that commit:"
+            echo "  gh release create $TAG --title ... --notes-file ..."
+            exit 1
+          fi
+          gh release upload "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size) bytes"'
