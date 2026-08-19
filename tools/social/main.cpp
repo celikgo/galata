@@ -17,6 +17,15 @@
 // The labels below are NOT assigned here — they come back from
 // analyze::analyze_modes, which is the whole point of the picture.
 //
+// Values are emitted to SIX significant figures, not to full precision, and
+// that is a determinism decision rather than a formatting one. These numbers
+// are downstream of a central difference, which ADR-0004 excludes from the
+// cross-platform bounded tier precisely because dividing by h amplifies a
+// libm disagreement by 1/h. Six figures is three orders inside the observed
+// spread and about two more than the picture can draw, so the committed file
+// is stable across platforms — and scripts/gen-modal-map.sh --check compares
+// it NUMERICALLY, with a stated tolerance, rather than as text.
+//
 // Consumed by scripts/gen-social-preview.py.
 
 #include "galata/analyze/modes.hpp"
@@ -58,9 +67,9 @@ void emit_modes(const galata::analyze::ModalDecomposition& decomposition,
     }
     first = false;
     std::printf(
-        "    {\"label\": \"%s\", \"axis\": \"%s\", \"re\": %.12g, \"im\": %.12g, "
-        "\"omega_n\": %.12g, \"zeta\": %.12g, \"oscillatory\": %s, "
-        "\"label_score\": %.12g, \"label_reason\": \"%s\"}",
+        "    {\"label\": \"%s\", \"axis\": \"%s\", \"re\": %.6g, \"im\": %.6g, "
+        "\"omega_n\": %.6g, \"zeta\": %.6g, \"oscillatory\": %s, "
+        "\"label_score\": %.6g, \"label_reason\": \"%s\"}",
         escape(galata::analyze::to_string(mode.label)).c_str(),
         axis,
         mode.eigenvalue.real(),
@@ -108,8 +117,8 @@ int main(int argc, char** argv) {
     std::printf("  \"version\": \"%s\",\n", std::string(galata::version_string()).c_str());
     std::printf("  \"model\": \"%s\",\n", escape(aircraft.description).c_str());
     std::printf(
-        "  \"condition\": {\"altitude_m\": %.12g, \"airspeed_m_s\": %.12g, "
-        "\"mach\": %.12g, \"alpha_deg\": %.12g, \"residual_norm\": %.12g},\n",
+        "  \"condition\": {\"altitude_m\": %.6g, \"airspeed_m_s\": %.6g, "
+        "\"mach\": %.6g, \"alpha_deg\": %.6g, \"residual_norm\": %.6g},\n",
         request.altitude_m,
         trim.airspeed_m_s,
         trim.mach,

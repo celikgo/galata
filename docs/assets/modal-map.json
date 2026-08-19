@@ -2,12 +2,12 @@
   "generator": "galata-modal-map",
   "version": "0.2.0",
   "model": "NT-33A, flight condition 1 — sea level, M = 0.204, power approach (230 gal tip tanks, 25% internal fuel, full flaps, gear down, 1.4 Vs)",
-  "condition": {"altitude_m": 0, "airspeed_m_s": 69.4944, "mach": 0.204218640317, "alpha_deg": 2.14812209216, "residual_norm": 0},
+  "condition": {"altitude_m": 0, "airspeed_m_s": 69.4944, "mach": 0.204219, "alpha_deg": 2.14812, "residual_norm": 0},
   "modes": [
-    {"label": "phugoid", "axis": "longitudinal", "re": -0.0162576479739, "im": 0.170627754828, "omega_n": 0.17140053044, "zeta": 0.0948517949866, "oscillatory": true, "label_score": 0.959357247718, "label_reason": "0.959 of participation in u and theta"},
-    {"label": "short period", "axis": "longitudinal", "re": -0.992001509934, "im": 1.24901624865, "omega_n": 1.59502620201, "zeta": 0.621934303451, "oscillatory": true, "label_score": 0.992599775642, "label_reason": "0.993 of participation in w and q"},
-    {"label": "spiral", "axis": "lateral", "re": -0.0319021340031, "im": 0, "omega_n": 0.0319021340031, "zeta": 1, "oscillatory": false, "label_score": 0.71724867657, "label_reason": "0.717 of participation in phi"},
-    {"label": "roll subsidence", "axis": "lateral", "re": -2.19922894306, "im": 0, "omega_n": 2.19922894306, "zeta": 1, "oscillatory": false, "label_score": 0.838181139021, "label_reason": "0.838 of participation in p"},
-    {"label": "Dutch roll", "axis": "lateral", "re": -0.0680526078779, "im": 1.12727945308, "omega_n": 1.12933171512, "zeta": 0.0602591842299, "oscillatory": true, "label_score": 0.770542251538, "label_reason": "0.771 of participation in v and r"}
+    {"label": "phugoid", "axis": "longitudinal", "re": -0.0162576, "im": 0.170628, "omega_n": 0.171401, "zeta": 0.0948518, "oscillatory": true, "label_score": 0.959357, "label_reason": "0.959 of participation in u and theta"},
+    {"label": "short period", "axis": "longitudinal", "re": -0.992002, "im": 1.24902, "omega_n": 1.59503, "zeta": 0.621934, "oscillatory": true, "label_score": 0.9926, "label_reason": "0.993 of participation in w and q"},
+    {"label": "spiral", "axis": "lateral", "re": -0.0319021, "im": 0, "omega_n": 0.0319021, "zeta": 1, "oscillatory": false, "label_score": 0.717249, "label_reason": "0.717 of participation in phi"},
+    {"label": "roll subsidence", "axis": "lateral", "re": -2.19923, "im": 0, "omega_n": 2.19923, "zeta": 1, "oscillatory": false, "label_score": 0.838181, "label_reason": "0.838 of participation in p"},
+    {"label": "Dutch roll", "axis": "lateral", "re": -0.0680526, "im": 1.12728, "omega_n": 1.12933, "zeta": 0.0602592, "oscillatory": true, "label_score": 0.770542, "label_reason": "0.771 of participation in v and r"}
   ]
 }

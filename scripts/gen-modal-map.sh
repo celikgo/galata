@@ -50,14 +50,20 @@ if grep -q '"label": "unclassified"' "$generated"; then
 fi
 
 if [ "$mode" = "--check" ]; then
-  if ! diff -u "$target" "$generated"; then
-    printf '\n::error::%s is stale, so docs/assets/social-preview.png is wrong.\n' "$target"
+  # Compared NUMERICALLY, not as text. These poles come out of a central
+  # difference, and ADR-0004 does not claim a cross-platform bound for values
+  # downstream of one: dividing by h amplifies a libm disagreement by 1/h. A
+  # byte diff of a file generated on one platform and checked on another would
+  # be a flaky gate, and a flaky gate is worse than a strict one because people
+  # learn to re-run it and then re-run it past a real failure too.
+  if ! python3 "$(dirname "$0")/compare-modal-map.py" "$target" "$generated"; then
+    printf '\n::error::%s no longer matches what the chain produces, so\n' "$target"
+    printf 'docs/assets/social-preview.png is asserting poles that are not current.\n'
     printf 'Regenerate both with:\n'
     printf '  scripts/gen-modal-map.sh %s\n' "$binary"
     printf '  python3 scripts/gen-social-preview.py\n'
     exit 1
   fi
-  printf '%s is current.\n' "$target"
   exit 0
 fi
 
