@@ -713,4 +713,4 @@ strict SI does not make a metre and a radian commensurate.
 
 ---
 
-Generated from galata 0.1.0 by `tools/validation/report_main.cpp`.
+Generated from galata 0.2.0 by `tools/validation/report_main.cpp`.
