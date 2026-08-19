@@ -112,6 +112,15 @@ jobs:
         shell: bash
         run: scripts/gen-status-table.sh "build/${{ matrix.preset }}/src/cli/galata" --check
 
+      # The social preview card is drawn from a run, not from numbers typed into
+      # a drawing script. This is what keeps that true: if the model or the
+      # classifier moves, the committed poles stop matching and this fails,
+      # rather than the card quietly going on asserting the old ones.
+      - name: Social preview poles match what the chain produces
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: scripts/gen-modal-map.sh "build/${{ matrix.preset }}/tools/social/galata-modal-map" --check
+
       # The quickstart in the README is a promise. This is the only thing that
       # keeps it true.
       - name: The shipped example runs
