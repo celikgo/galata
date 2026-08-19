@@ -214,9 +214,9 @@ down once, in full, in
 ## Documentation
 
 Everything below is also readable at
-<https://celikgo.github.io/galata/>, which is this repository's own Markdown
-rendered — including the generated V&V report. It adds no content that is not in
-the repository.
+[celikgo.github.io/galata](https://celikgo.github.io/galata/), which is this
+repository's own Markdown rendered — including the generated V&V report. It adds
+no content that is not in the repository.
 
 - [`docs/CHARTER.md`](docs/CHARTER.md) — the engineering rules, in full
 - [`docs/adr/`](docs/adr/README.md) — architecture decision records
