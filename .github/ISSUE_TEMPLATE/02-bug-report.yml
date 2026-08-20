@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Bug report
+description: Something builds, runs, and produces the wrong answer — or does not build or run.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >-
+        The exact commands. If it involves a study, paste the YAML — the CLI is
+        driven entirely by that file, so the file is the reproduction.
+      render: shell
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`galata version` prints the tag, the commit and the build identification."
+      placeholder: "0.2.0 (a46c6d8)"
+    validations: { required: true }
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux x86-64
+        - macOS arm64
+        - macOS x86-64
+        - Windows x86-64
+        - Other (say which below)
+    validations: { required: true }
+  - type: input
+    id: toolchain
+    attributes:
+      label: Compiler and version
+      placeholder: "clang 18.1.3 / gcc 13.2 / MSVC 19.40"
+  - type: textarea
+    id: output
+    attributes:
+      label: Output, error or failing test
+      render: text
+  - type: checkboxes
+    id: determinism
+    attributes:
+      label: If the complaint is that two runs disagree
+      options:
+        - label: >-
+            I have read ADR-0004. Bit-identical results are guaranteed on the SAME
+            platform; ACROSS platforms the guarantee is 1e-9 relative, because
+            platform math libraries disagree on `sin` in the last bits.

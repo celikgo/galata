@@ -54,6 +54,7 @@ TITLES = {
     "docs/TESTING.md": "Testing",
     "docs/ROADMAP.md": "Roadmap",
     "docs/adr/README.md": "Architecture decision records",
+    "docs/notes/phugoid-damping.md": "The phugoid-damping discrepancy",
 }
 
 # Order of the top navigation. Anything discovered but not named here is still
@@ -78,11 +79,14 @@ def discover():
             pages[name] = out
     for p in sorted((ROOT / "docs").glob("*.md")):
         pages[f"docs/{p.name}"] = p.stem.lower() + ".html"
-    adr = ROOT / "docs" / "adr"
-    if adr.is_dir():
-        for p in sorted(adr.glob("*.md")):
-            out = "adr/index.html" if p.name == "README.md" else f"adr/{p.stem}.html"
-            pages[f"docs/adr/{p.name}"] = out
+    # Every subdirectory of docs/, not a list of the ones that exist today.
+    # docs/notes/ was added after docs/adr/ and had to appear without this
+    # function being edited, which is constraint 1 at the top of the file.
+    for sub in sorted(d for d in (ROOT / "docs").iterdir() if d.is_dir()):
+        for p in sorted(sub.glob("*.md")):
+            out = (f"{sub.name}/index.html" if p.name == "README.md"
+                   else f"{sub.name}/{p.stem}.html")
+            pages[f"docs/{sub.name}/{p.name}"] = out
     return pages
 
 
@@ -113,6 +117,14 @@ def rewrite_links(md_text, src, pages):
         resolved = os.path.normpath(str(src_dir / path)).replace(os.sep, "/")
         if resolved.startswith("./"):
             resolved = resolved[2:]
+        # docs/assets/ is copied to the site root as assets/, so a link or an
+        # image pointing into it must resolve to that copy. Sending it to a
+        # GitHub blob URL instead would render an HTML page where the README
+        # asked for a picture.
+        if resolved.startswith("docs/assets/") and (ROOT / resolved).exists():
+            rel = os.path.relpath("assets/" + resolved[len("docs/assets/"):],
+                                  str(out_dir)).replace(os.sep, "/")
+            return f"[{label}]({rel}{anchor})"
         if resolved in pages:
             rel = os.path.relpath(pages[resolved], str(out_dir)).replace(os.sep, "/")
             return f"[{label}]({rel}{anchor})"

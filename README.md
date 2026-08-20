@@ -26,6 +26,89 @@ C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 [![CI](https://github.com/celikgo/galata/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/celikgo/galata/actions/workflows/ci.yml)
 [![Determinism](https://github.com/celikgo/galata/actions/workflows/determinism.yml/badge.svg?branch=main)](docs/adr/0004-determinism-policy.md)
 
+![The NT-33A pole map at flight condition 1: short period, phugoid, Dutch roll, roll subsidence and spiral, each labelled by eigenvector participation, on an s-plane with constant-zeta and constant-omega-n grid lines.](docs/assets/social-preview.png)
+
+<sub>Drawn from a run, not by hand: `tools/social/` emits the poles, CI diffs
+them, and the labels are the classifier's own output.</sub>
+
+---
+
+## The claim, and how to check it in one command
+
+Everything below is produced by
+[`tests/validation/`](tests/validation/) and regenerated into
+[`docs/VERIFICATION.md`](docs/VERIFICATION.md), which CI diffs. The input is a
+set of **non-dimensional** derivatives and some geometry — there is no matrix
+anywhere in it.
+
+**The aircraft.** NT-33A, a variable-stability T-33. **The condition.** Flight
+condition 1 of eight, Table II-2: sea level, M = 0.204, power approach, bare
+airframe. **The reference.** Robert K. Heffley and Wayne F. Jewell, *Aircraft
+Handling Qualities Data*, NASA CR-2144, Systems Technology Inc., December 1972.
+NTRS 19730003312, distribution unlimited.
+
+### Dimensional derivatives, against Table II-7
+
+Seven numbers the report computed from the same non-dimensional set by a
+different route.
+
+| Derivative | galata | published | deviation |
+|---|---|---|---|
+| Y_v | −0.124902 | −0.125 | 0.08% |
+| L_beta' | −5.49695 | −5.49 | 0.13% |
+| N_beta' | +0.667796 | +0.667 | 0.12% |
+| L_p' | −2.03530 | −2.03 | **0.26%** |
+| N_p' | −0.115922 | −0.116 | 0.07% |
+| L_r' | +0.64184 | +0.641 | 0.13% |
+| N_r' | −0.207034 | −0.207 | 0.02% |
+
+The source prints its inputs and outputs to three significant figures, so each
+value carries up to about 0.5% of its own rounding and several combine in every
+one of these. **The gate is 0.5%. The worst observed is 0.26%.**
+
+### All five classical modes, against Tables II-4 and II-8
+
+| Mode | galata | published | deviation |
+|---|---|---|---|
+| Phugoid | ζ 0.094852, ωₙ 0.1714 | 0.0948, 0.172 | 0.05%, 0.35% |
+| Short period | ζ 0.62193, ωₙ 1.5950 | 0.622, 1.59 | 0.01%, 0.32% |
+| Dutch roll | ζ 0.060259, ωₙ 1.1293 | 0.0609, 1.13 | **1.05%**, 0.06% |
+| Roll subsidence | 1/T 2.1992 | 2.20 | 0.04% |
+| Spiral | 1/T 0.031902 | 0.0318 | 0.32% |
+
+The report prints no headings saying "short period" or "Dutch roll" — the modal
+characteristics *are* the factored denominators of its transfer-function tables,
+and Appendix A prints this exact condition's lateral denominator as its worked
+example. galata's labels come from eigenvector participation and are checked
+against that identification.
+
+### Reproduce both tables
+
+```bash
+git clone https://github.com/celikgo/galata.git
+cd galata
+export VCPKG_ROOT=/path/to/vcpkg          # manifest mode fetches the rest
+
+cmake --preset dev
+cmake --build --preset dev
+
+ctest --preset dev -L validation          # fails if any deviation above exceeds its gate
+./build/dev/src/cli/galata run examples/nt33a-trim-and-linearise/study.yaml
+```
+
+The tier carries the ctest **label** `validation`, so `-L` is the flag.
+
+### What does NOT reproduce
+
+One published quantity does not, and it stays published rather than being
+quietly dropped: a state matrix assembled **by hand** from the report's
+*dimensional* derivatives gives a phugoid damping ratio 2.04% below the
+published value, while the full chain above reproduces it to 0.05%. The cause is
+now localised to a single matrix entry — a gravity term that the substituted-ẇ
+form of the report's Appendix C manufactures and that cannot physically exist.
+The investigation, including what was ruled out, is in
+[`docs/notes/phugoid-damping.md`](docs/notes/phugoid-damping.md); a labelled
+regression lock holds the gap at its measured size meanwhile.
 
 ---
 

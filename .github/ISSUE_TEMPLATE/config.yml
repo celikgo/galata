@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Blank issues are disabled. Not to be officious — because every template here
+# asks for the one thing that makes a report actionable in a project whose
+# claims are all numeric: what you ran, and what number came out.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/celikgo/galata/security/advisories/new
+    about: >-
+      Privately, never as a public issue. See SECURITY.md for scope and for what
+      is explicitly NOT a vulnerability in a library with no network surface.
+  - name: Read what has been checked against what
+    url: https://celikgo.github.io/galata/verification.html
+    about: >-
+      The generated V&V report. Frame and sign conventions are in ADR-0002 and
+      units in ADR-0003; both are on the same site.
