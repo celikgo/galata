@@ -22,6 +22,7 @@ on:
     paths:
       - '**.md'
       - 'docs/assets/**'
+      - 'docs/reports/**'
       - 'scripts/build-docs-site.py'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -56,6 +57,7 @@ jobs:
           python3 scripts/build-docs-site.py _site
           test -s _site/index.html
           test -s _site/verification.html
+          test -s _site/reports/nt33a-fc1.html
 
       # A relative link that survived the rewrite is a link to a file that does
       # not exist — the site's equivalent of charter rule 4, checked here
