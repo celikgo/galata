@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NT-33A at flight condition 1 &mdash; galata</title>
+<meta name="description" content="Trim, the five classical modes, the pole map and one
+closed bank-angle loop for the NT-33A at NASA CR-2144 flight condition 1, drawn from a
+galata run rather than transcribed.">
+<style>
+:root{
+  --ground:#15202B; --panel:#1E2732; --ink:#F7F9F9; --ink-muted:#8B98A5;
+  --rule:#38444D; --grid:#38444D; --accent:#1D9BF0; --link:#1D9BF0; --lateral:#FFD400;
+  --phase:#9B7BFF; --critical:#F91880; --good:#00BA7C; --bad:#F87171;
+  --rhp:rgba(249,24,128,.10); --code:#111A24;
+}
+:root:has(#light:checked){
+  --ground:#FFFFFF; --panel:#F7F9F9; --ink:#0F1419; --ink-muted:#536471;
+  --rule:#CFD9DE; --grid:#AFBBC3; --accent:#1D9BF0; --link:#1578C2; --lateral:#C2410C;
+  --phase:#6941E0; --critical:#E01673; --good:#007A55; --bad:#D91F2C;
+  --rhp:rgba(224,22,115,.08); --code:#F0F3F5;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--ground)}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:0 24px 96px}
+a{color:var(--link)}
+a:hover{text-decoration:none}
+h1{font-size:32px;line-height:1.18;letter-spacing:-.5px;margin:.15em 0 .3em;font-weight:600}
+h2{font-size:22px;margin:2.6em 0 .5em;padding-bottom:.32em;font-weight:600;
+  border-bottom:1px solid var(--rule)}
+h3{font-size:16.5px;margin:1.8em 0 .4em;font-weight:600}
+p{color:var(--ink);margin:.7em 0}
+.eyebrow,.kicker{font-size:11.5px;letter-spacing:1.3px;text-transform:uppercase;
+  color:var(--ink-muted);font-weight:600}
+.sub{color:var(--ink-muted);font-size:17px;margin:.2em 0 1.1em}
+.lede{font-size:17.5px;line-height:1.6}
+header{border-bottom:1px solid var(--rule);background:var(--panel);margin-bottom:34px}
+.bar{max-width:1040px;margin:0 auto;padding:26px 24px 30px;position:relative}
+.meta{display:flex;flex-wrap:wrap;gap:6px 26px;font-size:13.5px;color:var(--ink-muted);
+  margin-top:14px;padding-top:14px;border-top:1px solid var(--rule)}
+.meta b{color:var(--ink);font-weight:600}
+.cite{font-size:13.5px;color:var(--ink-muted);margin-top:10px;max-width:74ch}
+.tw{overflow-x:auto;margin:1.1em 0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border:1px solid var(--rule);padding:7px 11px;text-align:left;vertical-align:top}
+th{background:var(--panel);font-weight:600;white-space:nowrap;color:var(--ink)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--panel) 55%,transparent)}
+code{background:var(--code);border:1px solid var(--rule);border-radius:4px;padding:.1em .36em;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+pre{background:var(--code);border:1px solid var(--rule);border-radius:7px;padding:14px 16px;
+  overflow-x:auto;font-size:13px;line-height:1.55}
+pre code{background:none;border:0;padding:0}
+figure{margin:1.4em 0 1.8em}
+figure svg{width:100%;height:auto;display:block}
+figcaption{font-size:13.5px;color:var(--ink-muted);margin-top:10px;max-width:86ch}
+figcaption b{color:var(--ink);font-weight:600}
+.note-box{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:0 7px 7px 0;padding:13px 17px;margin:1.3em 0;font-size:14.5px;color:var(--ink-muted)}
+.note-box.warn{border-left-color:var(--lateral)}
+.note-box b{color:var(--ink)}
+.routine{font-size:12.5px;color:var(--ink-muted);margin:.3em 0 0}
+.routine code{font-size:12px}
+footer{border-top:1px solid var(--rule);margin-top:60px;padding:22px 24px 60px;
+  max-width:1040px;margin-left:auto;margin-right:auto;font-size:13px;color:var(--ink-muted)}
+#light{position:absolute;opacity:0;pointer-events:none}
+.switch{position:absolute;top:26px;right:24px;cursor:pointer;font-size:12.5px;
+  color:var(--ink-muted);border:1px solid var(--rule);border-radius:999px;
+  padding:5px 13px;user-select:none;background:var(--ground)}
+.switch:hover{color:var(--ink)}
+.deviation-in{color:var(--good);font-weight:600}
+.deviation-out{color:var(--lateral);font-weight:600}
+
+/* --- figure elements ---------------------------------------------------- */
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.panel{fill:var(--panel);stroke:var(--rule);stroke-width:1}
+.rhp{fill:var(--rhp)}
+.grid{stroke:var(--grid);stroke-width:1;fill:none}
+.gridfaint{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 3}
+.axis{stroke:var(--ink-muted);stroke-width:1.2;opacity:.75}
+.axis-crit{stroke:var(--critical);stroke-width:1.2;opacity:.7}
+.reference{stroke:var(--critical);stroke-width:1.2;stroke-dasharray:5 4}
+.tick{fill:var(--ink-muted);font-size:10px}
+.note{fill:var(--ink-muted);font-size:11px}
+.eyebrow{fill:var(--ink-muted);letter-spacing:1.2px;font-weight:600}
+.m-long,.m-long line{stroke:var(--accent);stroke-width:2.4;stroke-linecap:round}
+.m-lat,.m-lat line{stroke:var(--lateral);stroke-width:2.4;stroke-linecap:round}
+.m-crit,.m-crit line{stroke:var(--critical);stroke-width:2.2;stroke-linecap:round}
+.t-long{fill:var(--accent);font-weight:600}
+.t-lat{fill:var(--lateral);font-weight:600}
+.t-crit{fill:var(--critical);font-weight:600}
+.marker{fill:none;stroke:var(--ink-muted);stroke-width:1;stroke-dasharray:3 2}
+.marker-tie{stroke:var(--ink-muted);stroke-width:1;stroke-dasharray:3 2;opacity:.4}
+.trace-mag{stroke:var(--accent);stroke-width:2}
+.trace-pha{stroke:var(--phase);stroke-width:2}
+.trace-nyq{stroke:var(--accent);stroke-width:2}
+.trace-mirror{stroke:var(--accent);stroke-width:1.2;stroke-dasharray:4 4;opacity:.5}
+.unit-circle{stroke:var(--ink-muted);stroke-width:1.2;stroke-dasharray:3 3;opacity:.8}
+.disk{fill:color-mix(in srgb,var(--critical) 10%,transparent);stroke:var(--critical);
+  stroke-width:1.4}
+.touch{fill:var(--critical);stroke:none}
+.crossing{stroke:var(--ink-muted);stroke-width:1;stroke-dasharray:3 3;opacity:.6}
+.crossing-strong{stroke:var(--critical);stroke-width:1.4;stroke-dasharray:4 3}
+.span{stroke:var(--critical);stroke-width:3}
+
+@media (max-width:760px){
+  main{padding:0 14px 64px} .bar{padding:22px 14px 26px} h1{font-size:25px}
+  .switch{position:static;display:inline-block;margin-top:12px}
+}
+
+/* Printed and projected, this page is read on white. A report printed from a
+   dark palette is a report nobody reads twice. */
+@media print{
+  :root{
+    --ground:#FFFFFF; --panel:#F7F9F9; --ink:#0F1419; --ink-muted:#536471;
+    --rule:#CFD9DE; --grid:#AFBBC3; --accent:#1578C2; --link:#1578C2; --lateral:#C2410C;
+    --phase:#6941E0; --critical:#E01673; --good:#007A55; --bad:#D91F2C;
+    --rhp:rgba(224,22,115,.08); --code:#F0F3F5;
+  }
+  .switch,#light{display:none}
+  header{border-bottom:1px solid var(--rule)}
+  figure,table{break-inside:avoid;page-break-inside:avoid}
+  h2{break-after:avoid;page-break-after:avoid}
+  a{text-decoration:none}
+  a[href^="http"]::after{content:" (" attr(href) ")";font-size:10px;color:#536471}
+  figcaption a[href^="http"]::after{content:""}
+}
+</style>
+</head>
+<body>
+<input type="checkbox" id="light">
+<header><div class="bar">
+<label class="switch" for="light">Light / dark</label>
+<p class="kicker">galata &#183; flight-condition report</p>
+<h1>NT-33A at flight condition 1</h1>
+<p class="sub">Trim, the five classical modes, and one closed bank-angle loop
+&mdash; every number on this page produced by the run that generated it.</p>
+<div class="meta">
+<span><b>Model</b> NT-33A, flight condition 1 — sea level, M = 0.204, power approach (230 gal tip tanks, 25% internal fuel, full flaps, gear down, 1.4 Vs)</span>
+</div>
+<div class="meta">
+<span><b>Condition</b> 0 m, 69.494 m/s,
+M&nbsp;0.2042</span>
+<span><b>Built by</b> galata 0.2.0</span>
+<span><b>Emitter</b> <code>galata-report-data</code></span>
+<span><a href="https://celikgo.github.io/galata/">Documentation</a></span>
+<span><a href="https://github.com/celikgo/galata">Source</a></span>
+</div>
+<p class="cite"><b>Reference.</b> R. K. Heffley and W. F. Jewell, &quot;Aircraft Handling Qualities Data&quot;, NASA CR-2144, Systems Technology Inc., December 1972, Tables II-1 and II-2. NTRS 19730003312. Distribution: Unclassified - Unlimited.</p>
+</div></header>
+
+<main>
+<p class="lede">This page is a <em>run</em>, not a write-up. A single command
+loads a nonlinear aircraft model built from non-dimensional derivatives, trims
+it, linearises it about that trim by central differences, classifies the modes by
+eigenvector participation, closes one loop around the result and measures it.
+Every table cell and every mark on every plot below is read from the JSON that
+run emitted; the routine that produced each is named beneath it.</p>
+
+<p class="note-box"><b>How to get this page yourself.</b></p>
+<pre><code>cmake --preset dev
+cmake --build --preset dev
+./build/dev/tools/report/galata-report-data &gt; docs/assets/nt33a-fc1-run.json
+python3 scripts/gen-report-page.py</code></pre>
+<p class="routine">CI regenerates the JSON and compares it numerically against
+the committed copy, then regenerates this page and diffs it. A page that had
+drifted from the code would still look like evidence, which is worse than no page
+at all.</p>
+
+
+<h2 id="trim">The trim point</h2>
+<p>Three unknowns &mdash; angle of attack, elevator and thrust &mdash; and three
+equations: the two body-axis translational accelerations and the pitching
+acceleration all vanish. Everything further down this page is taken about
+<em>this</em> point, so it is the first thing to disbelieve.</p>
+<div class="tw"><table><thead><tr><th class="">Quantity</th><th class="n">Value</th><th class="">Unit</th></tr></thead><tbody><tr><td class="">Altitude</td><td class="n">0.0</td><td class="">m, geometric</td></tr><tr><td class="">True airspeed</td><td class="n">69.4944</td><td class="">m/s</td></tr><tr><td class="">Mach</td><td class="n">0.2042</td><td class="">&mdash;</td></tr><tr><td class="">Dynamic pressure</td><td class="n">2958.1</td><td class="">Pa</td></tr><tr><td class="">Angle of attack</td><td class="n">2.1481</td><td class="">deg</td></tr><tr><td class="">Flight-path angle</td><td class="n">0.0000</td><td class="">deg</td></tr><tr><td class="">Pitch attitude</td><td class="n">2.1481</td><td class="">deg</td></tr><tr><td class="">Elevator</td><td class="n">0.0234</td><td class="">deg</td></tr><tr><td class="">Thrust</td><td class="n">8685.5</td><td class="">N</td></tr><tr><td class="">Trim lift coefficient</td><td class="n">0.80841</td><td class="">&mdash;</td></tr></tbody></table></div>
+<p><b>Evidence.</b> Residual norm 0.000000000000
+(m/s&sup2; and rad/s&sup2;); trim Jacobian condition number
+350682.</p>
+<p class="note-box">A trim is only as good as its residual, so the residual is
+reported rather than asserted, and the solver <b>throws</b> rather than
+returning a best effort: a linearisation taken about a point that is not an
+equilibrium produces a state-space model that is plausible and wrong. The
+condition number is large here for a units reason and not a physical one &mdash;
+an angle of order 0.04&nbsp;rad and a thrust of order 10<sup>4</sup>&nbsp;N sit
+in the same unknown vector, so the columns differ in scale by five orders before
+any aircraft is involved. It is worth worrying about only when it is large
+<em>and</em> the residual will not come down.</p>
+
+<p class="routine">Computed by <code>galata::trim::trim_level</code>.</p>
+
+
+<h2 id="modes">The modal table</h2>
+<p>The labels are not assigned by frequency order. Each one comes from
+<em>eigenvector participation</em> &mdash; how much of the mode lives in the
+states that define it &mdash; and the score is the share of participation that
+does. Below about 0.5 a label is a guess, and the column is there so that can be
+seen rather than assumed.</p>
+<div class="tw"><table><thead><tr><th class="">Mode</th><th class="">Axis</th><th class="n">&lambda; (1/s)</th><th class="n">&omega;<sub>n</sub> (rad/s)</th><th class="n">&zeta;</th><th class="n">Period (s)</th><th class="n">T&frac12; (s)</th><th class="n">T&times;2 (s)</th><th class="n">Score</th><th class="">Why it carries that label</th></tr></thead><tbody><tr><td class=""><b>phugoid</b></td><td class="">longitudinal</td><td class="n">-0.01626 &plusmn; 0.17063j</td><td class="n">0.17140</td><td class="n">0.09485</td><td class="n">36.824</td><td class="n">42.635</td><td class="n">&mdash;</td><td class="n">0.959</td><td class="">0.959 of participation in u and theta</td></tr><tr><td class=""><b>short period</b></td><td class="">longitudinal</td><td class="n">-0.99200 &plusmn; 1.24902j</td><td class="n">1.59503</td><td class="n">0.62193</td><td class="n">5.031</td><td class="n">0.699</td><td class="n">&mdash;</td><td class="n">0.993</td><td class="">0.993 of participation in w and q</td></tr><tr><td class=""><b>spiral</b></td><td class="">lateral</td><td class="n">-0.03190</td><td class="n">0.03190</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">21.727</td><td class="n">&mdash;</td><td class="n">0.717</td><td class="">0.717 of participation in phi</td></tr><tr><td class=""><b>roll subsidence</b></td><td class="">lateral</td><td class="n">-2.19923</td><td class="n">2.19923</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">0.315</td><td class="n">&mdash;</td><td class="n">0.838</td><td class="">0.838 of participation in p</td></tr><tr><td class=""><b>Dutch roll</b></td><td class="">lateral</td><td class="n">-0.06805 &plusmn; 1.12728j</td><td class="n">1.12933</td><td class="n">0.06026</td><td class="n">5.574</td><td class="n">10.185</td><td class="n">&mdash;</td><td class="n">0.771</td><td class="">0.771 of participation in v and r</td></tr></tbody></table></div>
+<p class="note-box">A dash is a quantity that is not defined for that mode, never
+a zero: a real root has no period, and a mode has either a time to half amplitude
+or a time to double, never both. Printing zero there would invite a plot to draw
+it.</p>
+<p class="routine">Computed by <code>galata::analyze::analyze_modes</code>.</p>
+
+
+<h2 id="poles">The pole map</h2>
+<figure>
+<svg viewBox="0 0 980 524" width="980" height="524" role="img" xmlns="http://www.w3.org/2000/svg" aria-label="Pole map of the NT-33A at flight condition 1: every classical mode plotted on the s-plane, labelled by eigenvector participation.">
+<clipPath id="clip-whole"><rect x="58" y="66" width="380" height="380"/></clipPath>
+<clipPath id="clip-detail"><rect x="542" y="66" width="380" height="380"/></clipPath>
+<rect class="panel" x="58" y="66" width="380" height="380" rx="3"/>
+<g clip-path="url(#clip-whole)">
+<rect class="rhp" x="419.0" y="66" width="19.0" height="380"/>
+<path class="grid" d="M 419.00,189.86 L 416.12,189.92 L 413.24,190.11 L 410.37,190.43 L 407.52,190.87 L 404.68,191.43 L 401.88,192.11 L 399.11,192.92 L 396.38,193.85 L 393.69,194.90 L 391.05,196.06 L 388.46,197.33 L 385.93,198.72 L 383.46,200.22 L 381.06,201.82 L 378.74,203.53 L 376.49,205.33 L 374.32,207.24 L 372.23,209.23 L 370.24,211.32 L 368.33,213.49 L 366.53,215.74 L 364.82,218.06 L 363.22,220.46 L 361.72,222.93 L 360.33,225.46 L 359.06,228.05 L 357.90,230.69 L 356.85,233.38 L 355.92,236.11 L 355.11,238.88 L 354.43,241.68 L 353.87,244.52 L 353.43,247.37 L 353.11,250.24 L 352.92,253.12 L 352.86,256.00 L 352.92,258.88 L 353.11,261.76 L 353.43,264.63 L 353.87,267.48 L 354.43,270.32 L 355.11,273.12 L 355.92,275.89 L 356.85,278.62 L 357.90,281.31 L 359.06,283.95 L 360.33,286.54 L 361.72,289.07 L 363.22,291.54 L 364.82,293.94 L 366.53,296.26 L 368.33,298.51 L 370.24,300.68 L 372.23,302.77 L 374.32,304.76 L 376.49,306.67 L 378.74,308.47 L 381.06,310.18 L 383.46,311.78 L 385.93,313.28 L 388.46,314.67 L 391.05,315.94 L 393.69,317.10 L 396.38,318.15 L 399.11,319.08 L 401.88,319.89 L 404.68,320.57 L 407.52,321.13 L 410.37,321.57 L 413.24,321.89 L 416.12,322.08 L 419.00,322.14" fill="none"/>
+<text class="tick" x="356.9" y="251.0" text-anchor="start" font-size="10">0.5</text>
+<path class="grid" d="M 419.00,123.72 L 413.23,123.85 L 407.47,124.23 L 401.73,124.85 L 396.03,125.73 L 390.37,126.86 L 384.76,128.23 L 379.22,129.84 L 373.76,131.70 L 368.38,133.79 L 363.10,136.12 L 357.92,138.67 L 352.86,141.44 L 347.93,144.44 L 343.13,147.64 L 338.47,151.06 L 333.97,154.67 L 329.63,158.47 L 325.47,162.47 L 321.47,166.63 L 317.67,170.97 L 314.06,175.47 L 310.64,180.13 L 307.44,184.93 L 304.44,189.86 L 301.67,194.92 L 299.12,200.10 L 296.79,205.38 L 294.70,210.76 L 292.84,216.22 L 291.23,221.76 L 289.86,227.37 L 288.73,233.03 L 287.85,238.73 L 287.23,244.47 L 286.85,250.23 L 286.72,256.00 L 286.85,261.77 L 287.23,267.53 L 287.85,273.27 L 288.73,278.97 L 289.86,284.63 L 291.23,290.24 L 292.84,295.78 L 294.70,301.24 L 296.79,306.62 L 299.12,311.90 L 301.67,317.08 L 304.44,322.14 L 307.44,327.07 L 310.64,331.87 L 314.06,336.53 L 317.67,341.03 L 321.47,345.37 L 325.47,349.53 L 329.63,353.53 L 333.97,357.33 L 338.47,360.94 L 343.13,364.36 L 347.93,367.56 L 352.86,370.56 L 357.92,373.33 L 363.10,375.88 L 368.38,378.21 L 373.76,380.30 L 379.22,382.16 L 384.76,383.77 L 390.37,385.14 L 396.03,386.27 L 401.73,387.15 L 407.47,387.77 L 413.23,388.15 L 419.00,388.28" fill="none"/>
+<text class="tick" x="290.7" y="251.0" text-anchor="start" font-size="10">1</text>
+<path class="grid" d="M 419.00,57.58 L 410.35,57.77 L 401.71,58.34 L 393.10,59.28 L 384.55,60.60 L 376.05,62.29 L 367.65,64.34 L 359.34,66.77 L 351.14,69.55 L 343.07,72.69 L 335.15,76.17 L 327.38,80.00 L 319.79,84.17 L 312.39,88.66 L 305.19,93.47 L 298.21,98.59 L 291.46,104.00 L 284.95,109.71 L 278.70,115.70 L 272.71,121.95 L 267.00,128.46 L 261.59,135.21 L 256.47,142.19 L 251.66,149.39 L 247.17,156.79 L 243.00,164.38 L 239.17,172.15 L 235.69,180.07 L 232.55,188.14 L 229.77,196.34 L 227.34,204.65 L 225.29,213.05 L 223.60,221.55 L 222.28,230.10 L 221.34,238.71 L 220.77,247.35 L 220.58,256.00 L 220.77,264.65 L 221.34,273.29 L 222.28,281.90 L 223.60,290.45 L 225.29,298.95 L 227.34,307.35 L 229.77,315.66 L 232.55,323.86 L 235.69,331.93 L 239.17,339.85 L 243.00,347.62 L 247.17,355.21 L 251.66,362.61 L 256.47,369.81 L 261.59,376.79 L 267.00,383.54 L 272.71,390.05 L 278.70,396.30 L 284.95,402.29 L 291.46,408.00 L 298.21,413.41 L 305.19,418.53 L 312.39,423.34 L 319.79,427.83 L 327.38,432.00 L 335.15,435.83 L 343.07,439.31 L 351.14,442.45 L 359.34,445.23 L 367.65,447.66 L 376.05,449.71 L 384.55,451.40 L 393.10,452.72 L 401.71,453.66 L 410.35,454.23 L 419.00,454.42" fill="none"/>
+<text class="tick" x="224.6" y="251.0" text-anchor="start" font-size="10">1.5</text>
+<path class="grid" d="M 419.00,-8.56 L 407.46,-8.30 L 395.94,-7.55 L 384.47,-6.29 L 373.06,-4.54 L 361.74,-2.28 L 350.53,0.46 L 339.45,3.69 L 328.52,7.40 L 317.76,11.58 L 307.19,16.23 L 296.84,21.34 L 286.72,26.89 L 276.85,32.88 L 267.26,39.29 L 257.95,46.11 L 248.95,53.34 L 240.27,60.95 L 231.93,68.93 L 223.95,77.27 L 216.34,85.95 L 209.11,94.95 L 202.29,104.26 L 195.88,113.85 L 189.89,123.72 L 184.34,133.84 L 179.23,144.19 L 174.58,154.76 L 170.40,165.52 L 166.69,176.45 L 163.46,187.53 L 160.72,198.74 L 158.46,210.06 L 156.71,221.47 L 155.45,232.94 L 154.70,244.46 L 154.44,256.00 L 154.70,267.54 L 155.45,279.06 L 156.71,290.53 L 158.46,301.94 L 160.72,313.26 L 163.46,324.47 L 166.69,335.55 L 170.40,346.48 L 174.58,357.24 L 179.23,367.81 L 184.34,378.16 L 189.89,388.28 L 195.88,398.15 L 202.29,407.74 L 209.11,417.05 L 216.34,426.05 L 223.95,434.73 L 231.93,443.07 L 240.27,451.05 L 248.95,458.66 L 257.95,465.89 L 267.26,472.71 L 276.85,479.12 L 286.72,485.11 L 296.84,490.66 L 307.19,495.77 L 317.76,500.42 L 328.52,504.60 L 339.45,508.31 L 350.53,511.54 L 361.74,514.28 L 373.06,516.54 L 384.47,518.29 L 395.94,519.55 L 407.46,520.30 L 419.00,520.56" fill="none"/>
+<text class="tick" x="158.4" y="251.0" text-anchor="start" font-size="10">2</text>
+<path class="grid" d="M 419.00,-74.69 L 404.58,-74.38 L 390.18,-73.44 L 375.84,-71.86 L 361.58,-69.67 L 347.42,-66.86 L 333.41,-63.43 L 319.56,-59.39 L 305.90,-54.75 L 292.45,-49.52 L 279.24,-43.71 L 266.30,-37.33 L 253.65,-30.39 L 241.32,-22.90 L 229.32,-14.89 L 217.69,-6.36 L 206.43,2.67 L 195.59,12.19 L 185.16,22.16 L 175.19,32.59 L 165.67,43.43 L 156.64,54.69 L 148.11,66.32 L 140.10,78.32 L 132.61,90.65 L 125.67,103.30 L 119.29,116.24 L 113.48,129.45 L 108.25,142.90 L 103.61,156.56 L 99.57,170.41 L 96.14,184.42 L 93.33,198.58 L 91.14,212.84 L 89.56,227.18 L 88.62,241.58 L 88.31,256.00 L 88.62,270.42 L 89.56,284.82 L 91.14,299.16 L 93.33,313.42 L 96.14,327.58 L 99.57,341.59 L 103.61,355.44 L 108.25,369.10 L 113.48,382.55 L 119.29,395.76 L 125.67,408.70 L 132.61,421.35 L 140.10,433.68 L 148.11,445.68 L 156.64,457.31 L 165.67,468.57 L 175.19,479.41 L 185.16,489.84 L 195.59,499.81 L 206.43,509.33 L 217.69,518.36 L 229.32,526.89 L 241.32,534.90 L 253.65,542.39 L 266.30,549.33 L 279.24,555.71 L 292.45,561.52 L 305.90,566.75 L 319.56,571.39 L 333.41,575.43 L 347.42,578.86 L 361.58,581.67 L 375.84,583.86 L 390.18,585.44 L 404.58,586.38 L 419.00,586.69" fill="none"/>
+<text class="tick" x="92.3" y="251.0" text-anchor="start" font-size="10">2.5</text>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="358.2" y2="-349.0"/>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="358.2" y2="861.0"/>
+<text class="tick" x="410.4" y="354.0" text-anchor="middle" font-size="10">&zeta; 0.1</text>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="297.4" y2="-339.7"/>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="297.4" y2="851.7"/>
+<text class="tick" x="397.1" y="375.5" text-anchor="middle" font-size="10">&zeta; 0.2</text>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="175.8" y2="-301.2"/>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="175.8" y2="813.2"/>
+<text class="tick" x="362.7" y="397.0" text-anchor="middle" font-size="10">&zeta; 0.4</text>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="54.2" y2="-230.4"/>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="54.2" y2="742.4"/>
+<text class="tick" x="306.1" y="418.5" text-anchor="middle" font-size="10">&zeta; 0.6</text>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="-67.4" y2="-108.8"/>
+<line class="gridfaint" x1="419.0" y1="256.0" x2="-67.4" y2="620.8"/>
+<text class="tick" x="189.7" y="440.0" text-anchor="middle" font-size="10">&zeta; 0.8</text>
+<line class="axis" x1="58.0" y1="256.0" x2="438.0" y2="256.0"/>
+<line class="axis-crit" x1="419.0" y1="66.0" x2="419.0" y2="446.0"/>
+<g class="m-long"><line x1="409.8" y1="226.4" x2="423.8" y2="240.4"/><line x1="409.8" y1="240.4" x2="423.8" y2="226.4"/></g>
+<g class="m-long"><line x1="409.8" y1="271.6" x2="423.8" y2="285.6"/><line x1="409.8" y1="285.6" x2="423.8" y2="271.6"/></g>
+<g class="m-long"><line x1="280.8" y1="83.8" x2="294.8" y2="97.8"/><line x1="280.8" y1="97.8" x2="294.8" y2="83.8"/></g>
+<g class="m-long"><line x1="280.8" y1="414.2" x2="294.8" y2="428.2"/><line x1="280.8" y1="428.2" x2="294.8" y2="414.2"/></g>
+<g class="m-lat"><line x1="407.8" y1="249.0" x2="421.8" y2="263.0"/><line x1="407.8" y1="263.0" x2="421.8" y2="249.0"/></g>
+<g class="m-lat"><line x1="121.1" y1="249.0" x2="135.1" y2="263.0"/><line x1="121.1" y1="263.0" x2="135.1" y2="249.0"/></g>
+<g class="m-lat"><line x1="403.0" y1="99.9" x2="417.0" y2="113.9"/><line x1="403.0" y1="113.9" x2="417.0" y2="99.9"/></g>
+<g class="m-lat"><line x1="403.0" y1="398.1" x2="417.0" y2="412.1"/><line x1="403.0" y1="412.1" x2="417.0" y2="398.1"/></g>
+</g>
+<text class="eyebrow" x="68.0" y="84.0" text-anchor="start" font-size="10">EVERY MODE</text>
+<text class="tick" x="248.0" y="468.0" text-anchor="middle" font-size="11">Re(&lambda;) &mdash; 1/s</text>
+<text class="tick" x="58.0" y="54.0" text-anchor="start" font-size="11">Im(&lambda;) &mdash; rad/s</text>
+<rect class="panel" x="542" y="66" width="380" height="380" rx="3"/>
+<g clip-path="url(#clip-detail)">
+<rect class="rhp" x="903.0" y="66" width="19.0" height="380"/>
+<path class="grid" d="M 903.00,159.17 L 898.78,159.26 L 894.56,159.54 L 890.36,160.00 L 886.19,160.64 L 882.04,161.47 L 877.94,162.47 L 873.88,163.65 L 869.88,165.01 L 865.95,166.54 L 862.08,168.24 L 858.29,170.11 L 854.59,172.14 L 850.97,174.34 L 847.46,176.68 L 844.05,179.18 L 840.76,181.82 L 837.58,184.61 L 834.53,187.53 L 831.61,190.58 L 828.82,193.76 L 826.18,197.05 L 823.68,200.46 L 821.34,203.97 L 819.14,207.59 L 817.11,211.29 L 815.24,215.08 L 813.54,218.95 L 812.01,222.88 L 810.65,226.88 L 809.47,230.94 L 808.47,235.04 L 807.64,239.19 L 807.00,243.36 L 806.54,247.56 L 806.26,251.78 L 806.17,256.00 L 806.26,260.22 L 806.54,264.44 L 807.00,268.64 L 807.64,272.81 L 808.47,276.96 L 809.47,281.06 L 810.65,285.12 L 812.01,289.12 L 813.54,293.05 L 815.24,296.92 L 817.11,300.71 L 819.14,304.41 L 821.34,308.03 L 823.68,311.54 L 826.18,314.95 L 828.82,318.24 L 831.61,321.42 L 834.53,324.47 L 837.58,327.39 L 840.76,330.18 L 844.05,332.82 L 847.46,335.32 L 850.97,337.66 L 854.59,339.86 L 858.29,341.89 L 862.08,343.76 L 865.95,345.46 L 869.88,346.99 L 873.88,348.35 L 877.94,349.53 L 882.04,350.53 L 886.19,351.36 L 890.36,352.00 L 894.56,352.46 L 898.78,352.74 L 903.00,352.83" fill="none"/>
+<text class="tick" x="810.2" y="251.0" text-anchor="start" font-size="10">0.1</text>
+<path class="grid" d="M 903.00,62.34 L 894.55,62.53 L 886.12,63.08 L 877.72,64.00 L 869.37,65.28 L 861.08,66.93 L 852.88,68.94 L 844.77,71.31 L 836.77,74.02 L 828.89,77.08 L 821.16,80.49 L 813.58,84.22 L 806.17,88.29 L 798.95,92.67 L 791.92,97.36 L 785.11,102.36 L 778.52,107.65 L 772.17,113.22 L 766.06,119.06 L 760.22,125.17 L 754.65,131.52 L 749.36,138.11 L 744.36,144.92 L 739.67,151.95 L 735.29,159.17 L 731.22,166.58 L 727.49,174.16 L 724.08,181.89 L 721.02,189.77 L 718.31,197.77 L 715.94,205.88 L 713.93,214.08 L 712.28,222.37 L 711.00,230.72 L 710.08,239.12 L 709.53,247.55 L 709.34,256.00 L 709.53,264.45 L 710.08,272.88 L 711.00,281.28 L 712.28,289.63 L 713.93,297.92 L 715.94,306.12 L 718.31,314.23 L 721.02,322.23 L 724.08,330.11 L 727.49,337.84 L 731.22,345.42 L 735.29,352.83 L 739.67,360.05 L 744.36,367.08 L 749.36,373.89 L 754.65,380.48 L 760.22,386.83 L 766.06,392.94 L 772.17,398.78 L 778.52,404.35 L 785.11,409.64 L 791.92,414.64 L 798.95,419.33 L 806.17,423.71 L 813.58,427.78 L 821.16,431.51 L 828.89,434.92 L 836.77,437.98 L 844.77,440.69 L 852.88,443.06 L 861.08,445.07 L 869.37,446.72 L 877.72,448.00 L 886.12,448.92 L 894.55,449.47 L 903.00,449.66" fill="none"/>
+<text class="tick" x="713.3" y="251.0" text-anchor="start" font-size="10">0.2</text>
+<path class="grid" d="M 903.00,-34.49 L 890.33,-34.21 L 877.68,-33.38 L 865.08,-32.00 L 852.56,-30.07 L 840.13,-27.60 L 827.82,-24.59 L 815.65,-21.04 L 803.65,-16.97 L 791.84,-12.38 L 780.23,-7.27 L 768.87,-1.67 L 757.76,4.43 L 746.92,11.01 L 736.38,18.05 L 726.16,25.54 L 716.28,33.47 L 706.75,41.83 L 697.59,50.59 L 688.83,59.75 L 680.47,69.28 L 672.54,79.16 L 665.05,89.38 L 658.01,99.92 L 651.43,110.76 L 645.33,121.87 L 639.73,133.23 L 634.62,144.84 L 630.03,156.65 L 625.96,168.65 L 622.41,180.82 L 619.40,193.13 L 616.93,205.56 L 615.00,218.08 L 613.62,230.68 L 612.79,243.33 L 612.51,256.00 L 612.79,268.67 L 613.62,281.32 L 615.00,293.92 L 616.93,306.44 L 619.40,318.87 L 622.41,331.18 L 625.96,343.35 L 630.03,355.35 L 634.62,367.16 L 639.73,378.77 L 645.33,390.13 L 651.43,401.24 L 658.01,412.08 L 665.05,422.62 L 672.54,432.84 L 680.47,442.72 L 688.83,452.25 L 697.59,461.41 L 706.75,470.17 L 716.28,478.53 L 726.16,486.46 L 736.38,493.95 L 746.92,500.99 L 757.76,507.57 L 768.87,513.67 L 780.23,519.27 L 791.84,524.38 L 803.65,528.97 L 815.65,533.04 L 827.82,536.59 L 840.13,539.60 L 852.56,542.07 L 865.08,544.00 L 877.68,545.38 L 890.33,546.21 L 903.00,546.49" fill="none"/>
+<text class="tick" x="616.5" y="251.0" text-anchor="start" font-size="10">0.3</text>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="842.2" y2="-349.0"/>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="842.2" y2="861.0"/>
+<text class="tick" x="894.4" y="354.0" text-anchor="middle" font-size="10">&zeta; 0.1</text>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="781.4" y2="-339.7"/>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="781.4" y2="851.7"/>
+<text class="tick" x="881.1" y="375.5" text-anchor="middle" font-size="10">&zeta; 0.2</text>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="659.8" y2="-301.2"/>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="659.8" y2="813.2"/>
+<text class="tick" x="846.7" y="397.0" text-anchor="middle" font-size="10">&zeta; 0.4</text>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="538.2" y2="-230.4"/>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="538.2" y2="742.4"/>
+<text class="tick" x="790.1" y="418.5" text-anchor="middle" font-size="10">&zeta; 0.6</text>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="416.6" y2="-108.8"/>
+<line class="gridfaint" x1="903.0" y1="256.0" x2="416.6" y2="620.8"/>
+<text class="tick" x="673.7" y="440.0" text-anchor="middle" font-size="10">&zeta; 0.8</text>
+<line class="axis" x1="542.0" y1="256.0" x2="922.0" y2="256.0"/>
+<line class="axis-crit" x1="903.0" y1="66.0" x2="903.0" y2="446.0"/>
+<g class="m-long"><line x1="880.3" y1="83.8" x2="894.3" y2="97.8"/><line x1="880.3" y1="97.8" x2="894.3" y2="83.8"/></g>
+<g class="m-long"><line x1="880.3" y1="414.2" x2="894.3" y2="428.2"/><line x1="880.3" y1="428.2" x2="894.3" y2="414.2"/></g>
+<g class="m-lat"><line x1="865.1" y1="249.0" x2="879.1" y2="263.0"/><line x1="865.1" y1="263.0" x2="879.1" y2="249.0"/></g>
+</g>
+<text class="eyebrow" x="552.0" y="84.0" text-anchor="start" font-size="10">MAGNIFIED &#183; 7&#215;</text>
+<text class="tick" x="732.0" y="468.0" text-anchor="middle" font-size="11">Re(&lambda;) &mdash; 1/s</text>
+<text class="tick" x="542.0" y="54.0" text-anchor="start" font-size="11">Im(&lambda;) &mdash; rad/s</text>
+<rect class="marker" x="369.7" y="230.0" width="51.9" height="51.9"/>
+<line class="marker-tie" x1="421.6" y1="230.0" x2="542.0" y2="66.0"/>
+<line class="marker-tie" x1="421.6" y1="282.0" x2="542.0" y2="446.0"/>
+<text class="t-long" x="874.3" y="80.8" text-anchor="end" font-size="13">phugoid</text>
+<text class="t-long" x="274.8" y="80.8" text-anchor="end" font-size="13">short period</text>
+<text class="t-lat" x="872.1" y="240.0" text-anchor="middle" font-size="13">spiral</text>
+<text class="t-lat" x="128.1" y="240.0" text-anchor="middle" font-size="13">roll subsidence</text>
+<text class="t-lat" x="397.0" y="96.9" text-anchor="end" font-size="13">Dutch roll</text>
+<text class="note" x="58.0" y="510.0" text-anchor="start" font-size="11">&#10005; a pole. An oscillatory mode is a conjugate pair and is drawn twice. Shaded: the right half-plane, where a pole is a divergence.</text>
+</svg>
+<figcaption><b>Every mode of both axes on one s-plane</b>, in units of 1/s
+horizontally and rad/s vertically, with constant-&omega;<sub>n</sub> circles and
+constant-&zeta; rays about the origin. Modes of the
+<b style="color:var(--accent)">longitudinal</b> axis and the
+<b style="color:var(--lateral)">lateral</b> axis carry different colours. The
+axes are equally scaled, which is not a stylistic choice: under unequal scaling
+the constant-&omega;<sub>n</sub> circles become ellipses and the
+constant-&zeta; rays stop reading as constant damping. The labels are the
+classifier&rsquo;s own output.</figcaption>
+</figure>
+
+
+<h2 id="participation">Participation factors &mdash; the evidence for the labels</h2>
+<p>Normalised to sum to one across the states of each axis. This is the measure
+the classification rests on, so a label whose evidence looks thin here is a label
+to distrust.</p>
+<h3>Longitudinal &mdash; states <code>u, w, q, theta</code></h3><div class="tw"><table><thead><tr><th class="">Mode</th><th class="n"><code>u</code></th><th class="n"><code>w</code></th><th class="n"><code>q</code></th><th class="n"><code>theta</code></th></tr></thead><tbody><tr><td class=""><b>phugoid</b></td><td class="n">0.477</td><td class="n">0.010</td><td class="n">0.031</td><td class="n">0.483</td></tr><tr><td class=""><b>short period</b></td><td class="n">0.001</td><td class="n">0.499</td><td class="n">0.493</td><td class="n">0.006</td></tr></tbody></table></div><p class="routine">Eigenvector matrix condition number 68.61.</p><h3>Lateral &mdash; states <code>v, p, r, phi</code></h3><div class="tw"><table><thead><tr><th class="">Mode</th><th class="n"><code>v</code></th><th class="n"><code>p</code></th><th class="n"><code>r</code></th><th class="n"><code>phi</code></th></tr></thead><tbody><tr><td class=""><b>spiral</b></td><td class="n">0.005</td><td class="n">0.009</td><td class="n">0.269</td><td class="n">0.717</td></tr><tr><td class=""><b>roll subsidence</b></td><td class="n">0.070</td><td class="n">0.838</td><td class="n">0.034</td><td class="n">0.058</td></tr><tr><td class=""><b>Dutch roll</b></td><td class="n">0.443</td><td class="n">0.111</td><td class="n">0.327</td><td class="n">0.119</td></tr></tbody></table></div><p class="routine">Eigenvector matrix condition number 81.19.</p>
+
+
+<h2 id="published">Against the published values</h2>
+<p>The input to everything above is a set of <b>non-dimensional</b> derivatives
+and some geometry. There is no matrix anywhere in it. These are the modal
+characteristics the same report printed, read from
+<a href="https://github.com/celikgo/galata/blob/main/tests/validation/reference/nt33a_fc1.csv">the committed reference
+file</a> by the same loader the validation tier uses.</p>
+<div class="tw"><table><thead><tr><th class="">Mode</th><th class="">Quantity</th><th class="n">Published</th><th class="n">Its own printing</th><th class="n">galata</th><th class="n">Deviation</th><th class="">Within the published printing?</th></tr></thead><tbody><tr><td class=""><b>phugoid</b></td><td class="">zeta</td><td class="n">0.09480</td><td class="n">&plusmn;5e-05</td><td class="n">0.094852</td><td class="n">0.05%</td><td class=""><span class="deviation-out">outside</span></td></tr><tr><td class=""><b>phugoid</b></td><td class="">omega_n</td><td class="n">0.17200</td><td class="n">&plusmn;0.0005</td><td class="n">0.171401</td><td class="n">0.35%</td><td class=""><span class="deviation-out">outside</span></td></tr><tr><td class=""><b>short period</b></td><td class="">zeta</td><td class="n">0.62200</td><td class="n">&plusmn;0.0005</td><td class="n">0.621934</td><td class="n">0.01%</td><td class=""><span class="deviation-in">inside</span></td></tr><tr><td class=""><b>short period</b></td><td class="">omega_n</td><td class="n">1.59000</td><td class="n">&plusmn;0.005</td><td class="n">1.595030</td><td class="n">0.32%</td><td class=""><span class="deviation-out">outside</span></td></tr><tr><td class=""><b>Dutch roll</b></td><td class="">zeta</td><td class="n">0.06090</td><td class="n">&plusmn;5e-05</td><td class="n">0.060259</td><td class="n">1.05%</td><td class=""><span class="deviation-out">outside</span></td></tr><tr><td class=""><b>Dutch roll</b></td><td class="">omega_n</td><td class="n">1.13000</td><td class="n">&plusmn;0.005</td><td class="n">1.129330</td><td class="n">0.06%</td><td class=""><span class="deviation-in">inside</span></td></tr><tr><td class=""><b>roll subsidence</b></td><td class="">1/T</td><td class="n">2.20000</td><td class="n">&plusmn;0.005</td><td class="n">2.199230</td><td class="n">0.04%</td><td class=""><span class="deviation-in">inside</span></td></tr><tr><td class=""><b>spiral</b></td><td class="">1/T</td><td class="n">0.03180</td><td class="n">&plusmn;5e-05</td><td class="n">0.031902</td><td class="n">0.32%</td><td class=""><span class="deviation-out">outside</span></td></tr></tbody></table></div>
+<p class="note-box"><b>&ldquo;Its own printing&rdquo; is not the gate.</b> The
+source prints three significant figures, so each published value carries half a
+unit in its last digit &mdash; that is the column above. The full error budget
+also has to carry the rounding of the ten printed <em>inputs</em> the value was
+computed from, and it is derived per quantity in
+<a href="https://github.com/celikgo/galata/blob/main/tests/validation/test_nt33a_modes.cpp">the validation tests</a>
+and published in <a href="https://celikgo.github.io/galata/verification.html">the V&amp;V report</a>. This
+page reports the measurement; it does not carry a second copy of the gate,
+because two gates are two answers to one question.</p>
+<p class="note-box warn"><b>The largest deviation in this table is the
+Dutch roll zeta, at 1.05%.</b>
+It is reported rather than absorbed by a wider tolerance, which is the whole
+discipline: a deviation over budget gets localised and published, never widened
+away. One quantity in this reference case does <em>not</em> reproduce at all
+&mdash; the phugoid damping ratio of a state matrix assembled <em>by hand</em>
+from the report&rsquo;s <em>dimensional</em> derivatives, where the chain above
+reproduces it to the deviation shown in the first row. That gap is localised to a
+single matrix entry and written up at
+<a href="https://celikgo.github.io/galata/notes/phugoid-damping.html">the phugoid-damping note</a>; its size
+is published in <a href="https://celikgo.github.io/galata/verification.html">the V&amp;V report</a>, which
+measures it rather than quoting it. It is still open, and it is still listed.</p>
+
+
+<h2 id="loop">One closed loop</h2>
+<p class="note-box"><b>The loop is not the aircraft.</b> Margins are a property
+of a <em>loop</em>, and an aircraft on its own is not one. What is measured below
+is the smallest control law that makes the question meaningful: measure bank
+angle, multiply by a gain, drive the aileron. The A and B matrices are the
+lateral linearisation from the run above &mdash; not a matrix read from a file
+&mdash; and the C row is the control law.</p>
+<div class="tw"><table><thead><tr><th class="">Property</th><th class="">Value</th></tr></thead><tbody><tr><td class="">Loop</td><td class=""><code>aileron</code> to <code>bank_feedback</code></td></tr><tr><td class="">Feedback gain</td><td class="">0.50 rad aileron per rad of bank error</td></tr><tr><td class="">Where the gain comes from</td><td class="">chosen for this example, not from a document</td></tr><tr><td class="">Where the loop is broken</td><td class="">plant input, between the gain and the aileron</td></tr><tr><td class="">Band searched</td><td class="">0.01000 to 100.0 rad/s, 413 points</td></tr><tr><td class="">Worst pivot ratio over the sweep</td><td class="">0.00379</td></tr></tbody></table></div>
+<p class="note-box warn"><b>That gain is a choice, not a published value.</b> It
+is 0.50, and it is chosen because at that gain the
+magnitude crosses unity 3 times, so the loop has
+that many phase margins &mdash; which is the point worth showing. Breaking the loop at the plant <em>output</em> instead would give
+a different transfer function and different margins for the same closed-loop
+system. galata will not make that decision for you.</p>
+
+<figure>
+<svg viewBox="0 0 980 604" width="980" height="604" role="img" xmlns="http://www.w3.org/2000/svg" aria-label="Bode plot of the open-loop bank-angle transfer function, with every gain crossover marked and the governing phase margin annotated.">
+<clipPath id="clip-mag"><rect x="74" y="44" width="848" height="200"/></clipPath>
+<clipPath id="clip-pha"><rect x="74" y="306" width="848" height="200"/></clipPath>
+<rect class="panel" x="74" y="44" width="848" height="200" rx="3"/>
+<line class="grid" x1="74.0" y1="235.7" x2="922.0" y2="235.7"/>
+<text class="tick" x="66.0" y="239.7" text-anchor="end" font-size="10">-75</text>
+<line class="grid" x1="74.0" y1="194.0" x2="922.0" y2="194.0"/>
+<text class="tick" x="66.0" y="198.0" text-anchor="end" font-size="10">-50</text>
+<line class="grid" x1="74.0" y1="152.3" x2="922.0" y2="152.3"/>
+<text class="tick" x="66.0" y="156.3" text-anchor="end" font-size="10">-25</text>
+<line class="grid" x1="74.0" y1="110.7" x2="922.0" y2="110.7"/>
+<text class="tick" x="66.0" y="114.7" text-anchor="end" font-size="10">0</text>
+<line class="grid" x1="74.0" y1="69.0" x2="922.0" y2="69.0"/>
+<text class="tick" x="66.0" y="73.0" text-anchor="end" font-size="10">25</text>
+<line class="grid" x1="74.0" y1="44.0" x2="74.0" y2="244.0"/>
+<line class="grid" x1="286.0" y1="44.0" x2="286.0" y2="244.0"/>
+<line class="grid" x1="498.0" y1="44.0" x2="498.0" y2="244.0"/>
+<line class="grid" x1="710.0" y1="44.0" x2="710.0" y2="244.0"/>
+<line class="grid" x1="922.0" y1="44.0" x2="922.0" y2="244.0"/>
+<rect class="panel" x="74" y="306" width="848" height="200" rx="3"/>
+<line class="grid" x1="74.0" y1="463.9" x2="922.0" y2="463.9"/>
+<text class="tick" x="66.0" y="467.9" text-anchor="end" font-size="10">-150</text>
+<line class="grid" x1="74.0" y1="411.3" x2="922.0" y2="411.3"/>
+<text class="tick" x="66.0" y="415.3" text-anchor="end" font-size="10">-100</text>
+<line class="grid" x1="74.0" y1="358.6" x2="922.0" y2="358.6"/>
+<text class="tick" x="66.0" y="362.6" text-anchor="end" font-size="10">-50</text>
+<line class="grid" x1="74.0" y1="306.0" x2="922.0" y2="306.0"/>
+<text class="tick" x="66.0" y="310.0" text-anchor="end" font-size="10">0</text>
+<line class="grid" x1="74.0" y1="306.0" x2="74.0" y2="506.0"/>
+<line class="grid" x1="286.0" y1="306.0" x2="286.0" y2="506.0"/>
+<line class="grid" x1="498.0" y1="306.0" x2="498.0" y2="506.0"/>
+<line class="grid" x1="710.0" y1="306.0" x2="710.0" y2="506.0"/>
+<line class="grid" x1="922.0" y1="306.0" x2="922.0" y2="506.0"/>
+<line class="reference" x1="74.0" y1="110.7" x2="922.0" y2="110.7"/>
+<text class="t-crit" x="916.0" y="104.7" text-anchor="end" font-size="11">|L| = 1</text>
+<line class="reference" x1="74.0" y1="495.5" x2="922.0" y2="495.5"/>
+<text class="t-crit" x="916.0" y="489.5" text-anchor="end" font-size="11">&minus;180&deg;</text>
+<g clip-path="url(#clip-mag)">
+<path class="trace-mag" d="M 74.00,65.22 L 76.13,65.25 L 78.25,65.28 L 80.38,65.31 L 82.50,65.35 L 84.63,65.38 L 86.75,65.42 L 88.88,65.46 L 91.00,65.50 L 93.13,65.54 L 95.25,65.59 L 97.38,65.63 L 99.50,65.68 L 101.63,65.73 L 103.75,65.78 L 105.88,65.84 L 108.01,65.89 L 110.13,65.95 L 112.26,66.01 L 114.38,66.07 L 116.51,66.14 L 118.63,66.21 L 120.76,66.28 L 122.88,66.35 L 125.01,66.43 L 127.13,66.50 L 129.26,66.58 L 131.38,66.67 L 133.51,66.75 L 135.63,66.84 L 137.76,66.94 L 139.88,67.03 L 142.01,67.13 L 144.14,67.24 L 146.26,67.34 L 148.39,67.45 L 150.51,67.56 L 152.64,67.68 L 154.76,67.80 L 156.89,67.92 L 159.01,68.05 L 161.14,68.18 L 163.26,68.31 L 165.39,68.45 L 167.51,68.59 L 169.64,68.74 L 171.76,68.89 L 173.89,69.04 L 176.02,69.20 L 178.14,69.36 L 180.27,69.52 L 182.39,69.69 L 184.52,69.86 L 186.64,70.04 L 188.77,70.22 L 190.89,70.40 L 193.02,70.59 L 195.14,70.78 L 197.27,70.98 L 199.39,71.18 L 201.52,71.38 L 203.64,71.58 L 205.77,71.79 L 207.89,72.01 L 210.02,72.23 L 212.15,72.45 L 214.27,72.67 L 216.40,72.90 L 218.52,73.13 L 220.65,73.37 L 222.77,73.60 L 224.90,73.84 L 227.02,74.09 L 229.15,74.34 L 231.27,74.59 L 233.40,74.84 L 235.52,75.09 L 237.65,75.35 L 239.77,75.62 L 241.90,75.88 L 244.03,76.15 L 246.15,76.42 L 248.28,76.69 L 250.40,76.96 L 252.53,77.24 L 254.65,77.52 L 256.78,77.80 L 258.90,78.08 L 261.03,78.37 L 263.15,78.66 L 265.28,78.95 L 267.40,79.24 L 269.53,79.53 L 271.65,79.83 L 273.78,80.12 L 275.90,80.42 L 278.03,80.72 L 280.16,81.03 L 282.28,81.33 L 284.41,81.64 L 286.53,81.94 L 288.66,82.25 L 290.78,82.56 L 292.91,82.87 L 295.03,83.19 L 297.16,83.50 L 299.28,83.82 L 301.41,84.13 L 303.53,84.45 L 305.66,84.77 L 307.78,85.09 L 309.91,85.41 L 312.03,85.73 L 314.16,86.06 L 316.29,86.38 L 318.41,86.71 L 320.54,87.04 L 322.66,87.36 L 324.79,87.69 L 326.91,88.02 L 329.04,88.35 L 331.16,88.69 L 333.29,89.02 L 335.41,89.36 L 337.54,89.69 L 339.66,90.03 L 341.79,90.37 L 343.91,90.71 L 346.04,91.05 L 348.17,91.39 L 350.29,91.73 L 352.42,92.07 L 354.54,92.42 L 356.67,92.77 L 358.79,93.11 L 360.92,93.46 L 363.04,93.81 L 365.17,94.16 L 367.29,94.52 L 369.42,94.87 L 371.54,95.23 L 373.67,95.59 L 375.79,95.95 L 377.92,96.31 L 380.05,96.67 L 382.17,97.04 L 384.30,97.40 L 386.42,97.77 L 388.55,98.14 L 390.67,98.52 L 392.80,98.90 L 394.92,99.27 L 397.05,99.66 L 399.17,100.04 L 401.30,100.43 L 403.42,100.82 L 405.55,101.21 L 407.67,101.61 L 409.80,102.01 L 411.92,102.42 L 414.05,102.83 L 416.18,103.24 L 418.30,103.66 L 420.43,104.08 L 422.55,104.51 L 424.68,104.95 L 426.80,105.39 L 428.93,105.84 L 431.05,106.29 L 433.18,106.75 L 435.30,107.22 L 437.43,107.70 L 439.55,108.18 L 441.68,108.67 L 443.80,109.17 L 445.93,109.68 L 448.06,110.20 L 450.18,110.73 L 452.31,111.26 L 454.43,111.80 L 456.56,112.34 L 458.68,112.89 L 460.81,113.43 L 462.93,113.96 L 465.06,114.47 L 467.18,114.95 L 469.31,115.38 L 471.43,115.74 L 473.56,115.99 L 475.68,116.10 L 477.81,116.04 L 479.93,115.76 L 482.06,115.23 L 483.80,114.58 L 484.19,114.42 L 486.31,113.33 L 488.44,111.96 L 490.56,110.31 L 490.84,110.08 L 492.69,108.40 L 494.81,106.24 L 496.94,103.82 L 497.37,103.30 L 499.06,101.14 L 500.48,99.20 L 501.19,98.19 L 503.31,95.00 L 503.48,94.76 L 505.44,91.81 L 506.38,90.53 L 507.56,89.23 L 509.20,88.30 L 509.69,88.25 L 511.81,89.25 L 511.93,89.34 L 513.94,91.38 L 514.59,92.11 L 516.06,93.79 L 517.17,95.00 L 518.19,96.07 L 519.68,97.53 L 520.32,98.12 L 522.44,99.95 L 524.50,101.53 L 524.57,101.58 L 526.69,103.04 L 528.82,104.37 L 529.08,104.53 L 530.94,105.59 L 533.07,106.71 L 535.19,107.76 L 537.32,108.75 L 539.44,109.68 L 541.57,110.56 L 543.69,111.41 L 545.82,112.22 L 547.94,113.00 L 550.07,113.76 L 552.20,114.50 L 554.32,115.22 L 556.45,115.92 L 558.57,116.60 L 560.70,117.28 L 562.82,117.94 L 564.95,118.60 L 567.07,119.24 L 569.20,119.88 L 571.32,120.52 L 573.45,121.15 L 575.57,121.77 L 577.70,122.39 L 579.82,123.01 L 581.95,123.63 L 584.08,124.24 L 586.20,124.85 L 588.33,125.46 L 590.45,126.07 L 592.58,126.68 L 594.70,127.29 L 596.83,127.89 L 598.95,128.50 L 601.08,129.11 L 603.20,129.72 L 605.33,130.33 L 607.45,130.94 L 609.58,131.55 L 611.70,132.16 L 613.83,132.77 L 615.95,133.39 L 618.08,134.00 L 620.21,134.62 L 622.33,135.23 L 624.46,135.85 L 626.58,136.47 L 628.71,137.09 L 630.83,137.71 L 632.96,138.34 L 635.08,138.96 L 637.21,139.59 L 639.33,140.21 L 641.46,140.84 L 643.58,141.47 L 645.71,142.10 L 647.83,142.73 L 649.96,143.37 L 652.09,144.00 L 654.21,144.64 L 656.34,145.27 L 658.46,145.91 L 660.59,146.55 L 662.71,147.19 L 664.84,147.83 L 666.96,148.47 L 669.09,149.11 L 671.21,149.76 L 673.34,150.40 L 675.46,151.05 L 677.59,151.70 L 679.71,152.34 L 681.84,152.99 L 683.96,153.64 L 686.09,154.29 L 688.22,154.94 L 690.34,155.59 L 692.47,156.24 L 694.59,156.90 L 696.72,157.55 L 698.84,158.20 L 700.97,158.86 L 703.09,159.51 L 705.22,160.17 L 707.34,160.83 L 709.47,161.48 L 711.59,162.14 L 713.72,162.80 L 715.84,163.45 L 717.97,164.11 L 720.09,164.77 L 722.22,165.43 L 724.35,166.09 L 726.47,166.75 L 728.60,167.41 L 730.72,168.07 L 732.85,168.73 L 734.97,169.39 L 737.10,170.06 L 739.22,170.72 L 741.35,171.38 L 743.47,172.04 L 745.60,172.71 L 747.72,173.37 L 749.85,174.03 L 751.97,174.70 L 754.10,175.36 L 756.23,176.02 L 758.35,176.69 L 760.48,177.35 L 762.60,178.02 L 764.73,178.68 L 766.85,179.35 L 768.98,180.01 L 771.10,180.68 L 773.23,181.34 L 775.35,182.01 L 777.48,182.67 L 779.60,183.34 L 781.73,184.00 L 783.85,184.67 L 785.98,185.34 L 788.11,186.00 L 790.23,186.67 L 792.36,187.33 L 794.48,188.00 L 796.61,188.67 L 798.73,189.33 L 800.86,190.00 L 802.98,190.67 L 805.11,191.33 L 807.23,192.00 L 809.36,192.67 L 811.48,193.33 L 813.61,194.00 L 815.73,194.67 L 817.86,195.34 L 819.98,196.00 L 822.11,196.67 L 824.24,197.34 L 826.36,198.00 L 828.49,198.67 L 830.61,199.34 L 832.74,200.01 L 834.86,200.67 L 836.99,201.34 L 839.11,202.01 L 841.24,202.68 L 843.36,203.34 L 845.49,204.01 L 847.61,204.68 L 849.74,205.35 L 851.86,206.02 L 853.99,206.68 L 856.12,207.35 L 858.24,208.02 L 860.37,208.69 L 862.49,209.35 L 864.62,210.02 L 866.74,210.69 L 868.87,211.36 L 870.99,212.03 L 873.12,212.69 L 875.24,213.36 L 877.37,214.03 L 879.49,214.70 L 881.62,215.37 L 883.74,216.03 L 885.87,216.70 L 887.99,217.37 L 890.12,218.04 L 892.25,218.71 L 894.37,219.38 L 896.50,220.04 L 898.62,220.71 L 900.75,221.38 L 902.87,222.05 L 905.00,222.72 L 907.12,223.38 L 909.25,224.05 L 911.37,224.72 L 913.50,225.39 L 915.62,226.06 L 917.75,226.72 L 919.87,227.39 L 922.00,228.06" fill="none"/>
+</g>
+<g clip-path="url(#clip-pha)">
+<path class="trace-pha" d="M 74.00,324.38 L 76.13,324.78 L 78.25,325.19 L 80.38,325.61 L 82.50,326.04 L 84.63,326.47 L 86.75,326.91 L 88.88,327.36 L 91.00,327.82 L 93.13,328.28 L 95.25,328.76 L 97.38,329.24 L 99.50,329.73 L 101.63,330.23 L 103.75,330.73 L 105.88,331.25 L 108.01,331.77 L 110.13,332.30 L 112.26,332.83 L 114.38,333.38 L 116.51,333.93 L 118.63,334.49 L 120.76,335.06 L 122.88,335.64 L 125.01,336.22 L 127.13,336.82 L 129.26,337.41 L 131.38,338.02 L 133.51,338.63 L 135.63,339.25 L 137.76,339.88 L 139.88,340.51 L 142.01,341.15 L 144.14,341.79 L 146.26,342.44 L 148.39,343.10 L 150.51,343.76 L 152.64,344.43 L 154.76,345.10 L 156.89,345.77 L 159.01,346.45 L 161.14,347.13 L 163.26,347.82 L 165.39,348.51 L 167.51,349.20 L 169.64,349.89 L 171.76,350.59 L 173.89,351.28 L 176.02,351.98 L 178.14,352.68 L 180.27,353.38 L 182.39,354.08 L 184.52,354.78 L 186.64,355.48 L 188.77,356.18 L 190.89,356.88 L 193.02,357.58 L 195.14,358.27 L 197.27,358.96 L 199.39,359.65 L 201.52,360.34 L 203.64,361.02 L 205.77,361.70 L 207.89,362.37 L 210.02,363.05 L 212.15,363.71 L 214.27,364.37 L 216.40,365.03 L 218.52,365.68 L 220.65,366.32 L 222.77,366.96 L 224.90,367.60 L 227.02,368.22 L 229.15,368.85 L 231.27,369.46 L 233.40,370.07 L 235.52,370.67 L 237.65,371.26 L 239.77,371.85 L 241.90,372.42 L 244.03,373.00 L 246.15,373.56 L 248.28,374.12 L 250.40,374.66 L 252.53,375.20 L 254.65,375.74 L 256.78,376.26 L 258.90,376.78 L 261.03,377.29 L 263.15,377.79 L 265.28,378.28 L 267.40,378.77 L 269.53,379.25 L 271.65,379.72 L 273.78,380.18 L 275.90,380.64 L 278.03,381.08 L 280.16,381.52 L 282.28,381.95 L 284.41,382.38 L 286.53,382.80 L 288.66,383.20 L 290.78,383.61 L 292.91,384.00 L 295.03,384.39 L 297.16,384.77 L 299.28,385.14 L 301.41,385.51 L 303.53,385.87 L 305.66,386.22 L 307.78,386.57 L 309.91,386.91 L 312.03,387.24 L 314.16,387.57 L 316.29,387.89 L 318.41,388.20 L 320.54,388.51 L 322.66,388.81 L 324.79,389.10 L 326.91,389.39 L 329.04,389.68 L 331.16,389.95 L 333.29,390.23 L 335.41,390.49 L 337.54,390.75 L 339.66,391.01 L 341.79,391.25 L 343.91,391.50 L 346.04,391.74 L 348.17,391.97 L 350.29,392.19 L 352.42,392.41 L 354.54,392.63 L 356.67,392.84 L 358.79,393.04 L 360.92,393.24 L 363.04,393.43 L 365.17,393.62 L 367.29,393.80 L 369.42,393.98 L 371.54,394.14 L 373.67,394.31 L 375.79,394.46 L 377.92,394.61 L 380.05,394.75 L 382.17,394.89 L 384.30,395.02 L 386.42,395.13 L 388.55,395.25 L 390.67,395.35 L 392.80,395.44 L 394.92,395.53 L 397.05,395.60 L 399.17,395.66 L 401.30,395.71 L 403.42,395.75 L 405.55,395.78 L 407.67,395.79 L 409.80,395.78 L 411.92,395.76 L 414.05,395.72 L 416.18,395.66 L 418.30,395.57 L 420.43,395.47 L 422.55,395.33 L 424.68,395.16 L 426.80,394.97 L 428.93,394.73 L 431.05,394.45 L 433.18,394.13 L 435.30,393.75 L 437.43,393.32 L 439.55,392.82 L 441.68,392.25 L 443.80,391.59 L 445.93,390.83 L 448.06,389.96 L 450.18,388.97 L 452.31,387.83 L 454.43,386.52 L 456.56,385.02 L 458.68,383.30 L 460.81,381.31 L 462.93,379.03 L 465.06,376.41 L 467.18,373.41 L 469.31,369.99 L 471.43,366.10 L 473.56,361.74 L 475.68,356.92 L 477.81,351.69 L 479.93,346.16 L 482.06,340.49 L 483.80,335.88 L 484.19,334.90 L 486.31,329.61 L 488.44,324.84 L 490.56,320.80 L 490.84,320.34 L 492.69,317.67 L 494.81,315.64 L 496.94,314.92 L 497.37,314.97 L 499.06,315.86 L 500.48,317.67 L 501.19,319.02 L 503.31,325.33 L 503.48,325.98 L 505.44,336.18 L 506.38,342.81 L 507.56,352.76 L 509.20,368.64 L 509.69,373.57 L 511.81,393.29 L 511.93,394.25 L 513.94,408.06 L 514.59,411.53 L 516.06,418.05 L 517.17,421.84 L 518.19,424.75 L 519.68,428.15 L 520.32,429.38 L 522.44,432.70 L 524.50,435.11 L 524.57,435.18 L 526.69,437.10 L 528.82,438.64 L 529.08,438.81 L 530.94,439.92 L 533.07,441.01 L 535.19,441.97 L 537.32,442.82 L 539.44,443.61 L 541.57,444.34 L 543.69,445.03 L 545.82,445.70 L 547.94,446.34 L 550.07,446.96 L 552.20,447.58 L 554.32,448.18 L 556.45,448.78 L 558.57,449.38 L 560.70,449.98 L 562.82,450.57 L 564.95,451.16 L 567.07,451.75 L 569.20,452.35 L 571.32,452.94 L 573.45,453.53 L 575.57,454.13 L 577.70,454.72 L 579.82,455.32 L 581.95,455.91 L 584.08,456.51 L 586.20,457.10 L 588.33,457.70 L 590.45,458.29 L 592.58,458.88 L 594.70,459.47 L 596.83,460.05 L 598.95,460.64 L 601.08,461.22 L 603.20,461.80 L 605.33,462.38 L 607.45,462.95 L 609.58,463.52 L 611.70,464.08 L 613.83,464.64 L 615.95,465.19 L 618.08,465.75 L 620.21,466.29 L 622.33,466.83 L 624.46,467.36 L 626.58,467.89 L 628.71,468.41 L 630.83,468.93 L 632.96,469.44 L 635.08,469.95 L 637.21,470.44 L 639.33,470.93 L 641.46,471.42 L 643.58,471.90 L 645.71,472.37 L 647.83,472.83 L 649.96,473.29 L 652.09,473.74 L 654.21,474.18 L 656.34,474.62 L 658.46,475.05 L 660.59,475.47 L 662.71,475.89 L 664.84,476.30 L 666.96,476.70 L 669.09,477.09 L 671.21,477.48 L 673.34,477.86 L 675.46,478.23 L 677.59,478.60 L 679.71,478.96 L 681.84,479.31 L 683.96,479.66 L 686.09,480.00 L 688.22,480.34 L 690.34,480.66 L 692.47,480.99 L 694.59,481.30 L 696.72,481.61 L 698.84,481.91 L 700.97,482.21 L 703.09,482.50 L 705.22,482.78 L 707.34,483.06 L 709.47,483.34 L 711.59,483.60 L 713.72,483.87 L 715.84,484.12 L 717.97,484.37 L 720.09,484.62 L 722.22,484.86 L 724.35,485.10 L 726.47,485.33 L 728.60,485.55 L 730.72,485.78 L 732.85,485.99 L 734.97,486.21 L 737.10,486.41 L 739.22,486.61 L 741.35,486.81 L 743.47,487.01 L 745.60,487.20 L 747.72,487.38 L 749.85,487.57 L 751.97,487.74 L 754.10,487.92 L 756.23,488.09 L 758.35,488.25 L 760.48,488.42 L 762.60,488.58 L 764.73,488.73 L 766.85,488.88 L 768.98,489.03 L 771.10,489.18 L 773.23,489.32 L 775.35,489.46 L 777.48,489.60 L 779.60,489.73 L 781.73,489.86 L 783.85,489.99 L 785.98,490.11 L 788.11,490.23 L 790.23,490.35 L 792.36,490.47 L 794.48,490.58 L 796.61,490.69 L 798.73,490.80 L 800.86,490.91 L 802.98,491.01 L 805.11,491.11 L 807.23,491.21 L 809.36,491.31 L 811.48,491.40 L 813.61,491.50 L 815.73,491.59 L 817.86,491.67 L 819.98,491.76 L 822.11,491.85 L 824.24,491.93 L 826.36,492.01 L 828.49,492.09 L 830.61,492.16 L 832.74,492.24 L 834.86,492.31 L 836.99,492.39 L 839.11,492.46 L 841.24,492.52 L 843.36,492.59 L 845.49,492.66 L 847.61,492.72 L 849.74,492.78 L 851.86,492.85 L 853.99,492.91 L 856.12,492.96 L 858.24,493.02 L 860.37,493.08 L 862.49,493.13 L 864.62,493.18 L 866.74,493.24 L 868.87,493.29 L 870.99,493.34 L 873.12,493.39 L 875.24,493.43 L 877.37,493.48 L 879.49,493.53 L 881.62,493.57 L 883.74,493.61 L 885.87,493.66 L 887.99,493.70 L 890.12,493.74 L 892.25,493.78 L 894.37,493.82 L 896.50,493.85 L 898.62,493.89 L 900.75,493.93 L 902.87,493.96 L 905.00,494.00 L 907.12,494.03 L 909.25,494.06 L 911.37,494.10 L 913.50,494.13 L 915.62,494.16 L 917.75,494.19 L 919.87,494.22 L 922.00,494.25" fill="none"/>
+</g>
+<line class="crossing" x1="449.9" y1="44.0" x2="449.9" y2="244.0"/>
+<line class="crossing" x1="449.9" y1="306.0" x2="449.9" y2="506.0"/>
+<g class="m-crit"><line x1="444.9" y1="105.7" x2="454.9" y2="115.7"/><line x1="444.9" y1="115.7" x2="454.9" y2="105.7"/></g>
+<text class="tick" x="449.9" y="38.0" text-anchor="middle" font-size="10">0.593</text>
+<line class="crossing" x1="490.1" y1="44.0" x2="490.1" y2="244.0"/>
+<line class="crossing" x1="490.1" y1="306.0" x2="490.1" y2="506.0"/>
+<g class="m-crit"><line x1="485.1" y1="105.7" x2="495.1" y2="115.7"/><line x1="485.1" y1="115.7" x2="495.1" y2="105.7"/></g>
+<text class="tick" x="490.1" y="38.0" text-anchor="middle" font-size="10">0.918</text>
+<line class="crossing-strong" x1="541.8" y1="44.0" x2="541.8" y2="244.0"/>
+<line class="crossing-strong" x1="541.8" y1="306.0" x2="541.8" y2="506.0"/>
+<g class="m-crit"><line x1="536.8" y1="105.7" x2="546.8" y2="115.7"/><line x1="536.8" y1="115.7" x2="546.8" y2="105.7"/></g>
+<line class="span" x1="541.8" y1="444.4" x2="541.8" y2="495.5"/>
+<text class="t-crit" x="549.8" y="473.9" text-anchor="start" font-size="12">PM 48.5&deg;</text>
+<text class="tick" x="541.8" y="38.0" text-anchor="middle" font-size="10">1.61</text>
+<text class="tick" x="74.0" y="525.0" text-anchor="middle" font-size="10">0.01</text>
+<text class="tick" x="286.0" y="525.0" text-anchor="middle" font-size="10">0.1</text>
+<text class="tick" x="498.0" y="525.0" text-anchor="middle" font-size="10">1</text>
+<text class="tick" x="710.0" y="525.0" text-anchor="middle" font-size="10">10</text>
+<text class="tick" x="922.0" y="525.0" text-anchor="middle" font-size="10">100</text>
+<text class="tick" x="498.0" y="550.0" text-anchor="middle" font-size="12">&omega; &mdash; rad/s</text>
+<text class="eyebrow" x="74.0" y="28.0" text-anchor="start" font-size="10">OPEN-LOOP MAGNITUDE &#183; dB</text>
+<text class="eyebrow" x="74.0" y="290.0" text-anchor="start" font-size="10">OPEN-LOOP PHASE &#183; deg, unwrapped</text>
+<text class="note" x="74.0" y="592.0" text-anchor="start" font-size="11">Vertical marks: every &#124;L(j&omega;)&#124; = 1 crossing. The bold one governs; the numbers above the upper panel are their frequencies in rad/s.</text>
+</svg>
+<figcaption><b>Open-loop frequency response.</b> Magnitude in dB and unwrapped
+phase in degrees, against frequency in rad/s. Vertical marks are every
+|L(j&omega;)| = 1 crossing; the bold one governs. Evaluated by Hessenberg solves
+&mdash; the inverse is never formed &mdash; on a grid refined around the
+loop&rsquo;s own lightly damped modes. Computed by
+<code>galata::analyze::single_loop_response</code>.</figcaption>
+</figure>
+
+<h3>The governing margins</h3>
+<div class="tw"><table><thead><tr><th class="">Margin</th><th class="n">Value</th><th class="n">At (rad/s)</th></tr></thead><tbody><tr><td class="">Gain margin</td><td class="n">infinite</td><td class="n">&mdash;</td></tr><tr><td class="">Phase margin</td><td class="n">48.497 deg</td><td class="n">1.60954</td></tr><tr><td class="">Delay margin</td><td class="n">0.52588 s</td><td class="n">1.60954</td></tr></tbody></table></div>
+
+<h3>Every crossover, not just the governing one</h3>
+<p>A loop whose magnitude crosses unity three times has three phase margins. An
+implementation that returned the first crossing it found would report this loop
+as comfortable at the largest of them.</p>
+<div class="tw"><table><thead><tr><th class="">Kind</th><th class="n">&omega; (rad/s)</th><th class="n">Margin</th><th class="n">Delay</th></tr></thead><tbody><tr><td class="">|L| = 1</td><td class="n">0.59337</td><td class="n">101.068 deg</td><td class="n">2.97279 s</td></tr><tr><td class="">|L| = 1</td><td class="n">0.91806</td><td class="n">165.221 deg</td><td class="n">3.14103 s</td></tr><tr><td class="">|L| = 1</td><td class="n">1.60954</td><td class="n">48.497 deg</td><td class="n">0.52588 s</td></tr></tbody></table></div>
+<p class="routine">Computed by <code>galata::analyze::stability_margins</code>.</p>
+<p class="note-box">Crossovers are found by <b>searching a frequency grid</b>. A
+crossover pair narrower than the grid spacing is not found, which is why the band
+and the point count travel with the result. Nothing here proves closed-loop
+stability either: margins are distances from the critical point, not a Nyquist
+encirclement count.</p>
+
+<h2 id="disk">Gain and phase together</h2>
+<p>The gain margin is the tolerable gain change with <em>no</em> phase change;
+the phase margin is the tolerable phase change with <em>no</em> gain change. No
+real actuator varies one alone. The disk margin asks how much of both together,
+and the picture below is the whole of the argument: the perturbed loop is
+f&#183;L for every f in a disk, so the closed loop is stable for all of them
+exactly when L(j&omega;) misses the shaded region.</p>
+
+<figure>
+<svg viewBox="0 0 810 566" width="810" height="566" role="img" xmlns="http://www.w3.org/2000/svg" aria-label="Nyquist plot of the open loop with the disk-margin exclusion disk drawn: the curve is tangent to the disk at the critical frequency.">
+<clipPath id="clip-nyq"><rect x="40" y="40" width="470" height="470"/></clipPath>
+<rect class="panel" x="40" y="40" width="470" height="470" rx="3"/>
+<g clip-path="url(#clip-nyq)">
+<line class="grid" x1="144.6" y1="40.0" x2="144.6" y2="510.0"/>
+<line class="grid" x1="253.7" y1="40.0" x2="253.7" y2="510.0"/>
+<line class="grid" x1="362.7" y1="40.0" x2="362.7" y2="510.0"/>
+<line class="grid" x1="471.8" y1="40.0" x2="471.8" y2="510.0"/>
+<line class="grid" x1="40.0" y1="493.2" x2="510.0" y2="493.2"/>
+<line class="grid" x1="40.0" y1="384.1" x2="510.0" y2="384.1"/>
+<line class="grid" x1="40.0" y1="275.0" x2="510.0" y2="275.0"/>
+<line class="grid" x1="40.0" y1="165.9" x2="510.0" y2="165.9"/>
+<line class="grid" x1="40.0" y1="56.8" x2="510.0" y2="56.8"/>
+<line class="axis" x1="40.0" y1="275.0" x2="510.0" y2="275.0"/>
+<line class="axis" x1="362.7" y1="40.0" x2="362.7" y2="510.0"/>
+<path class="unit-circle" d="M 471.82,275.00 L 471.76,271.19 L 471.56,267.39 L 471.23,263.60 L 470.76,259.82 L 470.17,256.06 L 469.44,252.32 L 468.58,248.61 L 467.60,244.93 L 466.48,241.29 L 465.25,237.69 L 463.88,234.14 L 462.39,230.63 L 460.78,227.18 L 459.06,223.79 L 457.21,220.46 L 455.25,217.20 L 453.18,214.01 L 450.99,210.89 L 448.70,207.85 L 446.30,204.89 L 443.81,202.01 L 441.21,199.23 L 438.52,196.54 L 435.73,193.94 L 432.86,191.44 L 429.90,189.05 L 426.86,186.76 L 423.74,184.57 L 420.55,182.50 L 417.29,180.54 L 413.96,178.69 L 410.56,176.96 L 407.11,175.35 L 403.61,173.87 L 400.05,172.50 L 396.45,171.26 L 392.81,170.15 L 389.14,169.16 L 385.43,168.31 L 381.69,167.58 L 377.93,166.99 L 374.15,166.52 L 370.36,166.19 L 366.55,165.99 L 362.75,165.92 L 358.94,165.99 L 355.14,166.19 L 351.35,166.52 L 347.57,166.99 L 343.81,167.58 L 340.07,168.31 L 336.36,169.16 L 332.68,170.15 L 329.04,171.26 L 325.44,172.50 L 321.89,173.87 L 318.38,175.35 L 314.93,176.96 L 311.54,178.69 L 308.21,180.54 L 304.95,182.50 L 301.75,184.57 L 298.63,186.76 L 295.59,189.05 L 292.63,191.44 L 289.76,193.94 L 286.98,196.54 L 284.28,199.23 L 281.69,202.01 L 279.19,204.89 L 276.79,207.85 L 274.50,210.89 L 272.32,214.01 L 270.25,217.20 L 268.28,220.46 L 266.44,223.79 L 264.71,227.18 L 263.10,230.63 L 261.61,234.14 L 260.25,237.69 L 259.01,241.29 L 257.90,244.93 L 256.91,248.61 L 256.05,252.32 L 255.33,256.06 L 254.73,259.82 L 254.27,263.60 L 253.94,267.39 L 253.74,271.19 L 253.67,275.00 L 253.74,278.81 L 253.94,282.61 L 254.27,286.40 L 254.73,290.18 L 255.33,293.94 L 256.05,297.68 L 256.91,301.39 L 257.90,305.07 L 259.01,308.71 L 260.25,312.31 L 261.61,315.86 L 263.10,319.37 L 264.71,322.82 L 266.44,326.21 L 268.28,329.54 L 270.25,332.80 L 272.32,335.99 L 274.50,339.11 L 276.79,342.15 L 279.19,345.11 L 281.69,347.99 L 284.28,350.77 L 286.98,353.46 L 289.76,356.06 L 292.63,358.56 L 295.59,360.95 L 298.63,363.24 L 301.75,365.43 L 304.95,367.50 L 308.21,369.46 L 311.54,371.31 L 314.93,373.04 L 318.38,374.65 L 321.89,376.13 L 325.44,377.50 L 329.04,378.74 L 332.68,379.85 L 336.36,380.84 L 340.07,381.69 L 343.81,382.42 L 347.57,383.01 L 351.35,383.48 L 355.14,383.81 L 358.94,384.01 L 362.75,384.08 L 366.55,384.01 L 370.36,383.81 L 374.15,383.48 L 377.93,383.01 L 381.69,382.42 L 385.43,381.69 L 389.14,380.84 L 392.81,379.85 L 396.45,378.74 L 400.05,377.50 L 403.61,376.13 L 407.11,374.65 L 410.56,373.04 L 413.96,371.31 L 417.29,369.46 L 420.55,367.50 L 423.74,365.43 L 426.86,363.24 L 429.90,360.95 L 432.86,358.56 L 435.73,356.06 L 438.52,353.46 L 441.21,350.77 L 443.81,347.99 L 446.30,345.11 L 448.70,342.15 L 450.99,339.11 L 453.18,335.99 L 455.25,332.80 L 457.21,329.54 L 459.06,326.21 L 460.78,322.82 L 462.39,319.37 L 463.88,315.86 L 465.25,312.31 L 466.48,308.71 L 467.60,305.07 L 468.58,301.39 L 469.44,297.68 L 470.17,293.94 L 470.76,290.18 L 471.23,286.40 L 471.56,282.61 L 471.76,278.81 L 471.82,275.00" fill="none"/>
+<circle class="disk" cx="201.9" cy="275.0" r="118.2"/>
+<path class="trace-mirror" d="M 2765.67,-480.90 L 2755.52,-495.30 L 2744.97,-509.82 L 2734.02,-524.47 L 2722.66,-539.24 L 2710.89,-554.11 L 2698.68,-569.07 L 2686.02,-584.12 L 2672.92,-599.24 L 2659.36,-614.43 L 2645.32,-629.65 L 2630.80,-644.91 L 2615.79,-660.19 L 2600.28,-675.46 L 2584.27,-690.72 L 2567.74,-705.95 L 2550.69,-721.13 L 2533.12,-736.23 L 2515.01,-751.24 L 2496.37,-766.15 L 2477.19,-780.92 L 2457.47,-795.54 L 2437.20,-809.98 L 2416.39,-824.23 L 2395.03,-838.24 L 2373.14,-852.02 L 2350.71,-865.52 L 2327.74,-878.73 L 2304.26,-891.62 L 2280.25,-904.17 L 2255.74,-916.34 L 2230.72,-928.13 L 2205.22,-939.49 L 2179.25,-950.42 L 2152.82,-960.86 L 2125.94,-970.82 L 2098.65,-980.28 L 2070.94,-989.19 L 2042.87,-997.55 L 2014.42,-1005.34 L 1985.65,-1012.52 L 1956.57,-1019.10 L 1927.19,-1025.05 L 1897.57,-1030.34 L 1867.71,-1034.98 L 1837.66,-1038.95 L 1807.44,-1042.25 L 1777.08,-1044.84 L 1746.62,-1046.74 L 1716.09,-1047.94 L 1685.51,-1048.44 L 1654.93,-1048.22 L 1624.36,-1047.31 L 1593.87,-1045.68 L 1563.45,-1043.36 L 1533.16,-1040.35 L 1503.02,-1036.65 L 1473.05,-1032.27 L 1443.31,-1027.23 L 1413.81,-1021.53 L 1384.58,-1015.20 L 1355.64,-1008.24 L 1327.03,-1000.68 L 1298.76,-992.53 L 1270.87,-983.81 L 1243.37,-974.55 L 1216.28,-964.76 L 1189.62,-954.47 L 1163.42,-943.71 L 1137.68,-932.48 L 1112.42,-920.82 L 1087.65,-908.76 L 1063.39,-896.31 L 1039.64,-883.51 L 1016.41,-870.36 L 993.72,-856.92 L 971.55,-843.18 L 949.93,-829.20 L 928.85,-814.97 L 908.31,-800.53 L 888.32,-785.90 L 868.87,-771.11 L 849.96,-756.17 L 831.59,-741.10 L 813.75,-725.94 L 796.45,-710.69 L 779.67,-695.39 L 763.40,-680.03 L 747.65,-664.65 L 732.40,-649.26 L 717.64,-633.88 L 703.38,-618.52 L 689.59,-603.20 L 676.26,-587.92 L 663.40,-572.71 L 650.98,-557.58 L 639.01,-542.53 L 627.46,-527.59 L 616.32,-512.74 L 605.60,-498.02 L 595.26,-483.42 L 585.32,-468.96 L 575.74,-454.63 L 566.53,-440.46 L 557.67,-426.44 L 549.16,-412.57 L 540.97,-398.87 L 533.11,-385.34 L 525.55,-371.98 L 518.30,-358.80 L 511.33,-345.79 L 504.65,-332.96 L 498.24,-320.32 L 492.09,-307.86 L 486.19,-295.59 L 480.54,-283.50 L 475.12,-271.60 L 469.93,-259.89 L 464.96,-248.37 L 460.20,-237.03 L 455.64,-225.88 L 451.28,-214.92 L 447.11,-204.14 L 443.12,-193.55 L 439.30,-183.14 L 435.65,-172.91 L 432.16,-162.87 L 428.83,-153.00 L 425.65,-143.30 L 422.61,-133.79 L 419.71,-124.44 L 416.95,-115.27 L 414.31,-106.26 L 411.80,-97.42 L 409.41,-88.74 L 407.13,-80.23 L 404.96,-71.87 L 402.90,-63.67 L 400.94,-55.62 L 399.08,-47.73 L 397.32,-39.98 L 395.65,-32.37 L 394.07,-24.91 L 392.57,-17.59 L 391.16,-10.41 L 389.83,-3.35 L 388.58,3.56 L 387.40,10.35 L 386.30,17.02 L 385.27,23.56 L 384.31,29.98 L 383.42,36.28 L 382.60,42.47 L 381.84,48.55 L 381.15,54.52 L 380.52,60.38 L 379.96,66.14 L 379.46,71.79 L 379.02,77.35 L 378.64,82.82 L 378.32,88.19 L 378.07,93.48 L 377.88,98.68 L 377.75,103.79 L 377.68,108.83 L 377.68,113.78 L 377.75,118.67 L 377.89,123.48 L 378.10,128.23 L 378.38,132.90 L 378.74,137.52 L 379.18,142.08 L 379.70,146.59 L 380.32,151.04 L 381.03,155.45 L 381.84,159.81 L 382.76,164.14 L 383.81,168.43 L 384.98,172.68 L 386.30,176.92 L 387.78,181.13 L 389.43,185.32 L 391.28,189.51 L 393.34,193.69 L 395.66,197.87 L 398.26,202.06 L 401.19,206.26 L 404.49,210.48 L 408.25,214.72 L 412.52,218.99 L 417.43,223.29 L 423.09,227.60 L 429.69,231.91 L 435.95,235.43 L 437.44,236.20 L 446.64,240.38 L 457.70,244.33 L 471.19,247.84 L 473.18,248.24 L 487.90,250.47 L 508.92,251.44 L 535.82,249.21 L 542.25,248.12 L 570.57,240.70 L 599.01,228.71 L 615.08,219.65 L 668.16,173.61 L 672.32,168.51 L 714.75,82.55 L 721.84,23.85 L 705.28,-60.64 L 622.32,-165.78 L 586.05,-186.82 L 421.71,-200.35 L 413.85,-198.02 L 312.68,-135.20 L 292.77,-111.67 L 263.66,-60.68 L 252.36,-27.51 L 246.83,-0.62 L 244.07,32.09 L 244.11,44.22 L 247.12,77.63 L 252.08,102.31 L 252.26,103.04 L 258.00,122.85 L 263.67,138.69 L 264.36,140.44 L 269.04,151.65 L 274.00,162.47 L 278.56,171.66 L 282.73,179.59 L 286.56,186.51 L 290.07,192.63 L 293.30,198.09 L 296.29,203.01 L 299.07,207.48 L 301.66,211.55 L 304.07,215.29 L 306.34,218.74 L 308.48,221.94 L 310.50,224.91 L 312.41,227.69 L 314.22,230.29 L 315.95,232.72 L 317.60,235.01 L 319.18,237.17 L 320.69,239.20 L 322.15,241.12 L 323.54,242.94 L 324.89,244.65 L 326.18,246.28 L 327.44,247.82 L 328.64,249.29 L 329.81,250.67 L 330.94,251.99 L 332.04,253.24 L 333.10,254.42 L 334.13,255.55 L 335.13,256.61 L 336.09,257.63 L 337.03,258.59 L 337.94,259.50 L 338.82,260.37 L 339.67,261.19 L 340.50,261.97 L 341.31,262.71 L 342.09,263.41 L 342.84,264.07 L 343.58,264.70 L 344.28,265.30 L 344.97,265.86 L 345.64,266.39 L 346.28,266.90 L 346.91,267.37 L 347.51,267.83 L 348.10,268.25 L 348.66,268.65 L 349.21,269.03 L 349.73,269.39 L 350.24,269.73 L 350.74,270.05 L 351.21,270.35 L 351.67,270.63 L 352.11,270.90 L 352.54,271.15 L 352.95,271.39 L 353.35,271.61 L 353.73,271.82 L 354.10,272.02 L 354.45,272.21 L 354.79,272.38 L 355.12,272.55 L 355.44,272.70 L 355.74,272.85 L 356.04,272.98 L 356.32,273.11 L 356.59,273.23 L 356.85,273.34 L 357.10,273.45 L 357.33,273.55 L 357.56,273.64 L 357.79,273.73 L 358.00,273.81 L 358.20,273.89 L 358.39,273.96 L 358.58,274.03 L 358.76,274.09 L 358.93,274.15 L 359.10,274.20 L 359.26,274.25 L 359.41,274.30 L 359.55,274.35 L 359.69,274.39 L 359.82,274.43 L 359.95,274.47 L 360.07,274.50 L 360.19,274.54 L 360.30,274.57 L 360.41,274.59 L 360.51,274.62 L 360.61,274.65 L 360.71,274.67 L 360.80,274.69 L 360.88,274.71 L 360.96,274.73 L 361.04,274.75 L 361.12,274.76 L 361.19,274.78 L 361.26,274.79 L 361.33,274.81 L 361.39,274.82 L 361.45,274.83 L 361.51,274.84 L 361.56,274.85 L 361.61,274.86 L 361.67,274.87 L 361.71,274.88 L 361.76,274.89 L 361.80,274.90 L 361.85,274.90 L 361.89,274.91 L 361.92,274.92 L 361.96,274.92 L 362.00,274.93 L 362.03,274.93 L 362.06,274.94 L 362.09,274.94 L 362.12,274.94 L 362.15,274.95 L 362.18,274.95 L 362.20,274.95 L 362.23,274.96 L 362.25,274.96 L 362.27,274.96 L 362.29,274.97 L 362.31,274.97 L 362.33,274.97 L 362.35,274.97 L 362.37,274.97 L 362.39,274.98 L 362.40,274.98 L 362.42,274.98 L 362.43,274.98 L 362.45,274.98 L 362.46,274.98 L 362.47,274.98 L 362.49,274.98 L 362.50,274.99 L 362.51,274.99 L 362.52,274.99 L 362.53,274.99 L 362.54,274.99 L 362.55,274.99 L 362.56,274.99 L 362.57,274.99 L 362.57,274.99 L 362.58,274.99 L 362.59,274.99 L 362.60,274.99 L 362.60,274.99 L 362.61,274.99 L 362.62,274.99 L 362.62,275.00 L 362.63,275.00 L 362.63,275.00 L 362.64,275.00 L 362.64,275.00 L 362.65,275.00 L 362.65,275.00 L 362.66,275.00 L 362.66,275.00 L 362.66,275.00 L 362.67,275.00 L 362.67,275.00 L 362.68,275.00 L 362.68,275.00 L 362.68,275.00 L 362.68,275.00 L 362.69,275.00 L 362.69,275.00 L 362.69,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00" fill="none"/>
+<path class="trace-nyq" d="M 2765.67,1030.90 L 2755.52,1045.30 L 2744.97,1059.82 L 2734.02,1074.47 L 2722.66,1089.24 L 2710.89,1104.11 L 2698.68,1119.07 L 2686.02,1134.12 L 2672.92,1149.24 L 2659.36,1164.43 L 2645.32,1179.65 L 2630.80,1194.91 L 2615.79,1210.19 L 2600.28,1225.46 L 2584.27,1240.72 L 2567.74,1255.95 L 2550.69,1271.13 L 2533.12,1286.23 L 2515.01,1301.24 L 2496.37,1316.15 L 2477.19,1330.92 L 2457.47,1345.54 L 2437.20,1359.98 L 2416.39,1374.23 L 2395.03,1388.24 L 2373.14,1402.02 L 2350.71,1415.52 L 2327.74,1428.73 L 2304.26,1441.62 L 2280.25,1454.17 L 2255.74,1466.34 L 2230.72,1478.13 L 2205.22,1489.49 L 2179.25,1500.42 L 2152.82,1510.86 L 2125.94,1520.82 L 2098.65,1530.28 L 2070.94,1539.19 L 2042.87,1547.55 L 2014.42,1555.34 L 1985.65,1562.52 L 1956.57,1569.10 L 1927.19,1575.05 L 1897.57,1580.34 L 1867.71,1584.98 L 1837.66,1588.95 L 1807.44,1592.25 L 1777.08,1594.84 L 1746.62,1596.74 L 1716.09,1597.94 L 1685.51,1598.44 L 1654.93,1598.22 L 1624.36,1597.31 L 1593.87,1595.68 L 1563.45,1593.36 L 1533.16,1590.35 L 1503.02,1586.65 L 1473.05,1582.27 L 1443.31,1577.23 L 1413.81,1571.53 L 1384.58,1565.20 L 1355.64,1558.24 L 1327.03,1550.68 L 1298.76,1542.53 L 1270.87,1533.81 L 1243.37,1524.55 L 1216.28,1514.76 L 1189.62,1504.47 L 1163.42,1493.71 L 1137.68,1482.48 L 1112.42,1470.82 L 1087.65,1458.76 L 1063.39,1446.31 L 1039.64,1433.51 L 1016.41,1420.36 L 993.72,1406.92 L 971.55,1393.18 L 949.93,1379.20 L 928.85,1364.97 L 908.31,1350.53 L 888.32,1335.90 L 868.87,1321.11 L 849.96,1306.17 L 831.59,1291.10 L 813.75,1275.94 L 796.45,1260.69 L 779.67,1245.39 L 763.40,1230.03 L 747.65,1214.65 L 732.40,1199.26 L 717.64,1183.88 L 703.38,1168.52 L 689.59,1153.20 L 676.26,1137.92 L 663.40,1122.71 L 650.98,1107.58 L 639.01,1092.53 L 627.46,1077.59 L 616.32,1062.74 L 605.60,1048.02 L 595.26,1033.42 L 585.32,1018.96 L 575.74,1004.63 L 566.53,990.46 L 557.67,976.44 L 549.16,962.57 L 540.97,948.87 L 533.11,935.34 L 525.55,921.98 L 518.30,908.80 L 511.33,895.79 L 504.65,882.96 L 498.24,870.32 L 492.09,857.86 L 486.19,845.59 L 480.54,833.50 L 475.12,821.60 L 469.93,809.89 L 464.96,798.37 L 460.20,787.03 L 455.64,775.88 L 451.28,764.92 L 447.11,754.14 L 443.12,743.55 L 439.30,733.14 L 435.65,722.91 L 432.16,712.87 L 428.83,703.00 L 425.65,693.30 L 422.61,683.79 L 419.71,674.44 L 416.95,665.27 L 414.31,656.26 L 411.80,647.42 L 409.41,638.74 L 407.13,630.23 L 404.96,621.87 L 402.90,613.67 L 400.94,605.62 L 399.08,597.73 L 397.32,589.98 L 395.65,582.37 L 394.07,574.91 L 392.57,567.59 L 391.16,560.41 L 389.83,553.35 L 388.58,546.44 L 387.40,539.65 L 386.30,532.98 L 385.27,526.44 L 384.31,520.02 L 383.42,513.72 L 382.60,507.53 L 381.84,501.45 L 381.15,495.48 L 380.52,489.62 L 379.96,483.86 L 379.46,478.21 L 379.02,472.65 L 378.64,467.18 L 378.32,461.81 L 378.07,456.52 L 377.88,451.32 L 377.75,446.21 L 377.68,441.17 L 377.68,436.22 L 377.75,431.33 L 377.89,426.52 L 378.10,421.77 L 378.38,417.10 L 378.74,412.48 L 379.18,407.92 L 379.70,403.41 L 380.32,398.96 L 381.03,394.55 L 381.84,390.19 L 382.76,385.86 L 383.81,381.57 L 384.98,377.32 L 386.30,373.08 L 387.78,368.87 L 389.43,364.68 L 391.28,360.49 L 393.34,356.31 L 395.66,352.13 L 398.26,347.94 L 401.19,343.74 L 404.49,339.52 L 408.25,335.28 L 412.52,331.01 L 417.43,326.71 L 423.09,322.40 L 429.69,318.09 L 435.95,314.57 L 437.44,313.80 L 446.64,309.62 L 457.70,305.67 L 471.19,302.16 L 473.18,301.76 L 487.90,299.53 L 508.92,298.56 L 535.82,300.79 L 542.25,301.88 L 570.57,309.30 L 599.01,321.29 L 615.08,330.35 L 668.16,376.39 L 672.32,381.49 L 714.75,467.45 L 721.84,526.15 L 705.28,610.64 L 622.32,715.78 L 586.05,736.82 L 421.71,750.35 L 413.85,748.02 L 312.68,685.20 L 292.77,661.67 L 263.66,610.68 L 252.36,577.51 L 246.83,550.62 L 244.07,517.91 L 244.11,505.78 L 247.12,472.37 L 252.08,447.69 L 252.26,446.96 L 258.00,427.15 L 263.67,411.31 L 264.36,409.56 L 269.04,398.35 L 274.00,387.53 L 278.56,378.34 L 282.73,370.41 L 286.56,363.49 L 290.07,357.37 L 293.30,351.91 L 296.29,346.99 L 299.07,342.52 L 301.66,338.45 L 304.07,334.71 L 306.34,331.26 L 308.48,328.06 L 310.50,325.09 L 312.41,322.31 L 314.22,319.71 L 315.95,317.28 L 317.60,314.99 L 319.18,312.83 L 320.69,310.80 L 322.15,308.88 L 323.54,307.06 L 324.89,305.35 L 326.18,303.72 L 327.44,302.18 L 328.64,300.71 L 329.81,299.33 L 330.94,298.01 L 332.04,296.76 L 333.10,295.58 L 334.13,294.45 L 335.13,293.39 L 336.09,292.37 L 337.03,291.41 L 337.94,290.50 L 338.82,289.63 L 339.67,288.81 L 340.50,288.03 L 341.31,287.29 L 342.09,286.59 L 342.84,285.93 L 343.58,285.30 L 344.28,284.70 L 344.97,284.14 L 345.64,283.61 L 346.28,283.10 L 346.91,282.63 L 347.51,282.17 L 348.10,281.75 L 348.66,281.35 L 349.21,280.97 L 349.73,280.61 L 350.24,280.27 L 350.74,279.95 L 351.21,279.65 L 351.67,279.37 L 352.11,279.10 L 352.54,278.85 L 352.95,278.61 L 353.35,278.39 L 353.73,278.18 L 354.10,277.98 L 354.45,277.79 L 354.79,277.62 L 355.12,277.45 L 355.44,277.30 L 355.74,277.15 L 356.04,277.02 L 356.32,276.89 L 356.59,276.77 L 356.85,276.66 L 357.10,276.55 L 357.33,276.45 L 357.56,276.36 L 357.79,276.27 L 358.00,276.19 L 358.20,276.11 L 358.39,276.04 L 358.58,275.97 L 358.76,275.91 L 358.93,275.85 L 359.10,275.80 L 359.26,275.75 L 359.41,275.70 L 359.55,275.65 L 359.69,275.61 L 359.82,275.57 L 359.95,275.53 L 360.07,275.50 L 360.19,275.46 L 360.30,275.43 L 360.41,275.41 L 360.51,275.38 L 360.61,275.35 L 360.71,275.33 L 360.80,275.31 L 360.88,275.29 L 360.96,275.27 L 361.04,275.25 L 361.12,275.24 L 361.19,275.22 L 361.26,275.21 L 361.33,275.19 L 361.39,275.18 L 361.45,275.17 L 361.51,275.16 L 361.56,275.15 L 361.61,275.14 L 361.67,275.13 L 361.71,275.12 L 361.76,275.11 L 361.80,275.10 L 361.85,275.10 L 361.89,275.09 L 361.92,275.08 L 361.96,275.08 L 362.00,275.07 L 362.03,275.07 L 362.06,275.06 L 362.09,275.06 L 362.12,275.06 L 362.15,275.05 L 362.18,275.05 L 362.20,275.05 L 362.23,275.04 L 362.25,275.04 L 362.27,275.04 L 362.29,275.03 L 362.31,275.03 L 362.33,275.03 L 362.35,275.03 L 362.37,275.03 L 362.39,275.02 L 362.40,275.02 L 362.42,275.02 L 362.43,275.02 L 362.45,275.02 L 362.46,275.02 L 362.47,275.02 L 362.49,275.02 L 362.50,275.01 L 362.51,275.01 L 362.52,275.01 L 362.53,275.01 L 362.54,275.01 L 362.55,275.01 L 362.56,275.01 L 362.57,275.01 L 362.57,275.01 L 362.58,275.01 L 362.59,275.01 L 362.60,275.01 L 362.60,275.01 L 362.61,275.01 L 362.62,275.01 L 362.62,275.00 L 362.63,275.00 L 362.63,275.00 L 362.64,275.00 L 362.64,275.00 L 362.65,275.00 L 362.65,275.00 L 362.66,275.00 L 362.66,275.00 L 362.66,275.00 L 362.67,275.00 L 362.67,275.00 L 362.68,275.00 L 362.68,275.00 L 362.68,275.00 L 362.68,275.00 L 362.69,275.00 L 362.69,275.00 L 362.69,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.70,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00 L 362.71,275.00" fill="none"/>
+<g class="m-crit"><line x1="246.7" y1="268.0" x2="260.7" y2="282.0"/><line x1="246.7" y1="282.0" x2="260.7" y2="268.0"/></g>
+<circle class="touch" cx="301.5" cy="338.7" r="5"/>
+</g>
+<text class="tick" x="144.6" y="528.0" text-anchor="middle" font-size="10">-2</text>
+<text class="tick" x="253.7" y="528.0" text-anchor="middle" font-size="10">-1</text>
+<text class="tick" x="362.7" y="528.0" text-anchor="middle" font-size="10">0</text>
+<text class="tick" x="471.8" y="528.0" text-anchor="middle" font-size="10">1</text>
+<text class="tick" x="40.0" y="30.0" text-anchor="start" font-size="11">Im L(j&omega;)</text>
+<text class="tick" x="275.0" y="550.0" text-anchor="middle" font-size="11">Re L(j&omega;)</text>
+<line class="trace-nyq" x1="542.0" y1="70.0" x2="560.0" y2="70.0"/>
+<text class="note" x="568.0" y="74.0" text-anchor="start" font-size="11.5">L(j&omega;), &omega; &gt; 0 &mdash; dimensionless</text>
+<line class="trace-mirror" x1="542.0" y1="94.0" x2="560.0" y2="94.0"/>
+<text class="note" x="568.0" y="98.0" text-anchor="start" font-size="11.5">L(&minus;j&omega;), the conjugate branch</text>
+<line class="unit-circle" x1="542.0" y1="118.0" x2="560.0" y2="118.0"/>
+<text class="note" x="568.0" y="122.0" text-anchor="start" font-size="11.5">&#124;L&#124; = 1</text>
+<g class="m-crit"><line x1="546.0" y1="137.0" x2="556.0" y2="147.0"/><line x1="546.0" y1="147.0" x2="556.0" y2="137.0"/></g>
+<text class="note" x="568.0" y="146.0" text-anchor="start" font-size="11.5">the critical point, &minus;1 + 0j</text>
+<circle class="disk" cx="551" cy="166" r="7"/>
+<text class="note" x="568.0" y="170.0" text-anchor="start" font-size="11.5">the disk L must avoid</text>
+<circle class="touch" cx="551" cy="190" r="4"/>
+<text class="note" x="568.0" y="194.0" text-anchor="start" font-size="11.5">tangency, at &omega; = 1.757 rad/s</text>
+</svg>
+<figcaption><b>Nyquist, against the disk the loop must avoid.</b> Axes are the
+real and imaginary parts of L(j&omega;), dimensionless. The shaded disk meets the
+real axis at &minus;1/&gamma;<sub>min</sub> and &minus;1/&gamma;<sub>max</sub>,
+the two gain limits the margin guarantees, and the marked point is where the
+curve touches it &mdash; the boundary perturbation
+f = 0.8550
+&minus;
+0.8894j places a closed-loop pole
+exactly at s = j1.7574. The low-frequency arm
+runs off the panel. Computed by
+<code>galata::analyze::disk_margin</code>.</figcaption>
+</figure>
+
+<div class="tw"><table><thead><tr><th class="">Quantity</th><th class="n">Value</th><th class="">Where</th></tr></thead><tbody><tr><td class="">Disk margin &alpha;</td><td class="n">0.87606</td><td class="">&mdash;</td></tr><tr><td class="">Peak of |S + (&sigma;&minus;1)/2|</td><td class="n">1.14147</td><td class="">&mdash;</td></tr><tr><td class="">Critical frequency</td><td class="n">1.75745</td><td class="">rad/s</td></tr><tr><td class="">Guaranteed gain range</td><td class="n">0.3908 to 2.5589 (-8.16 to 8.16 dB)</td><td class="">&mdash;</td></tr><tr><td class="">Guaranteed phase range</td><td class="n">&plusmn;47.310 deg</td><td class="">&mdash;</td></tr><tr><td class="">Sensitivity peak M<sub>S</sub></td><td class="n">1.44941</td><td class="">at 2.0441 rad/s</td></tr><tr><td class="">Complementary peak M<sub>T</sub></td><td class="n">1.25447</td><td class="">at 1.4844 rad/s</td></tr></tbody></table></div>
+
+<h3>What those peaks <em>guarantee</em></h3>
+<p>Skogestad &amp; Postlethwaite, 2nd&nbsp;ed., equations (2.47) and (2.48).
+Lower bounds: the loop&rsquo;s actual margins are at least this good. The two
+gain-margin bounds have different functional forms &mdash;
+M<sub>S</sub>/(M<sub>S</sub>&minus;1) against 1&nbsp;+&nbsp;1/M<sub>T</sub>
+&mdash; which is easy to blur from memory.</p>
+<div class="tw"><table><thead><tr><th class="">From</th><th class="n">Gain margin at least</th><th class="n">Phase margin at least</th></tr></thead><tbody><tr><td class="">M<sub>S</sub></td><td class="n">3.2251</td><td class="n">40.360 deg</td></tr><tr><td class="">M<sub>T</sub></td><td class="n">1.7972</td><td class="n">46.978 deg</td></tr></tbody></table></div>
+
+<p class="note-box"><b>Every peak on this page is a grid maximum.</b> The disk
+margin, M<sub>S</sub> and M<sub>T</sub> are all found by searching a refined
+frequency grid and not by the exact Hamiltonian-eigenvalue method, so each peak
+is a lower bound on the true H-infinity norm and each derived margin is an
+<em>upper</em> bound on the true one. The error is in the optimistic direction.
+Treat a marginal result as marginal.</p>
+
+
+<h2 id="matrices">The state matrices these came from</h2>
+<p>Central differences about the trim, with a Richardson truncation estimate per
+entry. The <em>neglected coupling</em> is the largest entry of the full
+12&times;12 Jacobian that ties a retained state to a discarded one, relative to
+the largest retained entry: it is measured rather than assumed, because
+&ldquo;the longitudinal and lateral axes decouple&rdquo; is true at a
+wings-level symmetric trim and false in a turn, and the difference does not show
+in the reduced matrix.</p>
+
+<h3>Longitudinal</h3>
+<p class="routine">Rows and columns in the order
+<code>u, w, q, theta</code>. Velocities m/s, angles rad, rates rad/s.
+Worst relative truncation 4.26e-12;
+neglected coupling 1.35e-05;
+Euler-chart conditioning |cos&nbsp;&theta;| = 0.999297.</p>
+<pre><code>A =
+                   u           w           q       theta
+      u    -0.039146    0.079936   -2.604860   -9.799760
+      w    -0.247105   -0.936394   69.445600   -0.367583
+      q     0.002244   -0.022467   -1.040980   -0.000000
+  theta     0.000000    0.000000    1.000000    0.000000
+
+B =
+            elevator     aileron      rudder      thrust
+      u     0.153638    0.000000    0.000000    0.000187
+      w    -4.095990    0.000000    0.000000    0.000000
+      q    -4.170710    0.000000    0.000000    0.000000
+  theta     0.000000    0.000000    0.000000    0.000000</code></pre>
+<h3>Lateral</h3>
+<p class="routine">Rows and columns in the order
+<code>v, p, r, phi</code>. Velocities m/s, angles rad, rates rad/s.
+Worst relative truncation 5.87e-15;
+neglected coupling 0;
+Euler-chart conditioning |cos&nbsp;&theta;| = 0.999297.</p>
+<pre><code>A =
+                   v           p           r         phi
+      v    -0.124902    2.604860  -69.445600    9.799760
+      p    -0.079099   -2.035300    0.641840    0.000000
+      r     0.009609   -0.115922   -0.207034    0.000000
+    phi     0.000000    1.000000    0.037509    0.000000
+
+B =
+            elevator     aileron      rudder      thrust
+      v     0.000000    0.000000    2.049440    0.000000
+      p     0.000000    6.014430   -0.012507    0.000000
+      r     0.000000    0.028629   -1.242800    0.000000
+    phi     0.000000    0.000000    0.000000    0.000000</code></pre>
+<p class="routine">Computed by <code>galata::linearize::linearize_finite_difference</code>.</p>
+
+
+<h2 id="limits">What this page is not</h2>
+<p class="note-box warn"><b>Not certified, and not a handling-qualities
+assessment.</b> Nothing in galata is DO-178C qualified and none of it may be used
+as evidence in a certification package. Nothing here says whether a mode or a
+margin is <em>acceptable</em>: Level 1/2/3 boundaries are a judgement against a
+specification, and that is a separate capability with its own citations, which
+galata does not have.</p>
+<p class="note-box">The aircraft model is a first-order expansion about
+<em>one</em> flight condition. It has no stall, no Mach effects and no engine,
+and it will return a confident answer at any angle of attack it is asked for.
+The linearisation is only as good as the trim, and the trim is reported above
+with its residual so that can be checked. The classification cannot tell you that
+a label is meaningless &mdash; only that its evidence was weak, which is what the
+score column is for.</p>
+</main>
+
+<footer>
+Generated by <code>scripts/gen-report-page.py</code> from
+<code>docs/assets/nt33a-fc1-run.json</code>, emitted by
+<code>tools/report/galata-report-data</code> at galata 0.2.0.
+No hand-entered numbers, no network requests, no scripts.
+&middot; <a href="https://celikgo.github.io/galata/verification.html">V&amp;V report</a>
+&middot; <a href="https://github.com/celikgo/galata">github.com/celikgo/galata</a>
+&middot; Apache-2.0.
+</footer>
+</body>
+</html>
