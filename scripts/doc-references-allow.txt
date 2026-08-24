@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Paths and test names that documents may name even though they do not exist.
+#
+# Read by scripts/check-doc-references.sh. Every entry needs a justification
+# after the '#', and the gate fails on an entry without one — the same shape as
+# ADR-0003's SI allowlist, and for the same reason: an exemption whose reason is
+# not written down is indistinguishable from a mistake nobody noticed.
+#
+# An entry here is a promise that the reference is DELIBERATELY forward-looking.
+# Charter rule 2 says nothing is documented before it works; this file is where a
+# document admits, in a reviewable diff, that it is describing something which
+# does not. Entries should be rare, and each one should eventually be deleted by
+# the commit that makes the thing exist.
+
+evals/                                        # docs/TESTING.md's tier table lists it as not existing; the "Exists: no" column is the point of the row
+include/galata-c/                             # ADR-0001 describes the plugin C ABI, which is not built. The ADR labels it as intent throughout
+scripts/check-frozen-headers.sh               # ADR-0001's proposed ABI-freeze gate, to arrive with the ABI
+src/synth/                                    # RFC-0001 and the roadmap; RFC-0001 explicitly forbids code there until its open questions are answered
+tests/validation/reference/carex1995_care.csv # RFC-0001's proposed CAREX reference file, whose rights position is one of the RFC's open questions

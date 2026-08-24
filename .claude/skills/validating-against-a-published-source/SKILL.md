@@ -138,7 +138,7 @@ Six statuses, and the wording of each is the honest position it is meant to expr
 An honest `Unvalidated` is worth more than a fabricated match. Do not reach for
 `SelfConsistent` to make a row look better — it means one specific thing.
 
-`evidence` names the gtest `Suite.Test` and the binary it lives in. Four reconciliation checks
+`evidence` names the gtest suite and test joined by a dot — `Nt33aChain.AllFiveClassicalModesMatchThePublishedValues` — and the binary it lives in. Four reconciliation checks
 then make the declaration unfalsifiable by hand:
 
 - every case claiming a comparison names a reference and names its evidence;

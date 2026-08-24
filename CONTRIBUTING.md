@@ -15,11 +15,13 @@ reproducible locally.
 
 ## Before you push
 
-Run the gates CI will run. All four are fast.
+Run the gates CI will run. All five are fast, and only the link check needs a
+network.
 
 ```bash
 scripts/check-version-consistency.sh
 scripts/check-si-boundary.sh
+scripts/check-doc-references.sh
 scripts/check-doc-links.sh
 
 pip install 'clang-format==20.1.8'      # the exact version CI uses

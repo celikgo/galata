@@ -168,6 +168,12 @@ jobs:
       - name: Rule 4 — every URL in every document resolves
         run: scripts/check-doc-links.sh
 
+      # The other half of rule 4, and the cheaper half — it needs no network.
+      # Added after a correction pass found three rotted names among nine untrue
+      # ADR claims, every one of which had passed review.
+      - name: Rule 4 — every path and test name in every document resolves
+        run: scripts/check-doc-references.sh
+
   # The single required status check. Branch protection points here, so adding
   # a job above never means editing branch settings, and a skipped job can
   # never be mistaken for a passing one.
