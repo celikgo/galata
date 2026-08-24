@@ -21,8 +21,11 @@ says so. A documentation claim that CI does not verify is a bug.
 The README's Status table is the contract. Sections describing intent are
 labelled as intent, in the same breath.
 
-*Enforced by:* review today; by generating the Status table from the capability
-registry once that registry exists.
+*Enforced by:* review for the Status table, which is still maintained by hand;
+and by generation for the capability table below it, which comes from the
+registry the CLI dispatches through — `scripts/gen-status-table.sh --check` fails
+CI if the committed copy disagrees, so that table cannot describe a capability
+that does not exist.
 
 ### 3. One source of version truth
 
@@ -92,8 +95,13 @@ Where no published value can be found for a case, `docs/VERIFICATION.md` marks
 that case **unvalidated**. An honest "unvalidated" is worth more than a
 fabricated match.
 
-*Enforced by:* the validation tier's structure — each case cites a data file in
-`tests/validation/reference/` carrying a citation header.
+*Enforced by:* `load_reference`, which refuses a reference file with no citation
+header, and by the registry reconciliation tests in
+`tests/validation/test_case_registry.cpp` —
+`EveryCaseClaimingAComparisonNamesAReferenceAndItsEvidence`,
+`CapabilitiesClaimingValidationAreBackedByACase`,
+`NotImplementedCasesDoNotNameACapabilityThatExists` and the evidence-registration
+check, which together make the claim unfalsifiable by hand.
 
 ### 9. No number reaches the user without provenance
 
