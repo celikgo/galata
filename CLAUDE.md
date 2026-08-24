@@ -65,6 +65,9 @@ bound, not bit-identity, because platform math libraries disagree on `sin` in th
 See ADR-0004 and the `preserving-determinism` skill.
 
 **5. Nothing is documented before it works, and every physics file cites its source.**
+`scripts/check-doc-references.sh` holds the checkable half of this: every file path and
+gtest name a document names in backticks must exist, and one that deliberately does not
+yet goes in `scripts/doc-references-allow.txt` with a justification.
 The README's Status table is the contract; its capability table is generated from the registry
 the CLI dispatches through. Every physics and numerics file carries an author/title/publication
 citation and a `WHAT THIS IS NOT` block naming the validity envelope and the direction of the

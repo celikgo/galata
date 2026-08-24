@@ -37,13 +37,26 @@ where values are comparable and mechanisms where they are not, and which names
 unwired surfaces as skipped rather than passing silently. See
 [ADR-0005](adr/0005-single-source-of-version.md).
 
-### 4. Every URL in every document resolves
+### 4. Every reference in every document resolves
 
-Including the clone URL in the README, which must be the real clone URL.
+Every URL, including the clone URL in the README, which must be the real clone
+URL. And every file path and test name a document names in backticks.
+
+The second half was added after a correction pass found nine untrue claims
+across seven ADRs with every gate green. Three of the nine were a rotted *name*:
+a header path that had never existed, a test that did not, a directory list from
+the gate's first day. A name is the one part of a documentation claim a machine
+can check, so it is now checked. The other six were claims about behaviour, and
+those still belong to review — the gate's own header says so, so its green tick
+is not read as more than it is.
 
 *Enforced by:* `scripts/check-doc-links.sh`, which fails on NXDOMAIN and on
 HTTP 404/410 for absolute URLs, and on any relative link whose target file does
-not exist.
+not exist; and `scripts/check-doc-references.sh`, which resolves backticked paths
+and gtest names against the tree. A reference that is deliberately
+forward-looking goes in `scripts/doc-references-allow.txt` with a justification,
+which makes rule 2's "nothing is documented before it works" a reviewable list
+rather than an assumption.
 
 ### 5. Strict SI internally
 
