@@ -121,6 +121,23 @@ jobs:
         shell: bash
         run: scripts/gen-modal-map.sh "build/${{ matrix.preset }}/tools/social/galata-modal-map" --check
 
+      # The NT-33A report page is drawn from a run too, and more is at stake
+      # than with the card: it is the artefact an engineer would actually read,
+      # and a page that has drifted from the code still looks like evidence.
+      # Two gates, because there are two artefacts. The run record is compared
+      # NUMERICALLY, since it is downstream of a central difference and ADR-0004
+      # claims no cross-platform bound for such values. The page is compared as
+      # TEXT, because it is a pure function of that record.
+      - name: The NT-33A run record matches what the chain produces
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: scripts/gen-report.sh "build/${{ matrix.preset }}/tools/report/galata-report-data" --check
+
+      - name: The published NT-33A report page matches its run record
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: python3 scripts/gen-report-page.py --check
+
       # The quickstart in the README is a promise. This is the only thing that
       # keeps it true.
       - name: The shipped example runs

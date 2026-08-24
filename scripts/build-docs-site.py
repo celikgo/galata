@@ -66,12 +66,20 @@ NAV = [
     ("docs/adr/README.md", "ADRs"),
     ("docs/ROADMAP.md", "Roadmap"),
     ("docs/TESTING.md", "Testing"),
+    ("docs/reports/nt33a-fc1.html", "NT-33A report"),
     ("CONTRIBUTING.md", "Contributing"),
 ]
 
 
 def discover():
-    """Every Markdown file that becomes a page, mapped to its output path."""
+    """Every file that becomes a page, mapped to its output path.
+
+    Two kinds. Markdown is rendered. HTML under docs/reports/ is COPIED
+    verbatim: it is a generated artefact, produced by scripts/gen-report-page.py
+    from a run record and diffed by CI, and re-rendering it here would put a
+    second opinion between the run and the reader. Both kinds land in the same
+    map so that a link to either resolves the same way.
+    """
     pages = {}
     for name in ("README.md", "CONTRIBUTING.md", "SECURITY.md", "CODE_OF_CONDUCT.md"):
         if (ROOT / name).exists():
@@ -87,7 +95,14 @@ def discover():
             out = (f"{sub.name}/index.html" if p.name == "README.md"
                    else f"{sub.name}/{p.stem}.html")
             pages[f"docs/{sub.name}/{p.name}"] = out
+    for p in sorted((ROOT / "docs" / "reports").glob("*.html")):
+        pages[f"docs/reports/{p.name}"] = f"reports/{p.name}"
     return pages
+
+
+def is_copied(src):
+    """A generated page that is served as it was produced, not re-rendered."""
+    return src.startswith("docs/reports/") and src.endswith(".html")
 
 
 def title_of(src, text):
@@ -237,6 +252,13 @@ def main():
     built = 0
 
     for src, out in sorted(pages.items()):
+        if is_copied(src):
+            dest = out_root / out
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes((ROOT / src).read_bytes())
+            built += 1
+            continue
+
         text = (ROOT / src).read_text(encoding="utf-8")
         title = title_of(src, text)
         # First non-empty paragraph, flattened, as the meta description.

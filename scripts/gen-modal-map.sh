@@ -56,7 +56,7 @@ if [ "$mode" = "--check" ]; then
   # byte diff of a file generated on one platform and checked on another would
   # be a flaky gate, and a flaky gate is worse than a strict one because people
   # learn to re-run it and then re-run it past a real failure too.
-  if ! python3 "$(dirname "$0")/compare-modal-map.py" "$target" "$generated"; then
+  if ! python3 "$(dirname "$0")/compare-run-json.py" "$target" "$generated"; then
     printf '\n::error::%s no longer matches what the chain produces, so\n' "$target"
     printf 'docs/assets/social-preview.png is asserting poles that are not current.\n'
     printf 'Regenerate both with:\n'

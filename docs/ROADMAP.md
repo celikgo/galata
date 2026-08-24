@@ -55,9 +55,21 @@ margins M_S and M_T guarantee — SISO only, which is the source's own scope.
 
 **Remaining.** `synth.pid`, `synth.lqr`, CARE via the generalised Schur method
 validated against the CAREX benchmark collection, root locus, and
-`sim.nonlinear` with actuator position and rate limits in the loop. Markdown
-reports with embedded plots. A high-fidelity aircraft model with its
-provenance, and the modal validation gate against published values.
+`sim.nonlinear` with actuator position and rate limits in the loop. A
+high-fidelity aircraft model with its provenance, and the modal validation gate
+against published values.
+
+The synthesis half of that is **designed but not built**, and the design is
+written around how it would be verified rather than around its API:
+[RFC-0001](rfc/0001-control-synthesis.md). No `src/synth/` code merges until the
+two open reference questions in it are answered.
+
+**Reports with embedded plots landed as HTML rather than Markdown.**
+`tools/report/` emits a run record and `scripts/gen-report-page.py` draws a
+single self-contained page from it — trim point, labelled modal table, pole map,
+Bode with every crossover marked, and a Nyquist against the disk-margin disk —
+published for the NT-33A reference case and diffed by CI. Markdown reports carry
+tables only, which is what `report.markdown` does today.
 
 Known gap carried forward: EVERY peak over frequency in galata — the disk
 margin, M_S, M_T and the largest singular value — is found on a refined
