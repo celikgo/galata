@@ -303,8 +303,10 @@ down once, in full, in
   `[w, x, y, z]`, representing the body-to-NED rotation.** Euler angles (3-2-1)
   are derived output, never integrated state.
 - Thirteen-component state vector `[p_n p_e p_d, u v w, q_w q_x q_y q_z, p q r]`
-  in that order, which is the row and column order of every state-space matrix
-  the tool produces.
+  in that order — the order it is integrated, fingerprinted and serialised in.
+  It is *not* the row order of a produced state-space matrix: linearisation works
+  in twelve Euler coordinates and reports a reduced set, and every
+  `LinearSystem` carries its own state names.
 - Full 6-DOF equations of motion with a **general inertia tensor** — `I_xz` is
   not assumed zero.
 
