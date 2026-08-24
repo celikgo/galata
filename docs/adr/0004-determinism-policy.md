@@ -20,14 +20,40 @@ implies more than it delivers is worse than no badge.
 ### The guarantee, in two tiers
 
 **Tier 1 — same binary, same platform: bit-identical.** Running the same
-pipeline twice with the same inputs on the same machine and binary produces
-byte-identical output files. This is gated by a test that runs a pipeline twice
-and compares bytes, and it runs on Linux, macOS and Windows.
+computation twice with the same inputs on the same machine and binary produces
+identical bits. This is gated two ways, both on Linux, macOS and Windows.
+`tests/determinism/` re-runs each battery in process and compares the resulting
+doubles with `EXPECT_EQ` — an exact comparison, not a tolerance.
+`scripts/check-determinism.sh` runs `tools/determinism` twice and `diff -u`s the
+two files, which is the byte comparison; the tool prints at `%.17g`, which
+round-trips a double exactly, so byte-identical output means bit-identical values
+rather than values that merely print the same.
+
+There is no test that runs a *pipeline* twice and diffs its output files. That
+would be the stronger check, because it would cover the report writers as well as
+the numerics, and nothing currently gates those.
 
 **Tier 2 — same source, different platform: agreement to a published bound.**
-Output produced on Linux, macOS and Windows agrees to a documented tolerance,
-and the *observed* deviation for every gated quantity is published in
-`docs/VERIFICATION.md` rather than merely bounded.
+Output produced on Linux, macOS and Windows agrees to a documented tolerance —
+1e-9 relative, between every pair of platforms — **with one carve-out, which
+this record failed to state until now.**
+
+Values downstream of the central-difference Jacobian are excluded from the
+cross-platform comparison altogether: `scripts/compare-determinism.sh` drops
+every fingerprint key prefixed `tier1.` before it compares anything. Dividing by
+the perturbation h amplifies a libm disagreement by 1/h, which on a small matrix
+entry reaches about 1e-8 relative through nobody's error — past this gate. Those
+values are held byte-identical *within* a platform by tier 1 instead, which is
+the stronger claim; the rest is what the 1e-9 bound covers. The split is 47
+excluded of 145 fingerprinted values as this is written, and
+`docs/VERIFICATION.md` reports both counts from the run rather than from here.
+
+The *observed* deviation is printed by every comparison rather than merely
+bounded, and it is read from the workflow log. It is deliberately **not**
+restated in `docs/VERIFICATION.md`: `determinism.yml` holds `contents: read` and
+writes nothing back to the repository, so a figure copied in by hand would be a
+figure that drifts. That is the report's own reasoning and this record follows
+it; an earlier version of this record claimed the opposite.
 
 Tier 2 is not bit-identity, and the reason is worth being blunt about.
 
@@ -61,31 +87,44 @@ linked to the document that defines it.
   our back. Under `-ffast-math` the compiler may reassociate floating-point
   expressions, and reassociation is not value-preserving.
 - **Fixed-step integrators for every gated result.** RK4 with a fixed step is
-  the default and the only integrator used for determinism-gated output.
-  Adaptive Dormand-Prince 5(4) is available for reference comparison, and its
-  results are never gated bit-identical, because its step sequence is a function
-  of an error estimate and therefore of the last bits of the state.
+  the only integrator in the tree, and therefore the only one used for
+  determinism-gated output. If an adaptive method is ever added — Dormand-Prince
+  5(4) or another — its results may not be gated bit-identical, because its step
+  sequence is a function of an error estimate and therefore of the last bits of
+  the state. That is a requirement on the commit that adds one, not a
+  description of today.
 - **Fixed iteration counts in root-finders.** Newton runs a fixed number of
   iterations and *then* checks the residual, rather than exiting when a
   tolerance is met. A tolerance-based exit makes the iteration count a function
   of floating-point noise, and with it the output. Failure to converge is
   reported as failure, never as a silent best effort.
-- **Seeded PRNGs, with the seed in the output.** Turbulence and Monte Carlo draw
-  from an explicitly seeded generator whose algorithm is fixed by galata rather
-  than inherited from the standard library's implementation-defined engines.
-  `std::mt19937_64` is specified bit-exactly by the standard and is therefore
-  acceptable; `std::random_device`, `std::default_random_engine` and the
-  distribution classes are not, since their outputs are implementation-defined.
-  Distributions are implemented in-tree.
+- **Seeded PRNGs, with the seed in the output — a requirement on the commit that
+  first needs one.** Nothing under `src/` draws a random number today: there is
+  no turbulence model and no Monte Carlo, and the only generator in the tree
+  seeds the property-test inputs. When one arrives it draws from an explicitly
+  seeded generator whose algorithm is fixed by galata rather than inherited from
+  the standard library's implementation-defined engines. `std::mt19937_64` is
+  specified bit-exactly by the standard and is therefore acceptable;
+  `std::random_device`, `std::default_random_engine` and the distribution classes
+  are not, since their outputs are implementation-defined, so distributions are
+  implemented in-tree.
 - **Ordered containers in any code path whose iteration order reaches output.**
   No `unordered_map` iteration, no pointer-value sorting, no
   address-of-allocation ordering.
 - **No `long double` anywhere in the numerical core.** It is 80-bit extended on
   x86-64 System V, 64-bit on MSVC and 128-bit quad on AArch64 Linux. A result
   that touches it is non-portable by construction.
-- **Locale-independent formatting.** Output goes through `fmt` rather than
-  iostreams so that a decimal comma in the user's locale cannot change a result
-  file.
+- **Locale-independent formatting, delivered by never changing the locale.**
+  Nothing in galata calls `setlocale` or `imbue`, so the program stays in the
+  `"C"` locale and a decimal comma cannot reach a result file. Note what this is
+  *not*: output goes through `std::printf` in `tools/determinism` and through
+  iostreams with `std::setprecision` in the pipeline's report writers. `fmt` is
+  declared in `vcpkg.json` but is not linked or included anywhere in the tree, so
+  it is not what delivers this — an earlier version of this record said it was.
+
+  This one therefore rests on a convention rather than on a library, and it is
+  the weakest item on this list: a single `setlocale(LC_ALL, "")` would break
+  tier 1 on every platform at once, and no test would catch it.
 
 ### What breaks the guarantee, stated so nobody is surprised
 
