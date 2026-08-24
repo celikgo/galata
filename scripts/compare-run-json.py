@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 #
-# Compares two docs/assets/modal-map.json files NUMERICALLY.
+# Compares two generated run records NUMERICALLY.
 #
-#   scripts/compare-modal-map.py <committed> <freshly-generated>
+#   scripts/compare-run-json.py <committed> <freshly-generated>
 #
-# Called by scripts/gen-modal-map.sh --check. It exists because the poles it
-# compares are downstream of a central difference, and ADR-0004 deliberately
-# does NOT claim a cross-platform bound for such values: dividing by h amplifies
-# a platform math-library disagreement by 1/h. The committed file is generated
-# on whatever machine last regenerated it and checked on CI's Linux runner, so
-# a byte diff would be a flaky gate — and a flaky gate is worse than a strict
-# one, because people learn to re-run it and then re-run past a real failure.
+# Called by scripts/gen-modal-map.sh --check and scripts/gen-report.sh --check.
+# ONE comparator for both, deliberately: docs/TESTING.md's rule is that anything
+# shared between a test and a generated document lives in one place, because two
+# implementations would be two answers to the same question — and "is this
+# committed file still what the code produces" is one question.
 #
-# The tolerance below is therefore a stated engineering bound, not a fudge. The
-# emitter rounds to six significant figures, so two runs that agree physically
+# It exists because the values it compares are downstream of a central
+# difference, and ADR-0004 deliberately does NOT claim a cross-platform bound
+# for such values: dividing by h amplifies a platform math-library disagreement
+# by 1/h. The committed file is generated on whatever machine last regenerated
+# it and checked on CI's Linux runner, so a byte diff would be a flaky gate —
+# and a flaky gate is worse than a strict one, because people learn to re-run it
+# and then re-run past a real failure.
+#
+# The tolerance below is therefore a stated engineering bound, not a fudge. Both
+# emitters round to six significant figures, so two runs that agree physically
 # agree textually in almost every case; this catches the boundary ones without
 # letting a genuine change through. A MOVED POLE is orders of magnitude larger
 # than this: the model changing at all moves these values in the third figure.
