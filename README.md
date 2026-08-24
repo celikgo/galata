@@ -100,12 +100,12 @@ The tier carries the ctest **label** `validation`, so `-L` is the flag.
 
 ### Or look at the whole case on one page
 
-[**The NT-33A at flight condition 1**](docs/reports/nt33a-fc1.html) — trim point, the labelled
-modal table with its participation factors, the pole map, the Bode plot with every crossover
-marked, and a Nyquist against the disk the loop must avoid. One self-contained page, no
-JavaScript and no network requests, with a light variant that is also what it prints as. It is
-served from the documentation site at `/reports/nt33a-fc1.html` once Pages has deployed it; the
-committed copy above opens from disk.
+[**The NT-33A at flight condition 1**](https://celikgo.github.io/galata/reports/nt33a-fc1.html)
+— trim point, the labelled modal table with its participation factors, the pole map, the Bode
+plot with every crossover marked, and a Nyquist against the disk the loop must avoid. One
+self-contained page, no JavaScript and no network requests, with a light variant that is also
+what it prints as. The committed copy is
+[`docs/reports/nt33a-fc1.html`](docs/reports/nt33a-fc1.html), and it opens from disk.
 
 Every number and every mark on it comes from a run: `tools/report/` emits the run record,
 `scripts/gen-report-page.py` draws the page from it, and CI compares the record numerically
@@ -324,8 +324,10 @@ no content that is not in the repository.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
 - [`docs/rfc/`](docs/rfc/README.md) — designs proposed but not built, each one written around how
   it would be verified. [RFC-0001](docs/rfc/0001-control-synthesis.md) is control synthesis.
-- [`docs/reports/nt33a-fc1.html`](docs/reports/nt33a-fc1.html) — the generated flight-condition
-  report, drawn from a run and diffed by CI
+- [The NT-33A flight-condition report](https://celikgo.github.io/galata/reports/nt33a-fc1.html)
+  — the trim point, the modal table, the pole map and the margins for the reference case, drawn
+  from a run and diffed by CI. Committed at
+  [`docs/reports/nt33a-fc1.html`](docs/reports/nt33a-fc1.html).
 - [`CLAUDE.md`](CLAUDE.md) and [`.claude/skills/`](.claude/skills/) — the build, the gates, and
   the verification methodology written down as skills
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — building, the pre-push gates, what review asks
