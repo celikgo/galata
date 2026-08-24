@@ -30,8 +30,9 @@ Everything else derives from it:
   system, so a result file can name the binary that produced it.
 - The CLI's `--version`, the Python binding's `__version__` and the desktop
   About box read the generated header, directly or through the library. This is
-  binding on each surface as it is added; none of the three exists yet, and the
-  consistency gate lists them as skipped by path until they do.
+  binding on each surface as it is added. The CLI's `--version` is wired and the
+  consistency gate checks it; the Python binding and the desktop About box do not
+  exist, and the gate lists those two as skipped by path until they do.
 - `vcpkg.json`'s `version-string` matches, checked rather than derived, because
   a JSON manifest cannot include a file.
 

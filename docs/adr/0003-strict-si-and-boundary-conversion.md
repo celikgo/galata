@@ -30,7 +30,10 @@ in the form `// m/s`. A field without one does not pass review.
 
 **Conversions exist only in two places:** the user interface layer, and file
 format adapters. Both call the same single set of `constexpr` functions in
-`galata/core/units.hpp`, and there is no other conversion code anywhere.
+`galata/units.hpp`, and there is no other conversion code anywhere. It sits *outside*
+`include/galata/core/` on purpose: that directory is scanned by the gate below,
+and keeping the definition site out of it means the gate needs no exception for
+the one file that is allowed to contain conversion factors.
 
 The conversion factors are exact by definition, and each carries the definition
 that makes it exact:
@@ -52,8 +55,9 @@ the underlying unit is not one this project converts.
 a file under the numerical core calls a conversion function, or contains a
 numeric literal matching a known conversion factor. It reports by name the core
 directories that do not exist yet, so its coverage is visible in the CI log
-instead of being assumed — as of this record it scans `src/core` and skips the
-rest, because the rest have not been written. The literal check is the one
+instead of being assumed rather than fixed in this document. When this record
+was written only `src/core` existed; today the gate scans forty files and
+reports `src/synth` and `src/ident` as the only skips. The literal check is the one
 that catches the real failure mode, which is not calling `feet_to_metres` in the
 solver — nobody does that — but writing `alt * 0.3048` inline because it seemed
 obvious at the time.

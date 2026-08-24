@@ -67,8 +67,13 @@ user than shipping a validated one with a citation.
 used for restricted datasets and it is consistent, which is its real merit. It
 fails here for a practical reason: the values are prose in a PDF, not a
 downloadable table. A test would have to parse a paywalled PDF, and CI would
-depend on a publisher's availability and bot policy. `check-doc-links.sh`
-already treats IEEE Xplore as unreachable to automated clients.
+depend on a publisher's availability and bot policy. IEEE Xplore serves a
+challenge to automated clients, which is why the values compared against were
+read from the authors' preprint rather than from the published version — see the
+header of `tests/validation/reference/seiler2020_disk_margin.csv`.
+`check-doc-links.sh` has no host-specific handling: it treats 401, 403, 405 and
+429 from *any* host as "alive and refusing a robot", which is a different fact
+from a URL being wrong.
 
 **Recompute the values ourselves and cite only the method.** Attractive, and
 partly done — every value here was reproduced independently. But if the
