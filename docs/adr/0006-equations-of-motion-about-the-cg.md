@@ -33,7 +33,13 @@ geometric datum, the point aerodynamic coefficient data is referenced to.
 
 The CG offset is therefore not a term in the equations of motion. It appears in
 exactly one place: **the transfer of the aerodynamic wrench from the reference
-point to the CG**, `M_cg = M_ref + r_ref_to_cg x F`. That transfer is where a CG
+point to the CG**, `M_cg = M_ref + r_cg_to_ref x F` — the offset taken as the
+vector **from the CG to the point the force acts at**, which is the direction
+`Aircraft::cg_to_aero_reference_m` is named for and the direction
+`sim::moved_to_cg` implements. An earlier version of this record wrote
+`r_ref_to_cg`, which is the same vector reversed; getting it backwards flips the
+sign of every moment contribution, and a sign-flipped pitching moment still
+trims — at the wrong elevator, with the wrong static margin. That transfer is where a CG
 sweep does its work, and it is the mechanism by which moving the CG aft reduces
 static margin and drives the short period unstable — which is the phenomenon
 this tool exists to let a user find.

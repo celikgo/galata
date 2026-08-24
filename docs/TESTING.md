@@ -30,9 +30,12 @@ written against the capability's documented contract. A test written by reading
 the code tests the code's opinion of itself.
 
 **Property-based tests carry the invariants that example-based tests miss.**
-Round-trip conversions, quaternion normalisation, frame-transformation
-composition and associativity. These are the tests that catch a transposed
-rotation matrix, which no single hand-picked example reliably does.
+Round-trip conversions, quaternion normalisation, and the frame relationships
+that must hold at every attitude — that the wind and body rotations are mutual
+inverses, that the stability frame never moves the body y-axis, that elementary
+rotations add their angles. These are the tests that catch a transposed rotation
+matrix, which no single hand-picked example reliably does. Composition
+associativity is *not* among them; it would be worth adding.
 
 **No number in the V&V report is typed.** Every figure it states about galata's
 own behaviour is measured at render time and referred to in prose by name. The

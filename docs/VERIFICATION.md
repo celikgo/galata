@@ -227,7 +227,7 @@ ADR-0004 defines two tiers, and both are gated by
 `.github/workflows/determinism.yml` on Linux, macOS and Windows.
 
 **Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
-emits 92 values at `%.17g`, which round-trips a double exactly, so byte-identical
+emits 145 values at `%.17g`, which round-trips a double exactly, so byte-identical
 output means bit-identical values rather than values that merely print the same.
 Gated absolutely on every platform.
 
@@ -237,6 +237,10 @@ is an arbitrary choice that then shows up in the published numbers. The gate is
 1e-9 relative — far above the roughly 1e-16 that one math-library call costs,
 far below the roughly 1e-5 that any real divergence in the physics would
 produce, so it discriminates between "different libm" and "different answer".
+
+98 of the 145 fingerprinted values are compared this way. The
+other 47 are downstream of a finite difference and are held byte-identical
+in tier 1 instead, for the reason given below.
 
 The observed deviation is printed by every run rather than merely bounded; read
 it from the workflow log. It is not restated here, because a measured figure

@@ -25,7 +25,11 @@ that touches a frame, an attitude or a state cites this ADR.
 ### Frames
 
 **Navigation frame — NED.** x north, y east, z **down**. Flat-Earth and
-non-rotating by default. A round-Earth WGS-84 option exists behind a flag; when
+non-rotating — always, not by default. There is no round-Earth or WGS-84 option
+and no flag that selects one, and the navigation frame is treated as inertial:
+no Earth rotation, no transport rate, no Coriolis or centrifugal term. That is
+adequate for the flight-dynamics timescales this tool addresses and inadequate
+for anything trans-continental, so it is stated rather than assumed. When
 the flat-Earth assumption is in force it is recorded in the output rather than
 left implicit.
 
@@ -146,8 +150,14 @@ x = [ p_n  p_e  p_d      position,       NED,         m
       p    q    r ]      angular rate,   body axes,   rad/s
 ```
 
-Thirteen components, in that order. The order is part of the contract: it is the
-row and column order of every A and B matrix galata produces, and a linearisation
+Thirteen components, in that order. The order is part of the contract: it is the order in which the components are
+stored, integrated, fingerprinted and serialised. It is **not** the row and
+column order of the A and B matrices galata produces — `linearize.finitediff`
+works in twelve Euler coordinates rather than thirteen quaternion ones, because
+perturbing four components of a unit quaternion explores a direction the
+dynamics do not have, and it then reports a *reduced* set: four longitudinal
+states or four lateral ones. Every produced `LinearSystem` carries its own
+`state_names`, and those are what the analysis layer reads. A state vector
 whose rows are permuted relative to its documentation is worthless.
 
 Derived quantities, defined here once and used everywhere:
