@@ -130,6 +130,12 @@ linked to the document that defines it.
   claim; a `setlocale(LC_ALL, "")` introduced anywhere in the library turns every
   decimal point into a comma and fails it.
 
+  An earlier version of this record credited `fmt` with delivering this. It never
+  did — it was declared in `vcpkg.json` and linked by nothing — and the
+  dependency has since been dropped rather than wired, because putting an
+  unpinned library's undocumented float formatting underneath every committed
+  artefact is the opposite of what pinning Eigen is for.
+
 ### What breaks the guarantee, stated so nobody is surprised
 
 - Compiling galata into a build that enables `-ffast-math`, `-Ofast`, or
@@ -141,6 +147,15 @@ linked to the document that defines it.
 - Parallel reduction over floating-point values in an unspecified order. Any
   parallelism introduced later must use a fixed reduction tree, and that
   requirement is on the reviewer of the commit that introduces it.
+- **A consumer that changes the process locale in its own program.** galata's
+  formatting is locale-*independent* only because galata leaves the locale
+  alone; it is not locale-*insensitive*. An application that calls
+  `setlocale(LC_ALL, "")` in its own `main` and then links galata as a library
+  gets commas in galata's output on a machine configured for them. The gate above
+  covers galata's own binaries and cannot cover somebody else's. Making the
+  formatting insensitive rather than merely undisturbed would mean routing every
+  numeric conversion through a locale-independent formatter, which is the `fmt`
+  question above, and it was answered no.
 
 ## Alternatives considered
 

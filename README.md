@@ -217,7 +217,7 @@ and then runs a real study.
 git clone https://github.com/celikgo/galata.git
 cd galata
 
-# vcpkg in manifest mode fetches Eigen, fmt, yaml-cpp and GoogleTest.
+# vcpkg in manifest mode fetches Eigen, yaml-cpp and GoogleTest.
 export VCPKG_ROOT=/path/to/vcpkg
 
 cmake --preset dev

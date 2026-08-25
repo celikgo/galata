@@ -73,7 +73,7 @@ say so in the report, and that will be worked with rather than argued about.
 - Path traversal or unintended file writes from a study file — a pipeline that
   writes outside the directory the operator nominated.
 - Anything that causes galata to execute code named by an input file.
-- A vulnerability in a pinned dependency (Eigen, fmt, yaml-cpp, GoogleTest) that
+- A vulnerability in a pinned dependency (Eigen, yaml-cpp, GoogleTest) that
   is actually reachable through galata's use of it. If it is not reachable, it
   is still worth a normal issue, and it will be pinned forward.
 

@@ -9,7 +9,7 @@ produced it and to the document it was checked against.
 
 ## Build and test
 
-vcpkg in manifest mode fetches Eigen, fmt, yaml-cpp and GoogleTest. `VCPKG_ROOT` must point at
+vcpkg in manifest mode fetches Eigen, yaml-cpp and GoogleTest. `VCPKG_ROOT` must point at
 a vcpkg checkout.
 
 ```bash
