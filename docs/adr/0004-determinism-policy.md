@@ -114,17 +114,21 @@ linked to the document that defines it.
 - **No `long double` anywhere in the numerical core.** It is 80-bit extended on
   x86-64 System V, 64-bit on MSVC and 128-bit quad on AArch64 Linux. A result
   that touches it is non-portable by construction.
-- **Locale-independent formatting, delivered by never changing the locale.**
-  Nothing in galata calls `setlocale` or `imbue`, so the program stays in the
-  `"C"` locale and a decimal comma cannot reach a result file. Note what this is
-  *not*: output goes through `std::printf` in `tools/determinism` and through
-  iostreams with `std::setprecision` in the pipeline's report writers. `fmt` is
-  declared in `vcpkg.json` but is not linked or included anywhere in the tree, so
-  it is not what delivers this — an earlier version of this record said it was.
+- **Locale-independent formatting, delivered by never changing the locale — and
+  now gated.** Nothing in galata calls `setlocale` or `imbue`, so the process
+  stays in the `"C"` locale and a decimal comma cannot reach a result file.
+  Output goes through `std::printf` in `tools/determinism` and through iostreams
+  with `std::setprecision` in the pipeline's report writers, and both take their
+  decimal point from that locale.
 
-  This one therefore rests on a convention rather than on a library, and it is
-  the weakest item on this list: a single `setlocale(LC_ALL, "")` would break
-  tier 1 on every platform at once, and no test would catch it.
+  This rests on a convention rather than on a library, which is why it needed a
+  gate more than any other item here: two runs on a German machine would be
+  equally wrong and equally identical, so tier 1 alone would pass.
+  `scripts/check-determinism.sh` therefore runs the fingerprint a **third** time
+  with a comma-decimal locale in the environment and requires the bytes not to
+  move. It passes because galata ignores the environment, which is exactly the
+  claim; a `setlocale(LC_ALL, "")` introduced anywhere in the library turns every
+  decimal point into a comma and fails it.
 
 ### What breaks the guarantee, stated so nobody is surprised
 

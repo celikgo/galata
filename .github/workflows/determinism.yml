@@ -66,8 +66,22 @@ jobs:
       - name: Determinism test tier
         run: ctest --preset ${{ matrix.preset }} -L determinism
 
+      # check-determinism.sh runs the binary a third time under a comma-decimal
+      # locale and requires the bytes not to move — the gate on ADR-0004's
+      # locale item. It SKIPS BY NAME where no such locale exists, and
+      # ubuntu-24.04 ships none, so the reference platform would report a skip
+      # rather than a pass. Generate one, so the check actually runs where it
+      # matters most. macOS carries de_DE.UTF-8 already; Windows reports the
+      # skip, which is visible in the log rather than silent.
+      - name: Provide a comma-decimal locale for the check
+        if: runner.os == 'Linux'
+        run: |
+          sudo locale-gen de_DE.UTF-8
+          sudo update-locale
+          locale -a | grep -i de_DE
+
       # Tier 1. Absolute, on this platform, with this binary.
-      - name: Tier 1 — byte-identical across two runs
+      - name: Tier 1 — byte-identical across two runs, and under a hostile locale
         shell: bash
         run: |
           engine="build/${{ matrix.preset }}/tools/determinism/galata-determinism"
