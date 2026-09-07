@@ -146,6 +146,7 @@ against.
 | `model.control_system` | implemented, unvalidated | — |
 | `model.feedback` | implemented, unvalidated | — |
 | `model.linear.statespace` | implemented, unvalidated | — |
+| `model.linear_graph` | implemented, unvalidated | — |
 | `model.series` | implemented, unvalidated | — |
 | `report.csv` | implemented, unvalidated | — |
 | `report.html` | implemented, unvalidated | — |

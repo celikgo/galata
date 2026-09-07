@@ -58,7 +58,7 @@ runs:
         path: |
           ~/.cache/vcpkg/archives
           ${{ env.LOCALAPPDATA }}/vcpkg/archives
-        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('vcpkg.json') }}
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('vcpkg.json', 'cmake/desktop-triplets/*.cmake') }}
         restore-keys: |
           vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-
           vcpkg-${{ runner.os }}-${{ runner.arch }}-

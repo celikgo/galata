@@ -19,3 +19,6 @@ The format is in [0000-template.md](0000-template.md).
 | [0009](0009-release-evidence-and-source-identity.md) | Releases consume complete evidence for one immutable source | implemented; hosted verification pending |
 | [0010](0010-continuous-scalar-executable-model.md) | Bounded continuous scalar executable model | implemented feasibility profile; review pending |
 | [0011](0011-source-model-identity-and-project-boundary.md) | Source-model identity and project document boundary | proposed |
+| [0012](0012-project-worker-preview.md) | Portable project revisions and an isolated preview worker | experimental M2 preview; verification and review pending |
+| [0013](0013-typed-linear-graph-adapter.md) | Typed linear rows and an explicit state-space graph adapter | experimental M2 contract; verification and external acceptance pending |
+| [0014](0014-project-revision-recovery.md) | Review and restore retained project revisions | experimental M2 contract; local verification and external acceptance pending |

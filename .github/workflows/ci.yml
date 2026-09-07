@@ -68,7 +68,7 @@ jobs:
 
       - name: C++ sources match .clang-format
         run: |
-          files="$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.c')"
+          files="$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.c' '*.mm')"
           if [ -z "$files" ]; then
             echo "::error::no C/C++ sources found — this job would be vacuously green"
             exit 1
@@ -117,6 +117,20 @@ jobs:
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+      - name: Package and verify the relocated macOS desktop candidate
+        if: matrix.name == 'macos'
+        run: >-
+          python3 scripts/package-desktop.py "build/${{ matrix.preset }}"
+          --output-dir build/desktop-candidate-assets
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.name == 'macos'
+        with:
+          name: desktop-candidate-${{ inputs.source_sha || github.sha }}
+          path: build/desktop-candidate-assets/*
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Install and consume the relocated C++ package
         shell: bash

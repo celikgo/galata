@@ -29,6 +29,7 @@ install(TARGETS ${_galata_install_targets} EXPORT GalataTargets
 if(TARGET galata_cli)
   install(TARGETS galata_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/galata"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 install(FILES "${PROJECT_BINARY_DIR}/generated/include/galata/build_config.hpp"
@@ -71,3 +72,16 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/tests/validation/reference"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/galata/tests/validation")
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/docs/adr"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/galata/docs")
+
+if(TARGET galata_desktop)
+  install(TARGETS galata_desktop BUNDLE DESTINATION ".")
+  install(PROGRAMS "$<TARGET_FILE:galata_cli>"
+    DESTINATION "Galata Preview.app/Contents/MacOS")
+  install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/NOTICE"
+    "${PROJECT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+    DESTINATION "Galata Preview.app/Contents/Resources")
+  install(FILES "${GALATA_EIGEN_LICENSE_FILE}" DESTINATION
+    "Galata Preview.app/Contents/Resources/licenses" RENAME eigen3.txt)
+  install(FILES "${GALATA_YAML_CPP_LICENSE_FILE}" DESTINATION
+    "Galata Preview.app/Contents/Resources/licenses" RENAME yaml-cpp.txt)
+endif()

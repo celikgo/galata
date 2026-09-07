@@ -86,6 +86,9 @@ struct StageContext {
   std::shared_ptr<RunFiles> files;
   // Study-local identity of the executing stage; empty for direct invocations.
   std::string stage_id;
+  // Optional cooperative cancellation propagated from RunOptions. Capabilities
+  // with internal polling may stop sooner than the executor's stage boundaries.
+  std::function<bool()> cancelled = {};
 
   // Resolves `{from: id}` and returns the referenced artefact.
   [[nodiscard]] const Artifact& upstream_at(const std::string& key) const;
@@ -119,6 +122,9 @@ struct Capability {
   // Optional positive byte limits for declared input file roles. Preflight
   // snapshots these before unbounded roles, and the reader also checks caches.
   std::map<std::string, std::size_t> input_file_byte_limits = {};
+  // Absent optional roles are skipped; present roles still receive complete
+  // preflight protection. All other declared file roles remain required.
+  std::vector<std::string> optional_input_file_keys = {};
 };
 
 [[nodiscard]] std::string to_string(Capability::State state);

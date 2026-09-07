@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Install, relocate, compile and run a consumer without galata's source includes."""
 import os
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -52,6 +54,7 @@ int main() {
 }
 ''', encoding="utf-8")
         (consumer / "model.cpp").write_text('''#include <galata/modeling/model.hpp>
+#include <galata/modeling/linear_adapter.hpp>
 int main() {
   namespace m = galata::modeling;
   m::Model source;
@@ -59,7 +62,17 @@ int main() {
   source.connections = {{"constant", "output", 0}};
   const auto compiled = m::compile_model(m::parse_model_yaml(m::write_model_yaml(source)));
   const auto result = m::simulate(compiled, {.step_count = 0});
-  return !result.state_ids.empty() || result.outputs.size() != 1
+  galata::model::LinearSystem plant;
+  plant.a = Eigen::MatrixXd::Zero(1, 1);
+  plant.b = Eigen::MatrixXd::Ones(1, 1);
+  plant.state_names = {"x"};
+  plant.input_names = {"u"};
+  m::LinearChannels channels{{m::SignalType{}}, {m::SignalType{}}, {m::SignalType{}}};
+  const auto graph = m::lower_linear_system(plant, channels,
+      {Eigen::VectorXd::Zero(1), Eigen::VectorXd::Ones(1), {}});
+  const auto linear = m::compile_model(graph.model);
+  return linear.evaluate(0.0, linear.initial_state()).derivatives(0) != 1.0
+      || !result.state_ids.empty() || result.outputs.size() != 1
       || result.outputs.front()(0) != 2.0 || result.semantic_sha256.size() != 64;
 }
 ''', encoding="utf-8")
@@ -82,6 +95,8 @@ int main() {
             if not (data / "third_party/licenses" / notice).read_bytes().strip():
                 raise ValueError(f"missing installed dependency notice: {notice}")
         studies = {"continuous-feedback": ("response.csv", "evidence.json"),
+                   "nt33a-graph-design": ("model.yaml", "adapter.json", "graph-response.csv",
+                                          "graph-evidence.json", "linear-response.csv"),
                    "nt33a-trim-and-linearise": ("trim-and-modes.md",),
                    "nt33a-control-design": ("control-design.md", "linear-response.csv",
                                             "nonlinear-response.csv")}
@@ -94,6 +109,27 @@ int main() {
             for report in reports:
                 if not (output / report).is_file() or not (output / report).stat().st_size:
                     raise ValueError(f"installed CLI did not produce {study}/{report}")
+        if os.name == "posix":
+            project = scratch / "installed-project.galata"
+            engine = relocated / "bin/galata"
+            run([engine, "project", "create", project], env=environment)
+            result = subprocess.run([str(engine), "project", "run", str(project)],
+                                    check=True, capture_output=True, text=True, env=environment)
+            if json.loads(result.stdout)["status"] != "completed":
+                raise ValueError("installed project worker did not complete")
+            if cache.get("GALATA_BUILD_DESKTOP") == "ON":
+                bundle = relocated / "Galata Preview.app/Contents"
+                bundled_engine = bundle / "MacOS/galata"
+                if hashlib.sha256(bundled_engine.read_bytes()).digest() != hashlib.sha256(engine.read_bytes()).digest():
+                    raise ValueError("desktop bundle contains a stale numerical worker")
+                for notice in ("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md",
+                               "licenses/eigen3.txt", "licenses/yaml-cpp.txt"):
+                    if not (bundle / "Resources" / notice).read_bytes().strip():
+                        raise ValueError(f"missing desktop dependency notice: {notice}")
+                result = subprocess.run([str(bundled_engine), "project", "run", str(project)],
+                                        check=True, capture_output=True, text=True, env=environment)
+                if json.loads(result.stdout)["status"] != "completed":
+                    raise ValueError("relocated bundled worker did not complete")
         print("Relocated C++ package and installed CLI passed.")
 
 

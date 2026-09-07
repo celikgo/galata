@@ -300,6 +300,8 @@ std::string write_run_manifest(const Pipeline& pipeline,
   out << "]\n}\n";
   const std::string bytes = out.str();
   const std::string name = "run-" + sha256(bytes) + ".json";
+  if (options.cancelled && options.cancelled())
+    throw std::runtime_error("pipeline cancelled before manifest publication");
   files.write_output(name, bytes, true);
   return files.output_path(name);
 }

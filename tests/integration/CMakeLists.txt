@@ -22,7 +22,9 @@ add_executable(galata_integration_tests
   test_runtime_identity.cpp
   test_design_workflow.cpp
   test_model_workflow.cpp
+  test_linear_graph_workflow.cpp
   test_model_input_limits.cpp
+  test_pipeline_cancellation.cpp
   test_simulation_convergence.cpp
 )
 

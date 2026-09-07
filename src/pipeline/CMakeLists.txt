@@ -13,6 +13,7 @@ add_library(galata_pipeline
   capabilities.cpp
   design_capabilities.cpp
   model_capabilities.cpp
+  linear_graph_capability.cpp
   files.cpp
   sha256.cpp
   provenance.cpp

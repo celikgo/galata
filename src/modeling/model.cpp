@@ -47,11 +47,20 @@ void dimension_check(const Dimension& dimension, const std::string& id) {
   }
 }
 
+void signal_type_check(const SignalType& type, const std::string& id) {
+  dimension_check(type.dimension, id);
+  if (type.frame != Frame::None && type.frame != Frame::Body && type.frame != Frame::Ned) {
+    throw Error(ErrorCode::InvalidModel, "unsupported signal frame", id);
+  }
+}
+
 std::size_t input_count(const Block& block) {
   if (std::holds_alternative<Constant>(block.parameters))
     return 0;
   if (const auto* sum = std::get_if<Sum>(&block.parameters))
     return sum->signs.size();
+  if (const auto* combination = std::get_if<LinearCombination>(&block.parameters))
+    return combination->terms.size();
   return 1;
 }
 
@@ -93,24 +102,22 @@ std::string cycle_path(const Graph& graph, const std::vector<std::vector<std::si
   return "unresolved instantaneous dependency";
 }
 
-Graph prepare(const Model& source) {
-  if (source.schema != kSchema || source.profile != kProfile) {
+void validate_draft_metadata(const Model& source) {
+  if (source.schema != kSchema
+      || (source.profile != kProfile && source.profile != kLinearProfile)) {
     throw Error(ErrorCode::InvalidModel, "unsupported model schema or execution profile");
   }
   if (source.blocks.size() > kMaxBlocks || source.connections.size() > kMaxConnections) {
     throw Error(ErrorCode::ResourceLimit, "model block or connection limit exceeded");
   }
-  if (source.blocks.empty())
-    throw Error(ErrorCode::InvalidModel, "model must contain blocks");
   // Validate allocations and scalar metadata before copying a direct C++ model.
+  std::set<std::string> ids;
   for (const auto& block : source.blocks) {
     if (!valid_id(block.id))
       throw Error(ErrorCode::InvalidModel, "invalid stable block ID");
-    dimension_check(block.output.dimension, block.id);
-    if (block.output.frame != Frame::None && block.output.frame != Frame::Body
-        && block.output.frame != Frame::Ned) {
-      throw Error(ErrorCode::InvalidModel, "unsupported signal frame", block.id);
-    }
+    if (!ids.insert(block.id).second)
+      throw Error(ErrorCode::InvalidModel, "duplicate block ID", block.id);
+    signal_type_check(block.output, block.id);
     if (block.parameters.valueless_by_exception()) {
       throw Error(ErrorCode::InvalidModel, "missing block parameters", block.id);
     }
@@ -136,12 +143,45 @@ Graph prepare(const Model& source) {
         throw Error(ErrorCode::InvalidModel, "sum requires ordered +1/-1 input signs", block.id);
       }
     }
+    if (const auto* combination = std::get_if<LinearCombination>(&block.parameters)) {
+      if (source.profile != kLinearProfile) {
+        throw Error(
+            ErrorCode::InvalidModel, "linear_combination requires continuous-linear.v1", block.id);
+      }
+      if (combination->terms.size() > kMaxLinearTerms) {
+        throw Error(ErrorCode::ResourceLimit, "linear combination input limit exceeded", block.id);
+      }
+      if (combination->terms.empty()) {
+        throw Error(ErrorCode::InvalidModel, "linear combination requires ordered terms", block.id);
+      }
+      for (const auto& term : combination->terms) {
+        signal_type_check(term.input, block.id);
+        dimension_check(term.coefficient.dimension, block.id);
+        if (!std::isfinite(term.coefficient.value)) {
+          throw Error(ErrorCode::InvalidModel, "parameters must be finite", block.id);
+        }
+        for (std::size_t d = 0; d < block.output.dimension.size(); ++d) {
+          if (term.input.dimension[d] + term.coefficient.dimension[d]
+              != block.output.dimension[d]) {
+            throw Error(ErrorCode::TypeMismatch,
+                        "linear term dimensions incompatible with output",
+                        block.id);
+          }
+        }
+      }
+    }
   }
   for (const auto& connection : source.connections) {
     if (!valid_id(connection.source) || !valid_id(connection.target)) {
       throw Error(ErrorCode::InvalidModel, "invalid connection endpoint ID");
     }
   }
+}
+
+Graph prepare(const Model& source) {
+  validate_draft_metadata(source);
+  if (source.blocks.empty())
+    throw Error(ErrorCode::InvalidModel, "model must contain blocks");
   Graph graph;
   graph.source = source;
   auto& blocks = graph.source.blocks;
@@ -152,9 +192,7 @@ Graph prepare(const Model& source) {
   graph.state_slots.resize(blocks.size(), kAbsent);
   for (std::size_t i = 0; i < blocks.size(); ++i) {
     const auto& block = blocks[i];
-    if (!by_id.emplace(block.id, i).second) {
-      throw Error(ErrorCode::InvalidModel, "duplicate block ID", block.id);
-    }
+    by_id.emplace(block.id, i);
     graph.inputs[i].resize(input_count(block), kAbsent);
     if (std::holds_alternative<Integrator>(block.parameters)) {
       graph.state_slots[i] = graph.states.size();
@@ -187,12 +225,22 @@ Graph prepare(const Model& source) {
   for (std::size_t i = 0; i < blocks.size(); ++i) {
     const auto& block = blocks[i];
     const bool integrator = std::holds_alternative<Integrator>(block.parameters);
-    for (const auto producer : graph.inputs[i]) {
+    for (std::size_t port = 0; port < graph.inputs[i].size(); ++port) {
+      const auto producer = graph.inputs[i][port];
       if (producer == kAbsent)
         throw Error(ErrorCode::InvalidModel, "unconnected input port", block.id);
       const auto& input_type = blocks[producer].output;
       auto expected = input_type;
-      if (const auto* gain = std::get_if<Gain>(&block.parameters)) {
+      if (const auto* combination = std::get_if<LinearCombination>(&block.parameters)) {
+        if (input_type != combination->terms[port].input) {
+          throw Error(ErrorCode::TypeMismatch,
+                      "input dimension/frame incompatible with declared linear term",
+                      block.id);
+        }
+        // The term explicitly declares coordinate coupling. Metadata validation
+        // has checked the coefficient dimensions; no frame transform is inferred.
+        expected = block.output;
+      } else if (const auto* gain = std::get_if<Gain>(&block.parameters)) {
         for (std::size_t d = 0; d < expected.dimension.size(); ++d) {
           expected.dimension[d] += gain->dimension[d];
         }
@@ -252,6 +300,10 @@ struct CompiledModel::Impl {
 Error::Error(ErrorCode code, std::string message, std::string block_id)
     : std::runtime_error(block_id.empty() ? std::move(message) : block_id + ": " + message),
       code_(code), block_id_(std::move(block_id)) {}
+
+void validate_model_draft(const Model& model) {
+  validate_draft_metadata(model);
+}
 
 void validate_model(const Model& model) {
   (void)prepare(model);
@@ -317,6 +369,21 @@ Evaluation CompiledModel::evaluate(double time_s, const Eigen::VectorXd& state) 
         value += static_cast<double>(sum->signs[i]) * signals[ports[i]];
         if (!std::isfinite(value)) {
           throw Error(ErrorCode::NonFiniteEvaluation, "sum intermediate overflowed", block.id);
+        }
+      }
+    } else if (const auto* combination = std::get_if<LinearCombination>(&block.parameters)) {
+      // Explicit source-port left fold. Even zero coefficients retain their
+      // graph dependencies, and neither overflow nor cancellation is hidden.
+      for (std::size_t i = 0; i < ports.size(); ++i) {
+        const double product = combination->terms[i].coefficient.value * signals[ports[i]];
+        if (!std::isfinite(product)) {
+          throw Error(ErrorCode::NonFiniteEvaluation, "linear term product overflowed", block.id);
+        }
+        value += product;
+        if (!std::isfinite(value)) {
+          throw Error(ErrorCode::NonFiniteEvaluation,
+                      "linear combination intermediate overflowed",
+                      block.id);
         }
       }
     } else if (std::holds_alternative<Integrator>(block.parameters)) {

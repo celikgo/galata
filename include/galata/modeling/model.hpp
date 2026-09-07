@@ -22,10 +22,12 @@ namespace galata::modeling {
 
 inline constexpr std::string_view kSchema = "galata.model.v1";
 inline constexpr std::string_view kProfile = "continuous-scalar.v1";
+inline constexpr std::string_view kLinearProfile = "continuous-linear.v1";
 inline constexpr std::size_t kMaxSourceBytes = 1024 * 1024;
 inline constexpr std::size_t kMaxBlocks = 1024;
 inline constexpr std::size_t kMaxConnections = 8192;
 inline constexpr std::size_t kMaxSumInputs = 64;
+inline constexpr std::size_t kMaxLinearTerms = 64;
 inline constexpr int kMaxSteps = 1000000;
 inline constexpr std::size_t kMaxRecordedScalars = 1000000;
 inline constexpr std::size_t kMaxBlockEvaluations = 100000000;
@@ -90,7 +92,20 @@ struct Integrator {
 
 struct Output {};
 
-using Parameters = std::variant<Constant, Gain, Sum, Integrator, Output>;
+// Ordered coordinate coupling, admitted only by continuous-linear.v1. Each
+// incoming signal must exactly match its declared input type. The coefficient
+// supplies the dimension difference to the output. Distinct input/output
+// frames explicitly declare linear coupling; no coordinate rotation is inferred.
+struct LinearTerm {
+  SignalType input;
+  Gain coefficient;
+};
+
+struct LinearCombination {
+  std::vector<LinearTerm> terms;
+};
+
+using Parameters = std::variant<Constant, Gain, Sum, Integrator, Output, LinearCombination>;
 
 struct Block {
   std::string id;  // [A-Za-z_][A-Za-z0-9_-]{0,63}; stable across source reordering
@@ -111,10 +126,20 @@ struct Model {
   std::vector<Connection> connections;
 };
 
-// All entry points reject unsupported/invalid direct C++ models as well as
-// documents. YAML has closed keys, finite decimal numbers and no aliases/tags.
+// Draft entry points accept incomplete graph connections, but require the same
+// closed YAML syntax, schema/profile, bounded collections and valid scalar
+// metadata as executable models. Drafts may have no blocks or outputs, unknown
+// endpoints, unconnected/invalid ports, type mismatches or instantaneous cycles.
+// A draft is never executable and has no semantic digest until full validation
+// and compilation succeed. The ordinary parser and serializers remain strict.
+void validate_model_draft(const Model& model);
+[[nodiscard]] Model parse_model_draft_yaml(std::string_view source);
+
+// These entry points reject invalid executable graphs from C++ or documents.
+// YAML has closed keys, finite decimal numbers and no aliases/tags.
 // Canonical bytes encode exact binary64 parameter bits and effective semantics;
-// block/connection declaration order is excluded, sum port order is retained.
+// block/connection declaration order is excluded; sum and linear term port
+// order is retained, including user-authored zero coefficients.
 void validate_model(const Model& model);
 [[nodiscard]] Model parse_model_yaml(std::string_view source);
 [[nodiscard]] std::string write_model_yaml(const Model& model);

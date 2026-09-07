@@ -88,6 +88,7 @@ void expect_error(const std::function<void()>& action, ErrorCode expected) {
 
 void expect_document_error(std::string_view text) {
   expect_error([text] { (void)parse_model_yaml(text); }, ErrorCode::InvalidDocument);
+  expect_error([text] { (void)parse_model_draft_yaml(text); }, ErrorCode::InvalidDocument);
 }
 
 class TestFloatingEnvironment final {
@@ -128,6 +129,108 @@ TEST(ModelIo, ParsesAllFiveKindsWithExplicitDimensionsFramesAndOrderedPorts) {
   EXPECT_EQ(model.blocks[3].output.frame, Frame::Body);
   EXPECT_EQ(model.connections[1].input, 1U);
   EXPECT_EQ(model.connections[1].target, "derivative");
+}
+
+TEST(ModelDraft, AcceptsIncompleteGraphsWithoutGrantingExecutableOrCanonicalSemantics) {
+  // ADR-0012 permits these editor states; every executable entry point retains
+  // the model.v1 graph contract. Input indices remain syntactically size_t.
+  struct Case {
+    std::string source;
+    ErrorCode executable_error;
+  };
+
+  const std::vector<Case> cases = {
+      {"schema: galata.model.v1\nprofile: continuous-scalar.v1\nblocks: []\nconnections: []\n",
+       ErrorCode::InvalidModel},
+      {replaced(kMinimal,
+                "kind: output",
+                "kind: gain\n    coefficient: {value: 1, dimension: [0, 0, 0, 0, 0, 0, 0, 0]}"),
+       ErrorCode::InvalidModel},
+      {replaced(kMinimal,
+                "connections:\n  - {source: source, target: result, input: 0}",
+                "connections: []"),
+       ErrorCode::InvalidModel},
+      {replaced(kMinimal, "source: source", "source: deleted_source"), ErrorCode::InvalidModel},
+      {replaced(kMinimal, "target: result", "target: future_target"), ErrorCode::InvalidModel},
+      {replaced(kMinimal, "input: 0", "input: 4096"), ErrorCode::InvalidModel},
+      {std::string(kMinimal) + "  - {source: source, target: result, input: 0}\n",
+       ErrorCode::InvalidModel},
+      {replaced(kMinimal, "frame: none", "frame: body"), ErrorCode::TypeMismatch},
+      {replaced(kMinimal, "source: source", "source: result"), ErrorCode::AlgebraicLoop}};
+  for (const auto& value : cases) {
+    SCOPED_TRACE(value.source);
+    const Model draft = parse_model_draft_yaml(value.source);
+    EXPECT_NO_THROW(validate_model_draft(draft));
+    expect_error([&] { validate_model(draft); }, value.executable_error);
+    expect_error([&] { (void)parse_model_yaml(value.source); }, value.executable_error);
+    expect_error([&] { (void)compile_model(draft); }, value.executable_error);
+    expect_error([&] { (void)write_model_yaml(draft); }, value.executable_error);
+    expect_error([&] { (void)canonical_model(draft); }, value.executable_error);
+  }
+}
+
+TEST(ModelDraft, ValidDraftCompilesWithTheSameIdentityAsTheOrdinaryParser) {
+  const auto draft = parse_model_draft_yaml(kAffine);
+  EXPECT_EQ(compile_model(draft).semantic_sha256(),
+            compile_model(parse_model_yaml(kAffine)).semantic_sha256());
+  EXPECT_EQ(write_model_yaml(draft), write_model_yaml(parse_model_yaml(kAffine)));
+}
+
+TEST(ModelDraft, RefusesInvalidMetadataEvenWhenConnectionsAreIncomplete) {
+  const Model valid = parse_model_yaml(kAffine);
+  const auto refused = [&](const std::function<void(Model&)>& mutate,
+                           ErrorCode code = ErrorCode::InvalidModel) {
+    Model draft = valid;
+    draft.connections.clear();
+    mutate(draft);
+    expect_error([&] { validate_model_draft(draft); }, code);
+  };
+  refused([](Model& model) { model.schema = "galata.model.v2"; });
+  refused([](Model& model) { model.profile = "sampled-scalar.v1"; });
+  refused([](Model& model) { model.blocks[1].id = model.blocks[0].id; });
+  refused([](Model& model) { model.blocks[0].id = "not an ID"; });
+  refused([](Model& model) { model.blocks[0].output.dimension[0] = 17; });
+  refused([](Model& model) { model.blocks[0].output.frame = static_cast<Frame>(99); });
+  refused([](Model& model) {
+    std::get<Constant>(model.blocks[0].parameters).value = std::numeric_limits<double>::infinity();
+  });
+  refused([](Model& model) {
+    std::get<Gain>(model.blocks[1].parameters).value = std::numeric_limits<double>::quiet_NaN();
+  });
+  refused([](Model& model) { std::get<Gain>(model.blocks[1].parameters).dimension[2] = -17; });
+  refused([](Model& model) { std::get<Sum>(model.blocks[2].parameters).signs = {}; });
+  refused([](Model& model) { std::get<Sum>(model.blocks[2].parameters).signs = {1, 0}; });
+  refused([](Model& model) {
+    std::get<Integrator>(model.blocks[3].parameters).initial_value =
+        -std::numeric_limits<double>::infinity();
+  });
+  refused([](Model& model) { model.connections = {{"bad.id", "future_target", 0}}; });
+  refused([](Model& model) { model.connections = {{"future_source", "", 0}}; });
+  refused([](Model& model) { model.blocks.resize(kMaxBlocks + 1); }, ErrorCode::ResourceLimit);
+  refused([](Model& model) { model.connections.resize(kMaxConnections + 1); },
+          ErrorCode::ResourceLimit);
+  refused(
+      [](Model& model) {
+        std::get<Sum>(model.blocks[2].parameters).signs.assign(kMaxSumInputs + 1, 1);
+      },
+      ErrorCode::ResourceLimit);
+}
+
+TEST(ModelDraft, ParserRetainsMetadataAndResourceRefusals) {
+  for (const std::string& document :
+       {replaced(kMinimal, "galata.model.v1", "galata.model.v2"),
+        replaced(kMinimal, "continuous-scalar.v1", "continuous-vector.v1"),
+        replaced(kMinimal, "id: result", "id: source"),
+        replaced(kMinimal, "id: result", "id: 'bad.id'"),
+        replaced(kMinimal, "source: source", "source: 'bad.id'"),
+        replaced(kMinimal, "[0, 0, 0, 0, 0, 0, 0, 0]", "[17, 0, 0, 0, 0, 0, 0, 0]"),
+        replaced(kAffine, "signs: [1, -1]", "signs: []"),
+        replaced(kAffine, "signs: [1, -1]", "signs: [1, 0]")}) {
+    SCOPED_TRACE(document);
+    expect_error([&] { (void)parse_model_draft_yaml(document); }, ErrorCode::InvalidModel);
+  }
+  const std::string oversized(kMaxSourceBytes + 1, '[');
+  expect_error([&] { (void)parse_model_draft_yaml(oversized); }, ErrorCode::ResourceLimit);
 }
 
 TEST(ModelIo, RejectsMalformedDuplicateAliasedTaggedAndMultipleDocuments) {

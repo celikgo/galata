@@ -1,10 +1,16 @@
 # Executable model architecture
 
-**Status: broader proposed architecture, with a bounded M1 implementation.**
+**Status: broader proposed architecture, with bounded M1 and M2 implementations.**
 [ADR-0010](../adr/0010-continuous-scalar-executable-model.md) defines the implemented
-continuous scalar compiler/runtime profile. The remaining
+continuous scalar compiler/runtime profile, and
+[ADR-0013](../adr/0013-typed-linear-graph-adapter.md) adds the sibling
+`continuous-linear.v1` profile with typed matrix rows and a state-space graph
+adapter. [ADR-0012](../adr/0012-project-worker-preview.md)
+adds experimental project revisions and a CLI worker/desktop preview, and
+[ADR-0014](../adr/0014-project-revision-recovery.md) makes retained revisions
+reviewable and restorable. The remaining
 [Simulink-style feature plan](../product/SIMULINK_FEATURES.md), desktop toolkit,
-project storage, aircraft blocks and sampled/hybrid execution remain proposed.
+production storage contract, aircraft blocks and sampled/hybrid execution remain proposed.
 The experimental source format is not a public compatibility freeze. See the
 [M1 implementation record](../product/M1_IMPLEMENTATION.md) and
 [delivery plan](../product/DELIVERY.md) for scope and outstanding gates.
@@ -21,10 +27,10 @@ target acceptance remain separate decisions under the
 |---|---|---|
 | Numerical kernels | [Fixed-step integration](../../include/galata/numerics/integrator.hpp), model, trim, linearization, simulation, analysis and synthesis libraries | Remain independent of the editor, project storage and graph presentation; add kernel functionality only with its numerical contract and independent evidence |
 | Study execution | [Pipeline](../../include/galata/pipeline/pipeline.hpp) and [capability registry](../../include/galata/pipeline/registry.hpp), including `model.compile` and `sim.model` for the bounded profile | Extend typed artifact adapters; keep study execution separate from signal scheduling |
-| Executable model | Bounded continuous scalar compiler and signal scheduler under ADR-0010; no graphical editor | Own model resolution, semantic checks, typed IR, state layout and deterministic scheduling; call the existing kernels through explicit adapters |
-| Worker and harness | CLI invokes the current engine; a desktop worker service is not present | Own bounded job execution, cancellation, progress, result storage and replay; run the same compiler/runtime as headless tests |
-| Project services | YAML studies and file-based inputs/outputs exist | Own model/data dictionaries, immutable revisions, migrations, library resolution, semantic diffs and evidence links |
-| Desktop | No desktop modeling application is present | Edit source models, submit jobs, inspect diagnostics and plot retained signals; consume public engine artifacts without implementing separate solver mathematics |
+| Executable model | Bounded continuous scalar compiler and signal scheduler under ADR-0010, plus typed linear rows and the pure state-space adapter under ADR-0013; editable drafts and a native macOS feasibility editor under ADR-0012 | Own model resolution, semantic checks, typed IR, state layout and deterministic scheduling; call the existing kernels through explicit adapters |
+| Worker and harness | One-job CLI processes with cooperative cancellation and retained terminal/interrupted states under ADR-0012 | Own bounded job execution, cancellation, progress, result storage and replay; run the same compiler/runtime as headless tests |
+| Project services | Experimental directory revisions, stale-save refusal and retained run artifacts under ADR-0012; bounded history review and explicit restore under ADR-0014; immutable imported-source attachments under ADR-0013 | Own model/data dictionaries, immutable revisions, migrations, library resolution, semantic diffs and evidence links |
+| Desktop | Optional native macOS project editor/plot/evidence preview; the aircraft adapter and full desktop acceptance remain open | Edit source models, submit jobs, inspect diagnostics and plot retained signals; consume public engine artifacts without implementing separate solver mathematics |
 | Extensions | Built-in C++ capability registration exists; [ADR-0001](../adr/0001-independent-c-abi.md) proposes an independent C ABI | Design a block SDK and conformance profile separately; the current registry is not a stable plugin ABI or a security sandbox |
 
 Dependency direction is desktop/project services to compiler/worker, then to

@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: Apache-2.0
+# The pitch perturbation and LQR weights are illustrative study inputs.
+# This is the existing local derivative model, not a newly validated aircraft.
+version: 1
+stages:
+  - id: aircraft
+    capability: model.aircraft.derivatives
+    input: {path: ../../models/nt33a/nt33a-fc1.yaml}
+  - id: trim
+    capability: trim.level
+    input: {aircraft: {from: aircraft}, altitude_m: 0, airspeed_m_s: 69.4944}
+  - id: full_plant
+    capability: linearize.finitediff
+    input: {trim_point: {from: trim}, axes: longitudinal}
+  - id: plant
+    capability: model.channels
+    input: {system: {from: full_plant}, inputs: [elevator]}
+  - id: law
+    capability: synth.lqr
+    input:
+      system: {from: plant}
+      break_at: plant_input
+      q: [[0.001,0,0,0],[0,0.01,0,0],[0,0,1,0],[0,0,0,10]]
+      r: [[1]]
+  - id: graph
+    capability: model.linear_graph
+    input:
+      law: {from: law}
+      # Matrix order is [u,w,q,theta], elevator, then [u,w,q,theta].
+      # Dimension order: length,mass,time,current,temperature,amount,light,angle.
+      channel_types:
+        states:
+          - {dimension: [1,0,-1,0,0,0,0,0], frame: body}
+          - {dimension: [1,0,-1,0,0,0,0,0], frame: body}
+          - {dimension: [0,0,-1,0,0,0,0,1], frame: body}
+          - {dimension: [0,0,0,0,0,0,0,1], frame: none}
+        inputs:
+          - {dimension: [0,0,0,0,0,0,0,1], frame: none}
+        outputs:
+          - {dimension: [1,0,-1,0,0,0,0,0], frame: body}
+          - {dimension: [1,0,-1,0,0,0,0,0], frame: body}
+          - {dimension: [0,0,-1,0,0,0,0,1], frame: body}
+          - {dimension: [0,0,0,0,0,0,0,1], frame: none}
+      initial_state: [0,0,0,0.005]
+      command: [0]
+      model_path: model.yaml
+      adapter_path: adapter.json
+  - id: graph_response
+    capability: sim.model
+    input:
+      model: {from: graph}
+      step_s: 0.005
+      steps: 4000
+      sample_stride: 10
+      csv_path: graph-response.csv
+      evidence_path: graph-evidence.json
+  - id: closed_loop
+    capability: model.control_system
+    input: {law: {from: law}, use: closed_loop}
+  - id: linear_response
+    capability: sim.linear
+    input:
+      system: {from: closed_loop}
+      initial_state: [0,0,0,0.005]
+      step_s: 0.005
+      steps: 4000
+      sample_stride: 10
+  - id: linear_csv
+    capability: report.csv
+    input: {trajectory: {from: linear_response}, path: linear-response.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A local linear graph study
+      sections: [{from: trim}, {from: law}, {from: linear_response}]
+      path: graph-design.md
+  - id: html_report
+    capability: report.html
+    input:
+      title: NT-33A local linear graph study
+      sections: [{from: trim}, {from: law}, {from: linear_response}]
+      path: graph-design.html
