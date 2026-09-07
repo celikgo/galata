@@ -381,7 +381,10 @@ std::string binary64_bits(double value) {
   std::string result(16, '0');
   for (std::size_t i = 0; i < result.size(); ++i) {
     const auto shift = static_cast<unsigned int>(4 * (15 - i));
-    result[i] = digits[static_cast<std::size_t>((bits >> shift) & 0xfU)];
+    // Narrow to the nibble it already is: casting straight to size_t is an
+    // identity where size_t is uint64_t, which -Wuseless-cast rejects.
+    const auto nibble = static_cast<unsigned int>((bits >> shift) & 0xfU);
+    result[i] = digits[nibble];
   }
   return result;
 }
