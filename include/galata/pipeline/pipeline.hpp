@@ -39,6 +39,10 @@ struct Stage {
 struct Pipeline {
   int version = 0;
   std::vector<Stage> stages;
+  // Original file bytes are retained for the run manifest. The manifest also
+  // records the actual stage tree, so programmatic modifications remain visible.
+  std::string source_name;
+  std::string source_bytes;
 
   // Stage ids in an execution order that satisfies every dependency.
   //
@@ -61,7 +65,15 @@ struct StageResult {
 
 struct RunResult {
   std::vector<StageResult> stages;
+  std::string manifest_path;
   [[nodiscard]] const Artifact* find(const std::string& stage_id) const;
+};
+
+struct RunOptions {
+  // Existing reports require explicit operator intent. Immutable manifests are
+  // never replaced, even when this option is set.
+  bool overwrite = false;
+  bool write_manifest = true;
 };
 
 // Called before and after each stage, so the CLI can stream progress.
@@ -77,7 +89,8 @@ using ProgressCallback = std::function<void(const std::string& stage_id,
                                      const Registry& registry,
                                      const std::string& base_directory,
                                      const std::string& output_directory,
-                                     const ProgressCallback& progress = nullptr);
+                                     const ProgressCallback& progress = nullptr,
+                                     const RunOptions& options = {});
 
 }  // namespace galata::pipeline
 

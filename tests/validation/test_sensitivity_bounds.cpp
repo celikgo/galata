@@ -30,6 +30,7 @@
 //     M_S and M_T the wrong way round.
 
 #include "galata/analyze/frequency_response.hpp"
+#include "galata/analyze/hinfinity.hpp"
 #include "galata/analyze/margins.hpp"
 #include "galata/analyze/sensitivity.hpp"
 #include "galata/units.hpp"
@@ -84,16 +85,15 @@ std::map<std::string, Published> published_values() {
   return values;
 }
 
-// A single-loop system with a deliberately chosen sensitivity peak is not
-// something one can construct directly, so the bounds are exercised through a
-// SensitivityPeaks value assembled by hand for the formula checks, and through
-// real loops for the inequality checks.
-galata::analyze::SensitivityPeaks peaks_with(double sensitivity, double complementary) {
-  galata::analyze::SensitivityPeaks peaks{};
-  peaks.sensitivity_peak = sensitivity;
-  peaks.complementary_peak = complementary;
-  peaks.is_single_loop = true;
-  return peaks;
+// Formula-only comparisons use the textbook's declared full-norm evidence.
+// They are not fabricated frequency-grid measurements. Real-loop comparisons
+// below obtain upper endpoints from the independent Hamiltonian route.
+galata::analyze::SensitivityNormUpperBounds upper_bounds_with(double sensitivity,
+                                                              double complementary) {
+  return {sensitivity,
+          complementary,
+          true,
+          "Skogestad and Postlethwaite (2005), equations (2.47) and (2.48)"};
 }
 
 // k / (s (s+1) (s+2)).
@@ -123,7 +123,7 @@ TEST(SkogestadSensitivityBounds, WorkedValuesMatchTheBook) {
   const auto published = published_values();
 
   // "For example, with M_S = 2 we are guaranteed GM >= 2 and PM >= 29.0 degrees."
-  const auto from_sensitivity = guaranteed_margins(peaks_with(2.0, 1.0));
+  const auto from_sensitivity = guaranteed_margins(upper_bounds_with(2.0, 1.0));
   ASSERT_TRUE(from_sensitivity.applies);
   ASSERT_TRUE(from_sensitivity.valid);
   EXPECT_NEAR(from_sensitivity.gain_margin_from_sensitivity,
@@ -136,7 +136,7 @@ TEST(SkogestadSensitivityBounds, WorkedValuesMatchTheBook) {
       << published.at("phase_margin_at_ms_2").location;
 
   // "and specifically with M_T = 2 we have GM >= 1.5 and PM >= 29.0 degrees."
-  const auto from_complementary = guaranteed_margins(peaks_with(2.0, 2.0));
+  const auto from_complementary = guaranteed_margins(upper_bounds_with(2.0, 2.0));
   EXPECT_NEAR(from_complementary.gain_margin_from_complementary,
               published.at("gain_margin_at_mt_2").value,
               published.at("gain_margin_at_mt_2").tolerance())
@@ -160,7 +160,15 @@ TEST(SkogestadSensitivityBounds, TheBoundsActuallyBoundRealLoops) {
   for (const double gain : {0.5, 1.0, 2.0, 4.0}) {
     const LinearSystem loop = chain(gain);
     const auto peaks = sensitivity_peaks(loop, wide_sweep());
-    const auto bounds = guaranteed_margins(peaks);
+    const auto norms = galata::analyze::sensitivity_norm_bounds(loop);
+    ASSERT_TRUE(norms.internally_stable);
+    ASSERT_TRUE(norms.sensitivity.numerically_reliable);
+    ASSERT_TRUE(norms.complementary.numerically_reliable);
+    const auto bounds = guaranteed_margins(
+        {norms.sensitivity.upper_bound,
+         norms.complementary.upper_bound,
+         true,
+         "Numerical Hamiltonian norm upper endpoints, including DC and feedthrough"});
     ASSERT_TRUE(bounds.applies) << "gain " << gain;
     ASSERT_TRUE(bounds.valid) << "gain " << gain << ", M_S = " << peaks.sensitivity_peak;
 
@@ -256,7 +264,9 @@ TEST(SkogestadSensitivityBounds, TheBoundsAreRefusedForAMimoLoop) {
 
   const auto peaks = sensitivity_peaks(mimo, wide_sweep());
   EXPECT_FALSE(peaks.is_single_loop);
-  const auto bounds = guaranteed_margins(peaks);
+  auto upper = upper_bounds_with(2.0, 2.0);
+  upper.is_single_loop = false;
+  const auto bounds = guaranteed_margins(upper);
   EXPECT_FALSE(bounds.applies)
       << "these bounds must not be offered for a multi-loop system on this source's authority";
   EXPECT_FALSE(bounds.valid);
@@ -264,14 +274,14 @@ TEST(SkogestadSensitivityBounds, TheBoundsAreRefusedForAMimoLoop) {
 
 TEST(SkogestadSensitivityBounds, OutOfDomainPeaksAreRefusedRatherThanComputed) {
   // The book's Remark on p. 37 notes that M_S must exceed 1 whenever a -180
-  // degree crossing exists. M_S <= 1 therefore means the grid missed the peak,
-  // and M_S/(M_S - 1) would be divergent or negative — a number that looks like
-  // a margin and is not one.
-  EXPECT_FALSE(guaranteed_margins(peaks_with(1.0, 1.0)).valid);
-  EXPECT_FALSE(guaranteed_margins(peaks_with(0.9, 1.0)).valid);
+  // degree crossing exists. For a full-norm upper bound <= 1, this particular
+  // gain-increase formula is outside its domain: it would be divergent or
+  // negative. That is a formula restriction, not evidence of a missed peak.
+  EXPECT_FALSE(guaranteed_margins(upper_bounds_with(1.0, 1.0)).valid);
+  EXPECT_FALSE(guaranteed_margins(upper_bounds_with(0.9, 1.0)).valid);
   // A peak below 0.5 puts 1/(2M) outside the domain of arcsin.
-  EXPECT_FALSE(guaranteed_margins(peaks_with(2.0, 0.4)).valid);
-  EXPECT_TRUE(guaranteed_margins(peaks_with(1.5, 1.5)).valid);
+  EXPECT_FALSE(guaranteed_margins(upper_bounds_with(2.0, 0.4)).valid);
+  EXPECT_TRUE(guaranteed_margins(upper_bounds_with(1.5, 1.5)).valid);
 }
 
 }  // namespace

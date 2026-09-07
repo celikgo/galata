@@ -1,125 +1,98 @@
 # Roadmap
 
-**Everything in this document is a plan.** Nothing here is a description of the
-current repository except where it says so. The README's Status table is the
-authority on what works today; this document is the authority on the order
-things are intended to arrive in.
+The current release is **v0.3.0, a bounded offline engineering workbench**.
+The [README](../README.md) and the capability registry describe what exists;
+the [operating guide](WORKBENCH.md) describes its limits. Future work below is
+not part of this release and has no promised delivery date.
 
-The rule for every milestone is the same: a stranger can clone the repository at
-that tag and run something real.
+The rule for each milestone remains that a reader can build that version and
+run a complete, reviewable study. Completing a workflow does not qualify a tool
+or validate a new aircraft model.
 
-## v0.1 — the honest spine
+## v0.1 — trim and linearisation
 
-**In progress.** What it needs, and where each piece stands:
+Implemented: frames and units, ISA atmosphere, quaternion rigid-body dynamics,
+fixed-step RK4, the CLI and YAML runner, the local derivative aircraft model,
+straight-line trim, finite-difference linearisation and classified aircraft
+modes. Published-reference comparisons for the NT-33A condition and the
+underlying numerical methods are in [VERIFICATION.md](VERIFICATION.md).
 
-| Piece | State |
+The known phugoid discrepancy and its labelled regression locks remain
+documented in the [investigation note](notes/phugoid-damping.md). They are not
+reclassified as validation successes by later releases.
+
+## v0.2 — frequency-domain analysis
+
+Implemented: frequency response, gain/phase/delay crossovers, SISO disk margin,
+MIMO principal gains, sensitivity and complementary-sensitivity peak estimates.
+The published NT-33A HTML report adds plots generated from its computed run.
+
+These original frequency-peak searches use a finite refined grid. A sampled
+peak can underestimate the true norm, making a derived margin optimistic.
+Their reference tests do not establish a bound for every possible transfer
+function. The original capabilities retain this limitation and their identity.
+
+## v0.3 — bounded offline workbench
+
+Implemented scope:
+
+- Continuous CARE and LQR synthesis with residual, conditioning and stability
+  evidence; filtered PID from explicit gains; channel selection, series and
+  negative-feedback interconnections.
+- Hamiltonian H-infinity norm brackets, S/T norm brackets and SISO disk-size
+  bounds. These supplement the sampled analyses and reject unresolved numerical
+  cases. They are floating-point numerical bounds, not interval proofs.
+- Fixed-step linear response and local nonlinear aircraft simulation with
+  explicit position bounds, rate limits and positive first-order lags for all
+  four controls. Continuous state feedback and constant command increments are
+  supported about a level translating reference.
+- A complete NT-33A local design example, trajectory CSV, Markdown and
+  self-contained HTML tables, strict input schemas, contained output writes,
+  input snapshots and immutable content-addressed run manifests.
+- Installable C++ libraries and CLI, dependency notices, installed-consumer and
+  release-archive checks, and expanded numerical and integration tests.
+
+Evidence for the CARE solver is distinguished from aircraft/controller
+validation in the [synthesis design record](rfc/0001-control-synthesis.md).
+The example's costs and actuator specifications are illustrative. The model
+still describes a single local aerodynamic reference condition.
+
+Earlier roadmap versions assigned v0.3 to a desktop application. That scope is
+deferred: this release has no GUI, 3-D viewport or signed desktop installer.
+It also does not complete the former v1.0 feature list.
+
+## Future work — not implemented
+
+The following are separate extensions, each requiring its own model assumptions,
+reference data and acceptance criteria before it becomes a release commitment.
+
+| Area | Remaining work |
 |---|---|
-| Core types, frames, quaternions, units | done, property-tested |
-| ISA atmosphere | done, validated against the published tables |
-| Nonlinear 6-DOF equations of motion | done, validated against closed-form solutions of Euler's equations |
-| Fixed-step RK4 | done, order verified |
-| `analyze.modes` | done, validated against NASA CR-2144 |
-| Pipeline runner and CLI | done |
-| `ci.yml`, `determinism.yml` | done |
-| A reference aircraft model | done, nonlinear, validated |
-| `trim.level` | done, validated |
-| `linearize.finitediff` | done, validated |
-| One example: YAML file to modal table | done, three of them, all checked by CI |
+| Aircraft fidelity | Additional independently validated conditions and aircraft, scheduled aerodynamic data, propulsion and configuration models, quantified model uncertainty |
+| Control design | Discrete-time control, sensors and estimators, explicit delay models, constrained synthesis, gain scheduling and robust-design methods |
+| Assessment | Handling-quality criteria, root locus, uncertainty campaigns and application-specific acceptance reports |
+| Simulation and identification | Disturbances, measured-data identification, sampled control execution, SITL/HIL interfaces and independently measured hardware responses |
+| User interface | Desktop shell, interactive plots and pipeline editor, engineering 3-D visualisation, platform installers |
+| Extensions and automation | Stable C plugin ABI, aerodynamic/sensor extension contracts, AI and MCP interfaces with separate execution controls and evaluations |
 
-**v0.1 is complete.** The chain runs end to end: a nonlinear aircraft model
-built from non-dimensional derivatives, trimmed by a constrained root-find that
-reports its residual and Jacobian conditioning and refuses to return a
-best-effort answer, linearised by central differences with a Richardson
-truncation estimate per entry, and analysed into a labelled modal table. It
-reproduces NASA CR-2144's published dimensional derivatives to 0.26% and its
-published modes to 1.0%.
+A future stable release needs an explicit scope and compatibility contract; it
+cannot be inferred from the number of completed capabilities. There is no
+onboard deployment or tool-qualification claim in this roadmap.
 
-No AI. No GUI.
+## Reference data and evidence
 
-This is the credibility floor and nothing ships before it.
+Shipped numerical data requires documented source and rights provenance under
+[ADR-0007](adr/0007-reference-values-from-copyrighted-sources.md). A prospective
+dataset whose redistribution rights are unresolved does not become acceptable
+merely because it would improve an example. Where no published comparison is
+available, the capability remains labelled unvalidated in the verification
+report; analytic tests and regression locks retain their separate purposes.
 
-## v0.2 — analysis and design
+## Proposed end-product completion plan
 
-**Done.** Frequency response (`analyze.freqresp`), evaluated by Hessenberg
-solves with the grid refined around the system's own lightly damped modes, and
-all four margin types: gain, phase and delay (`analyze.margins`) with every
-crossover reported, and the disk margin (`analyze.diskmargin`) with its
-guaranteed gain and phase range and a destabilising perturbation on the
-boundary. Validated against closed-form transfer functions and against the
-published worked example of Seiler, Packard & Gahinet (2020); see
-`docs/VERIFICATION.md`.
-
-Also done: singular values for MIMO loops (`analyze.sigma`) and the sensitivity
-and complementary-sensitivity peaks (`analyze.sensitivity`), with the classical
-margins M_S and M_T guarantee — SISO only, which is the source's own scope.
-
-**Remaining.** `synth.pid`, `synth.lqr`, CARE via the generalised Schur method
-validated against the CAREX benchmark collection, root locus, and
-`sim.nonlinear` with actuator position and rate limits in the loop. A
-high-fidelity aircraft model with its provenance, and the modal validation gate
-against published values.
-
-The synthesis half of that is **designed but not built**, and the design is
-written around how it would be verified rather than around its API:
-[RFC-0001](rfc/0001-control-synthesis.md). No `src/synth/` code merges until the
-two open reference questions in it are answered.
-
-**Reports with embedded plots landed as HTML rather than Markdown.**
-`tools/report/` emits a run record and `scripts/gen-report-page.py` draws a
-single self-contained page from it — trim point, labelled modal table, pole map,
-Bode with every crossover marked, and a Nyquist against the disk-margin disk —
-published for the NT-33A reference case and diffed by CI. Markdown reports carry
-tables only, which is what `report.markdown` does today.
-
-Known gap carried forward: EVERY peak over frequency in galata — the disk
-margin, M_S, M_T and the largest singular value — is found on a refined
-frequency grid rather than by the exact Hamiltonian-eigenvalue method (Boyd &
-Balakrishnan; Bruinsma & Steinbuch), so each is a lower bound on the true
-H-infinity norm and the derived robustness margins are upper bounds on the true
-ones. The error is in the optimistic direction and is documented at every point
-it surfaces. Closing it is a single piece of work — one exact norm routine
-behind `src/analyze/peak_search.hpp` — and it would tighten all four at once.
-
-## v0.3 — the desktop application
-
-Tauri shell, 3-D viewport, the plot suite (Bode, Nyquist with the disk-margin
-disk drawn, Nichols with handling-quality boundaries, labelled pole-zero map,
-root locus with a live gain slider), the pipeline editor. Signed installers for
-three platforms.
-
-No AI yet — the application has to be useful without it.
-
-## v0.4 — the AI layer
-
-Provider abstraction with Anthropic, OpenAI, the OpenAI-compatible generic
-adapter and Ollama. Secrets in the OS keychain. The agent loop, the first twelve
-tools, the audit log, budgets, and the eval suite. `galata-mcp` ships in the
-same release.
-
-The agent composes and runs pipelines. It never produces a number itself; tools
-return handles to computed artefacts and the chat renders those artefacts.
-
-## v0.5 — identification and hardware in the loop
-
-Frequency sweeps, coherence, transfer-function fitting. A MAVLink SITL bridge.
-The single-axis pitch-rig example with measured-versus-predicted step responses,
-its raw data and its bill of materials.
-
-## v1.0 — freeze
-
-Plugin ABI v1 final, agent tool contract v1 final, the full provider set,
-handling qualities, Monte Carlo, gain scheduling, the published verification
-and validation report, and a documentation site that resolves.
-
-Tagged only when all of that is true.
-
-## Aircraft model data
-
-Coefficient data ships in this repository only when it is transcribed from a US
-Government work, which is in the public domain. Data traceable only to a
-copyrighted source ships as a loader plus documented instructions for obtaining
-the data — never as data. A dataset whose licensing position cannot be
-established with confidence is not shipped at all.
-
-Where no published reference value can be found for a validation case, that case
-is marked unvalidated in `docs/VERIFICATION.md`.
+The [product plan](PRODUCT_PLAN.md) develops the future work into a proposed
+offline desktop engineering product with Simulink-style executable block
+modeling. It links a prioritized feature catalog, discovery investigations,
+milestone action plans and assurance gates. These are planning documents, not
+newly implemented capabilities or a qualification claim; the current release
+scope above remains unchanged.

@@ -409,8 +409,11 @@ int main(int argc, char** argv) {
         galata::analyze::disk_margin(loop, 0, 0, 0.0, margin_options);
     const galata::analyze::SensitivityPeaks peaks =
         galata::analyze::sensitivity_peaks(loop, margin_options);
-    const galata::analyze::GuaranteedMargins guaranteed =
-        galata::analyze::guaranteed_margins(peaks);
+    // Sampled peaks cannot establish upper-norm evidence. Keep absent bounds
+    // explicit for report consumers; numerical bounds use a separate API.
+    const double unavailable = std::numeric_limits<double>::quiet_NaN();
+    const galata::analyze::GuaranteedMargins guaranteed{
+        false, false, unavailable, unavailable, unavailable, unavailable};
 
     // ---------------------------------------------------------------------
     std::printf("{\n");
@@ -496,7 +499,12 @@ int main(int argc, char** argv) {
     number(*std::min_element(response.pivot_ratio.begin(), response.pivot_ratio.end()));
 
     // --- margins ----------------------------------------------------------
-    std::printf(",\n    \"margins\": {\"has_gain_margin\": %s, \"gain_margin\": ",
+    std::printf(
+        ",\n    \"margins\": {\"nominal_stability_checked\": %s, "
+        "\"nominal_closed_loop_stable\": %s, ",
+        margins.nominal_stability_checked ? "true" : "false",
+        margins.nominal_closed_loop_stable ? "true" : "false");
+    std::printf("\"has_gain_margin\": %s, \"gain_margin\": ",
                 margins.has_gain_margin ? "true" : "false");
     number(margins.gain_margin);
     std::printf(", \"gain_margin_db\": ");

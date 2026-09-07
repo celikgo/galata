@@ -110,9 +110,8 @@ struct Jacobian {
   // estimate_truncation_error is false.
   Eigen::MatrixXd truncation_estimate;
 
-  // Largest entry of truncation_estimate relative to the corresponding entry of
-  // value, ignoring entries whose value is negligible. A single number to look
-  // at before trusting the whole matrix.
+  // Largest entry of truncation_estimate relative to the largest absolute
+  // entry of value. A legitimate zero entry must not dominate the summary.
   double worst_relative_truncation = 0.0;
 };
 
@@ -121,6 +120,9 @@ struct Jacobian {
 // Uses 2n evaluations, or 4n when estimating truncation error. `f` must be
 // defined at x +/- h in every component; a caller whose function has a domain
 // boundary near x must move x, not shrink h.
+// x must be finite and non-empty; step options must be finite and non-negative.
+// A vanished/unrepresentable perturbation, non-finite result or changing output
+// dimension throws instead of returning an invalid Jacobian/error estimate.
 [[nodiscard]] Jacobian central_difference_jacobian(const VectorFunction& f,
                                                    const Eigen::VectorXd& x,
                                                    const JacobianOptions& options = {});

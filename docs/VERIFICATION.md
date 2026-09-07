@@ -43,7 +43,7 @@ Four checks stand behind it, each a test rather than a convention:
 | Intermediate-axis instability (the Dzhanibekov effect) | Closed-form solutions of Euler's equations (Goldstein; Landau & Lifshitz) | **validated** — Asserted against the cosh/sinh closed form pointwise, including the sign the (I2 - I3) < 0 factor forces. Fitting a log-slope instead measures 0.699 sigma and looks like a defect in the dynamics. |
 | Energy and angular-momentum conservation, general inertia tensor | Exact invariants of torque-free motion | **validated** — The angular-momentum figure is the VECTOR resolved in NED, not its body-axis magnitude. A transposed direction-cosine matrix conserves the magnitude and fails this. Drift measured below. |
 | Six-degree-of-freedom equations with aerodynamic forces | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-1 and II-7 | **validated**, with a caveat — Validated INDIRECTLY: the linearised derivatives that match Table II-7 to 0.26% run through these equations, the coefficient buildup and the wind-to-body rotation. There is no case comparing the equations in isolation. |
-| Nonlinear simulation with aerodynamic forces, over time | — | not implemented — There is a state derivative, not a loop flying an aircraft through time. |
+| Nonlinear simulation with aerodynamic forces, over time | — | unvalidated — The fixed-step rigid-body loop includes continuous full-state feedback, explicit actuator limits and envelope termination. Aircraft time histories have not been compared with independently published flight or simulator data. |
 | Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-8 | **validated** — Tolerance measured, not chosen: each input is perturbed by half a unit in its own last printed digit and the published value's own rounding is added. |
 | Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **validated** — Three of the four longitudinal quantities. The fourth is the row below. |
 | Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-4 | **known discrepancy** — 0.0929 against a published 0.0948, out by 2.04% — outside the envelope of the inputs' own rounding, which reaches only -1.67%. Localised to the hand assembly, and now to ONE entry of it: the M_wdot (-g sin theta) coupling that closing Appendix C's descriptor form with the whole w_dot equation manufactures, worth 98.8% of the gap. Held by a labelled regression lock; the investigation is in [the note on this discrepancy](notes/phugoid-damping.md). |
@@ -51,8 +51,8 @@ Four checks stand behind it, each a test rather than a convention:
 | Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
 | All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
-| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 145 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
-| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 47 of the 145 values — because dividing by h amplifies a libm disagreement by 1/h. |
+| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 171 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
+| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 52 of the 171 values — because dividing by h amplifies a libm disagreement by 1/h. |
 | Frequency response G(jw) against closed-form transfer functions | Closed-form evaluation of rational transfer functions at s = jw | **validated** — The reference is arithmetic, not a document: for a system whose transfer function can be written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding. |
 | The hand-written Hessenberg solver against a general LU on the unreduced matrix | Laub, *Efficient multivariable frequency response computations*, IEEE TAC 26(2) (1981) | **validated** — Two different eliminations of the same system over a grid reaching a condition number above 1e6. The gate is kappa * eps — the conditioning of the problem — not a chosen tolerance. |
 | Gain, phase and delay margins against loops whose margins are exact | Franklin, Powell & Emami-Naeini, *Feedback Control of Dynamic Systems*; Astrom & Murray, *Feedback Systems*, ch. 10 | **validated** — 1/(s(s+1)(s+2)) has gain margin exactly 6 at exactly sqrt(2) rad/s, and 1/(s(s+1)^2) exactly 2 at exactly 1 rad/s. The delay margin is checked by PROPERTY as well as by formula: applying the reported delay must land the loop on the critical point. |
@@ -63,7 +63,13 @@ Four checks stand behind it, each a test rather than a convention:
 | Sensitivity and complementary sensitivity peaks M_S and M_T | Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020), Theorem `thm:edm` and its named skews | **validated** — The strongest evidence is a published IDENTITY between two of galata's own computations: the disk margin at skew +1 is 1/M_S and at skew -1 is 1/M_T. One route takes the peak of a scalar sensitivity, the other inverts the smallest singular value of I + L; they share nothing below the frequency response, and they agree to below 1e-12 relative. |
 | The reported peak gain is a lower bound on the H-infinity norm, not equal to it | Boyd & Balakrishnan (1990); Bruinsma & Steinbuch (1990) — the exact computation galata does NOT use | **validated**, with a caveat — Every peak in this library is found on a refined frequency grid rather than by the exact Hamiltonian-eigenvalue method, so it UNDERSTATES the true supremum. For a robustness margin that error is optimistic. The tests demonstrate the shortfall rather than hiding it: 1/(s+1) has an H-infinity norm of exactly 1 attained at zero frequency, which no logarithmic grid contains, and the reported peak approaches it from below as the sweep widens. |
 | Classical margins guaranteed by M_S and M_T | Skogestad & Postlethwaite, *Multivariable Feedback Control*, 2nd ed. (2005), equations (2.47), (2.48) and (2.50), pp. 35-37 | **validated** — The book's own worked values reproduced — M_S = 2 guarantees GM >= 2 and PM >= 29.0 degrees — but the stronger check is that the inequalities BOUND real loops: across four loop gains, the measured margins are at least what the peaks promise. Equation (2.50), an exact identity, ties three separate parts of galata together at the gain crossover. The bounds are SISO only, which is the source's own scope and not a hedge, and galata refuses them for a MIMO loop. |
-| Riccati solvers against the CAREX and DAREX benchmark collections | — | not implemented — Named in the v0.2 milestone. |
+| Continuous-time Riccati solutions against SLICOT worked examples | SLICOT BB01AD (CAREX 2.3) and SB02MD Program Data and Program Results | **validated**, with a caveat — The dense stabilising solver agrees with the printed solution matrices within half a unit of their last decimal place. These are small worked examples, including one CAREX parameter value; this is not validation against the full benchmark collection. |
+| Aircraft full-state-feedback design against published controller gains | — | unvalidated — The aircraft design workflow executes and checks the stabilising CARE solution. No published aircraft example containing plant, costs and resulting controller gains has been transcribed; the example's weights and actuator limits are illustrative. |
+| Filtered PID and state-space interconnections | Astrom & Murray, Feedback Systems, 2nd ed., chapter 11; state-space block algebra | self-consistent, not externally validated — Realizations agree with independently evaluated transfer functions, including direct feedthrough and matrix channel order. This does not validate controller tuning. |
+| Hamiltonian H-infinity and sensitivity/disk bounds | Benner & Mitchell, arXiv:1707.02497, Theorem 2.1; Seiler, Packard & Gahinet (2020) | self-consistent, not externally validated — Analytic scalar/MIMO cases check DC, feedthrough, a narrow resonance and conservative reciprocal direction. The eigensystem is checked numerically; this is not a directed-rounding enclosure or an independent-package benchmark collection. |
+| Linear/nonlinear time histories and local convergence | Hairer, Norsett & Wanner, Solving Ordinary Differential Equations I (1993); smooth-ODE RK4 order and small-disturbance linearization | self-consistent, not externally validated — The actuator is checked against its exact exponential; smooth aircraft trajectories are checked under step halving and shrinking perturbations against a full linearization with actuator lags. Flight-data validation remains absent. |
+| Experimental continuous scalar graph compilation and simulation | MODEL_CONFORMANCE.md MC01-MC26/B01-B04; analytic linear ODEs and independent RK4 polynomial | unvalidated — Synthetic analytic, structural/refusal, parser and source-to-run contracts cover the bounded continuous scalar feasibility profile. Broader platform/reviewer acceptance, aircraft blocks, sampled/hybrid execution and aircraft-model validity remain open; successful execution does not assess numerical accuracy for an arbitrary run. |
+| Full CAREX and DAREX benchmark collections and generalised-pencil solvers | — | not implemented — Only the bounded continuous-time Schur solver and small worked comparisons exist. Singular or indefinite costs and discrete-time Riccati equations remain unsupported. |
 
 ### Evidence
 
@@ -87,7 +93,7 @@ ctest --preset dev -R '<test name>'
 | Intermediate-axis instability (the Dzhanibekov effect) | `IntermediateAxis.PerturbationFollowsTheClosedFormHyperbolicGrowth` (validation)<br>`IntermediateAxis.RotationAboutTheMajorAndMinorAxesIsStable` (validation) |
 | Energy and angular-momentum conservation, general inertia tensor | `TorqueFreeConservation.EnergyAndAngularMomentumDriftIsBounded` (validation)<br>`TorqueFreeConservation.AngularMomentumRotatesInBodyAxesButNotInNed` (validation) |
 | Six-degree-of-freedom equations with aerodynamic forces | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation) |
-| Nonlinear simulation with aerodynamic forces, over time | — |
+| Nonlinear simulation with aerodynamic forces, over time | `DesignWorkflow.AircraftStudyProducesAStabilisingLawAndCompletedTimeHistories` (integration) |
 | Aircraft lateral modes from a hand-assembled matrix — spiral, roll subsidence, Dutch roll | `Nt33aHandAssembled.LateralModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation)<br>`Nt33aHandAssembled.TheDutchRollPeriodAgreesWithThePublishedPeriod` (validation) |
 | Aircraft longitudinal modes from a hand-assembled matrix — phugoid frequency, short-period frequency and damping | `Nt33aHandAssembled.LongitudinalModesMatchThePublishedValuesWithinTheSourcesOwnPrecision` (validation) |
 | Aircraft longitudinal modes — phugoid DAMPING RATIO, from a hand-assembled matrix | `Nt33aHandAssembled.PhugoidDampingDiscrepancyDoesNotGrow` (validation) |
@@ -107,7 +113,13 @@ ctest --preset dev -R '<test name>'
 | Sensitivity and complementary sensitivity peaks M_S and M_T | `Sensitivity.PeaksAgreeWithTheDiskMarginAtTheNamedSkews` (unit)<br>`Sensitivity.SisoTracesMatchTheirClosedForms` (unit)<br>`Sensitivity.DiagonalMimoLoopMatchesItsClosedForm` (unit)<br>`Sensitivity.SplusTIsTheIdentityAsMatrices` (unit) |
 | The reported peak gain is a lower bound on the H-infinity norm, not equal to it | `SingularValues.ThePeakIsALowerBoundOnTheTrueNorm` (unit)<br>`Sensitivity.TheReportedPeakIsALowerBoundOnTheTrueOne` (unit) |
 | Classical margins guaranteed by M_S and M_T | `SkogestadSensitivityBounds.WorkedValuesMatchTheBook` (validation)<br>`SkogestadSensitivityBounds.TheBoundsActuallyBoundRealLoops` (validation)<br>`SkogestadSensitivityBounds.SensitivityAndComplementaryAgreeAtTheGainCrossover` (validation)<br>`SkogestadSensitivityBounds.MsIsTheReciprocalOfTheDistanceToTheCriticalPoint` (validation)<br>`SkogestadSensitivityBounds.TheBoundsAreRefusedForAMimoLoop` (validation) |
-| Riccati solvers against the CAREX and DAREX benchmark collections | — |
+| Continuous-time Riccati solutions against SLICOT worked examples | `CareSlicot.MatchesPublishedWorkedSolutionsWithinPrintedPrecision` (validation) |
+| Aircraft full-state-feedback design against published controller gains | `DesignWorkflow.AircraftStudyProducesAStabilisingLawAndCompletedTimeHistories` (integration) |
+| Filtered PID and state-space interconnections | `FilteredPid.FrequencyResponseMatchesTheDefinedTransferFunction` (unit)<br>`Interconnection.CascadeAndFeedbackMatchIndependentScalarTransferFunctionsWithFeedthrough` (unit)<br>`Interconnection.MatrixChannelOrderAndAlgebraicFeedthroughArePreserved` (unit) |
+| Hamiltonian H-infinity and sensitivity/disk bounds | `Hinfinity.NarrowResonanceMissedByAFrequencyGridIsBracketed` (unit)<br>`Hinfinity.DiagonalAndRectangularMimoMatchAnalyticSingularValues` (unit)<br>`RobustBounds.DiskEndpointsInvertTheNormInTheConservativeDirection` (unit) |
+| Linear/nonlinear time histories and local convergence | `NonlinearSimulation.UnsaturatedActuatorStepConvergesToTheExponentialAtFourthOrder` (unit)<br>`SimulationConvergence.NonlinearPipelineConvergesUnderStepHalving` (integration)<br>`SimulationConvergence.SmallDisturbancePipelineApproachesTheAugmentedLinearClosedLoop` (integration) |
+| Experimental continuous scalar graph compilation and simulation | `Modeling.ExponentialFeedbackMatchesIndependentRk4PolynomialAndContinuousBounds` (unit)<br>`Modeling.CoupledOscillatorUsesOneTemporaryStateForAllDerivatives` (unit)<br>`ModelIo.CanonicalVersionHasAHandSpecifiedByteContract` (unit)<br>`ModelWorkflow.CompiledFeedbackProducesLabeledSamplesAndExplicitEvidenceLimits` (integration) |
+| Full CAREX and DAREX benchmark collections and generalised-pencil solvers | — |
 
 ### Capabilities, and the cases that validate them
 
@@ -121,14 +133,29 @@ against.
 |---|---|---|
 | `analyze.diskmargin` | implemented and validated | `analyze.diskmargin`, `analyze.diskmargin.phase`, `analyze.diskmargin.critical_frequency`, `analyze.sigma.grid_bound` |
 | `analyze.freqresp` | implemented and validated | `analyze.freqresp`, `analyze.freqresp.hessenberg` |
+| `analyze.hinfnorm` | implemented, unvalidated | — |
 | `analyze.margins` | implemented and validated | `analyze.margins` |
 | `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
+| `analyze.robust_bounds` | implemented, unvalidated | — |
 | `analyze.sensitivity` | implemented and validated | `analyze.sensitivity`, `analyze.sigma.grid_bound`, `analyze.sensitivity.bounds` |
 | `analyze.sigma` | implemented and validated | `analyze.sigma`, `analyze.sigma.grid_bound` |
 | `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `model.channels` | implemented, unvalidated | — |
+| `model.compile` | implemented, unvalidated | — |
+| `model.control_system` | implemented, unvalidated | — |
+| `model.feedback` | implemented, unvalidated | — |
 | `model.linear.statespace` | implemented, unvalidated | — |
+| `model.series` | implemented, unvalidated | — |
+| `report.csv` | implemented, unvalidated | — |
+| `report.html` | implemented, unvalidated | — |
 | `report.markdown` | implemented, unvalidated | — |
+| `sim.linear` | implemented, unvalidated | — |
+| `sim.model` | implemented, unvalidated | — |
+| `sim.nonlinear` | implemented, unvalidated | — |
+| `synth.care` | implemented and validated | `synth.care.worked` |
+| `synth.lqr` | implemented, unvalidated | — |
+| `synth.pid` | implemented, unvalidated | — |
 | `trim.level` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 
 ## U.S. Standard Atmosphere, 1976
@@ -227,7 +254,7 @@ ADR-0004 defines two tiers, and both are gated by
 `.github/workflows/determinism.yml` on Linux, macOS and Windows.
 
 **Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
-emits 145 values at `%.17g`, which round-trips a double exactly, so byte-identical
+emits 171 values at `%.17g`, which round-trips a double exactly, so byte-identical
 output means bit-identical values rather than values that merely print the same.
 Gated absolutely on every platform.
 
@@ -238,8 +265,8 @@ is an arbitrary choice that then shows up in the published numbers. The gate is
 far below the roughly 1e-5 that any real divergence in the physics would
 produce, so it discriminates between "different libm" and "different answer".
 
-98 of the 145 fingerprinted values are compared this way. The
-other 47 are downstream of a finite difference and are held byte-identical
+119 of the 171 fingerprinted values are compared this way. The
+other 52 are downstream of a finite difference and are held byte-identical
 in tier 1 instead, for the reason given below.
 
 The observed deviation is printed by every run rather than merely bounded; read
@@ -742,4 +769,4 @@ strict SI does not make a metre and a radian commensurate.
 
 ---
 
-Generated from galata 0.2.0 by `tools/validation/report_main.cpp`.
+Generated from galata 0.3.0 by `tools/validation/report_main.cpp`.

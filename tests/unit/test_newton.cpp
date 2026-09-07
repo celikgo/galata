@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -100,11 +101,10 @@ TEST(Newton, TheLineSearchRescuesABadInitialGuess) {
   // keeps it from leaving the region entirely.
   //
   // There is a limit to this, and it is worth stating rather than discovering.
-  // From x = -8 the full step is +5967, and no number of halvings within the
-  // budget produces a point whose residual beats the one it started from: the
-  // iteration stalls exactly where it stands and the residual history is a
-  // flat line. A damped Newton is not a global method and this test does not
-  // pretend otherwise.
+  // Farther into the exponential tail, even the shortest tested fraction can
+  // overshoot: a finite backtracking budget does not establish global
+  // convergence. The separate overflow-trial test checks recovery where a
+  // shorter representable fraction does improve the residual.
   const auto result = solve_newton(residual, Eigen::VectorXd::Constant(1, -5.0));
   ASSERT_TRUE(result.converged) << "residual " << result.residual_norm;
   EXPECT_NEAR(result.solution(0), std::log(2.0), 1e-9);
@@ -157,6 +157,83 @@ TEST(Newton, RejectsANonSquareSystem) {
     return Eigen::VectorXd::Zero(3);
   };
   EXPECT_THROW((void)solve_newton(residual, Eigen::VectorXd::Zero(2)), std::invalid_argument);
+}
+
+TEST(Newton, NonFiniteToleranceCannotLabelAConstantNonzeroResidualConverged) {
+  const auto no_root = [](const Eigen::VectorXd&) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Ones(1);
+  };
+  for (const double bad : {0.0,
+                           -1.0,
+                           std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+    NewtonOptions options;
+    options.residual_tolerance = bad;
+    EXPECT_THROW((void)solve_newton(no_root, Eigen::VectorXd::Zero(1), options),
+                 std::invalid_argument);
+  }
+  const auto unresolved = solve_newton(no_root, Eigen::VectorXd::Zero(1));
+  EXPECT_FALSE(unresolved.converged);
+  EXPECT_DOUBLE_EQ(unresolved.residual_norm, 1.0);
+}
+
+TEST(Newton, ZeroJacobianPreservesIterationHistoryAndUsesResidualToDecideConvergence) {
+  // For a constant residual the Jacobian is identically zero. No step can
+  // improve the residual; its value alone distinguishes a root from stagnation.
+  for (const double value : {0.0, 1.0}) {
+    const auto constant = [value](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+      return Eigen::VectorXd::Constant(x.size(), value);
+    };
+    NewtonOptions options;
+    options.iterations = 3;
+    options.line_search_trials = 2;
+    const Eigen::VectorXd guess = Eigen::VectorXd::Constant(2, 7.0);
+    const auto result = solve_newton(constant, guess, options);
+    EXPECT_EQ(result.converged, value == 0.0);
+    EXPECT_TRUE((result.solution.array() == guess.array()).all());
+    EXPECT_TRUE(std::isinf(result.jacobian_condition_number));
+    ASSERT_EQ(result.residual_history.size(), 4U);
+    for (const double norm : result.residual_history) {
+      EXPECT_DOUBLE_EQ(norm, value * std::sqrt(2.0));
+    }
+  }
+}
+
+TEST(Newton, RejectsNonFiniteInitialGuessAndInitialResidual) {
+  const auto identity = [](const Eigen::VectorXd& x) -> Eigen::VectorXd { return x; };
+  for (const double bad :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW((void)solve_newton(identity, Eigen::VectorXd::Constant(1, bad)),
+                 std::invalid_argument);
+    const auto invalid = [bad](const Eigen::VectorXd&) -> Eigen::VectorXd {
+      return Eigen::VectorXd::Constant(1, bad);
+    };
+    EXPECT_THROW((void)solve_newton(invalid, Eigen::VectorXd::Zero(1)), std::runtime_error);
+  }
+}
+
+TEST(Newton, BacktrackingRejectsOverflowingTrialsAndStillFindsTheAnalyticRoot) {
+  const auto residual = [](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Constant(1, std::exp(x(0)) - 2.0);
+  };
+  NewtonOptions options;
+  options.line_search_trials = 16;
+  // At -8, the full Newton step overflows exp; shorter fractions remain
+  // representable. Rejected trials must not poison the accepted iterate.
+  const auto result = solve_newton(residual, Eigen::VectorXd::Constant(1, -8.0), options);
+  ASSERT_TRUE(result.converged);
+  EXPECT_NEAR(result.solution(0), std::log(2.0), 1e-9);
+  EXPECT_EQ(result.residual_history.size(), static_cast<std::size_t>(options.iterations) + 1U);
+}
+
+TEST(Newton, RejectsResidualDimensionChangesDuringLineSearch) {
+  const auto residual = [](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    if (x(0) > 0.5) {
+      return Eigen::VectorXd::Zero(2);
+    }
+    return Eigen::VectorXd::Constant(1, x(0) - 1.0);
+  };
+  EXPECT_THROW((void)solve_newton(residual, Eigen::VectorXd::Zero(1)), std::runtime_error);
 }
 
 }  // namespace

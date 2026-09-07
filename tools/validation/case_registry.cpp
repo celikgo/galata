@@ -9,6 +9,7 @@ using E = Evidence;
 constexpr Binary kUnit = Binary::Unit;
 constexpr Binary kProperty = Binary::Property;
 constexpr Binary kValidation = Binary::Validation;
+constexpr Binary kIntegration = Binary::Integration;
 constexpr Binary kDeterminism = Binary::Determinism;
 
 const char* const kUssa =
@@ -202,11 +203,14 @@ const std::vector<Case>& validation_cases() {
 
       {"sim.nonlinear_loop",
        "Nonlinear simulation with aerodynamic forces, over time",
-       {},
+       {"sim.nonlinear"},
        "",
-       Status::NotImplemented,
-       {},
-       "There is a state derivative, not a loop flying an aircraft through time."},
+       Status::Unvalidated,
+       {E{kIntegration,
+          "DesignWorkflow.AircraftStudyProducesAStabilisingLawAndCompletedTimeHistories"}},
+       "The fixed-step rigid-body loop includes continuous full-state feedback, explicit "
+       "actuator limits and envelope termination. Aircraft time histories have not been "
+       "compared with independently published flight or simulator data."},
 
       // --- Aircraft, from a hand-assembled matrix ---------------------------
       {"nt33a.lateral_modes_hand",
@@ -477,14 +481,88 @@ const std::vector<Case>& validation_cases() {
        "The bounds are SISO only, which is the source's own scope and not a hedge, and galata "
        "refuses them for a MIMO loop."},
 
+      {"synth.care.worked",
+       "Continuous-time Riccati solutions against SLICOT worked examples",
+       {"synth.care"},
+       "SLICOT BB01AD (CAREX 2.3) and SB02MD Program Data and Program Results",
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "CareSlicot.MatchesPublishedWorkedSolutionsWithinPrintedPrecision"}},
+       "The dense stabilising solver agrees with the printed solution matrices within half "
+       "a unit of their last decimal place. These are small worked examples, including one "
+       "CAREX parameter value; this is not validation against the full benchmark collection."},
+      {"synth.lqr.aircraft",
+       "Aircraft full-state-feedback design against published controller gains",
+       {"synth.lqr"},
+       "",
+       Status::Unvalidated,
+       {E{kIntegration,
+          "DesignWorkflow.AircraftStudyProducesAStabilisingLawAndCompletedTimeHistories"}},
+       "The aircraft design workflow executes and checks the stabilising CARE solution. "
+       "No published aircraft example containing plant, costs and resulting controller gains "
+       "has been transcribed; the example's weights and actuator limits are illustrative."},
+      {"synth.pid.realisation",
+       "Filtered PID and state-space interconnections",
+       {"synth.pid", "model.series", "model.feedback"},
+       "Astrom & Murray, Feedback Systems, 2nd ed., chapter 11; state-space block algebra",
+       Status::SelfConsistent,
+       {E{kUnit, "FilteredPid.FrequencyResponseMatchesTheDefinedTransferFunction"},
+        E{kUnit,
+          "Interconnection."
+          "CascadeAndFeedbackMatchIndependentScalarTransferFunctionsWithFeedthrough"},
+        E{kUnit, "Interconnection.MatrixChannelOrderAndAlgebraicFeedthroughArePreserved"}},
+       "Realizations agree with independently evaluated transfer functions, including direct "
+       "feedthrough and matrix channel order. This does not validate controller tuning."},
+      {"hinfinity.analytic_bounds",
+       "Hamiltonian H-infinity and sensitivity/disk bounds",
+       {"analyze.hinfnorm", "analyze.robust_bounds"},
+       "Benner & Mitchell, arXiv:1707.02497, Theorem 2.1; Seiler, Packard & Gahinet (2020)",
+       Status::SelfConsistent,
+       {E{kUnit, "Hinfinity.NarrowResonanceMissedByAFrequencyGridIsBracketed"},
+        E{kUnit, "Hinfinity.DiagonalAndRectangularMimoMatchAnalyticSingularValues"},
+        E{kUnit, "RobustBounds.DiskEndpointsInvertTheNormInTheConservativeDirection"}},
+       "Analytic scalar/MIMO cases check DC, feedthrough, a narrow resonance and conservative "
+       "reciprocal direction. The eigensystem is checked numerically; this is not a "
+       "directed-rounding enclosure or an independent-package benchmark collection."},
+      {"simulation.convergence",
+       "Linear/nonlinear time histories and local convergence",
+       {"sim.linear", "sim.nonlinear"},
+       "Hairer, Norsett & Wanner, Solving Ordinary Differential Equations I (1993); "
+       "smooth-ODE RK4 order and small-disturbance linearization",
+       Status::SelfConsistent,
+       {E{kUnit,
+          "NonlinearSimulation.UnsaturatedActuatorStepConvergesToTheExponentialAtFourthOrder"},
+        E{kIntegration, "SimulationConvergence.NonlinearPipelineConvergesUnderStepHalving"},
+        E{kIntegration,
+          "SimulationConvergence.SmallDisturbancePipelineApproachesTheAugmentedLinearClosedLoop"}},
+       "The actuator is checked against its exact exponential; smooth aircraft trajectories "
+       "are checked under step halving and shrinking perturbations against a full linearization "
+       "with actuator lags. Flight-data validation remains absent."},
+
+      {"model.continuous_scalar",
+       "Experimental continuous scalar graph compilation and simulation",
+       {"model.compile", "sim.model"},
+       "MODEL_CONFORMANCE.md MC01-MC26/B01-B04; analytic linear ODEs and independent RK4 "
+       "polynomial",
+       Status::Unvalidated,
+       {E{kUnit, "Modeling.ExponentialFeedbackMatchesIndependentRk4PolynomialAndContinuousBounds"},
+        E{kUnit, "Modeling.CoupledOscillatorUsesOneTemporaryStateForAllDerivatives"},
+        E{kUnit, "ModelIo.CanonicalVersionHasAHandSpecifiedByteContract"},
+        E{kIntegration,
+          "ModelWorkflow.CompiledFeedbackProducesLabeledSamplesAndExplicitEvidenceLimits"}},
+       "Synthetic analytic, structural/refusal, parser and source-to-run contracts cover the "
+       "bounded continuous scalar feasibility profile. Broader platform/reviewer acceptance, "
+       "aircraft blocks, sampled/hybrid execution and aircraft-model validity remain open; "
+       "successful execution does not assess numerical accuracy for an arbitrary run."},
+
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
-       "Riccati solvers against the CAREX and DAREX benchmark collections",
+       "Full CAREX and DAREX benchmark collections and generalised-pencil solvers",
        {},
        "",
        Status::NotImplemented,
        {},
-       "Named in the v0.2 milestone."},
+       "Only the bounded continuous-time Schur solver and small worked comparisons exist. "
+       "Singular or indefinite costs and discrete-time Riccati equations remain unsupported."},
 
   };
   return cases;

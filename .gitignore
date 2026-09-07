@@ -50,3 +50,10 @@ examples/**/*.md.out
 examples/nt33a-lateral-modes/lateral-modes.md
 examples/nt33a-longitudinal-modes/longitudinal-modes.md
 examples/nt33a-trim-and-linearise/trim-and-modes.md
+examples/**/run-*.json
+examples/nt33a-bank-loop-margins/bank-loop-margins.md
+examples/nt33a-lateral-mimo/lateral-mimo.md
+examples/nt33a-control-design/control-design.md
+examples/nt33a-control-design/control-design.html
+examples/nt33a-control-design/linear-response.csv
+examples/nt33a-control-design/nonlinear-response.csv

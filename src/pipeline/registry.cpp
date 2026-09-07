@@ -2,6 +2,9 @@
 
 #include "galata/pipeline/registry.hpp"
 
+#include "galata/pipeline/files.hpp"
+
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
@@ -30,16 +33,19 @@ const Artifact& StageContext::upstream_at(const std::string& key) const {
                              "{from: stage_id}, but it is a " +
                              Value::kind_name(found->kind()));
   }
-  const std::string& stage_id = found->as_stage_reference();
-  const auto artifact = upstream.find(stage_id);
+  const std::string& referenced_stage_id = found->as_stage_reference();
+  const auto artifact = upstream.find(referenced_stage_id);
   if (artifact == upstream.end()) {
-    throw std::runtime_error("input '" + key + "' refers to stage '" + stage_id
+    throw std::runtime_error("input '" + key + "' refers to stage '" + referenced_stage_id
                              + "', which produced no output");
   }
   return artifact->second;
 }
 
 std::string StageContext::resolve_input_path(const std::string& path) const {
+  if (path.empty() || path.find('\0') != std::string::npos) {
+    throw std::runtime_error("input path must be non-empty and must not contain a NUL byte");
+  }
   const std::filesystem::path candidate(path);
   if (candidate.is_absolute() || base_directory.empty()) {
     return path;
@@ -48,11 +54,25 @@ std::string StageContext::resolve_input_path(const std::string& path) const {
 }
 
 std::string StageContext::resolve_output_path(const std::string& path) const {
-  const std::filesystem::path candidate(path);
-  if (candidate.is_absolute() || output_directory.empty()) {
-    return path;
+  return files ? files->output_path(path) : RunFiles(output_directory).output_path(path);
+}
+
+std::string StageContext::read_input(const std::string& path) const {
+  const auto resolved = resolve_input_path(path);
+  return files ? files->read_input(resolved) : read_file_bytes(resolved);
+}
+
+std::string StageContext::read_input(const std::string& path, std::size_t max_bytes) const {
+  const auto resolved = resolve_input_path(path);
+  return files ? files->read_input(resolved, max_bytes) : read_file_bytes(resolved, max_bytes);
+}
+
+void StageContext::write_output(const std::string& path, const std::string& bytes) const {
+  if (files) {
+    files->write_output(path, bytes);
+  } else {
+    RunFiles(output_directory).write_output(path, bytes);
   }
-  return (std::filesystem::path(output_directory) / candidate).lexically_normal().string();
 }
 
 void Registry::add(Capability capability) {
@@ -62,6 +82,22 @@ void Registry::add(Capability capability) {
   if (!capability.run) {
     throw std::invalid_argument("Registry::add: capability '" + capability.id
                                 + "' has no implementation");
+  }
+  for (const auto& keys : {capability.input_file_keys, capability.output_file_keys}) {
+    for (const auto& key : keys) {
+      if (std::find(capability.input_keys.begin(), capability.input_keys.end(), key)
+          == capability.input_keys.end()) {
+        throw std::invalid_argument("file role '" + key + "' is not a declared input key");
+      }
+    }
+  }
+  for (const auto& [key, limit] : capability.input_file_byte_limits) {
+    if (limit == 0
+        || std::find(capability.input_file_keys.begin(), capability.input_file_keys.end(), key)
+               == capability.input_file_keys.end()) {
+      throw std::invalid_argument("input byte limit '" + key
+                                  + "' must be positive and name a declared input file role");
+    }
   }
   if (capabilities_.count(capability.id) != 0) {
     throw std::invalid_argument("Registry::add: capability '" + capability.id

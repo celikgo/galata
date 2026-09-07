@@ -21,6 +21,18 @@
 namespace galata::linearize {
 namespace {
 
+double require_chart(double pitch) {
+  const double conditioning = std::fabs(std::cos(pitch));
+  if (!std::isfinite(conditioning) || conditioning < kMinimumChartConditioning) {
+    std::ostringstream message;
+    message << "linearize_finite_difference: Euler chart conditioning " << conditioning
+            << " is below the supported minimum " << kMinimumChartConditioning
+            << "; use a different attitude chart for this trim";
+    throw std::invalid_argument(message.str());
+  }
+  return conditioning;
+}
+
 core::State state_from_euler(const Eigen::VectorXd& x) {
   core::State state;
   state.position_ned_m = Eigen::Vector3d(x(kPositionNorth), x(kPositionEast), x(kPositionDown));
@@ -96,6 +108,9 @@ model::LinearSystem Linearisation::to_linear_system(const std::string& descripti
   std::ostringstream units;
   units << "linearised about " << trim_airspeed_m_s << " m/s at " << trim_altitude_m
         << " m; velocities m/s, angles rad, rates rad/s";
+  if (trim_delta_isa_k != 0.0) {
+    units << "; ISA temperature offset " << trim_delta_isa_k << " K";
+  }
   system.units = units.str();
   system.validate();
   return system;
@@ -106,13 +121,59 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
                                           const LinearisationOptions& options) {
   aircraft.validate();
 
+  if (!std::isfinite(options.equilibrium_tolerance) || !(options.equilibrium_tolerance > 0.0)) {
+    throw std::invalid_argument(
+        "linearize_finite_difference: equilibrium_tolerance must be positive and finite");
+  }
+  const double quaternion_norm = trim.state.attitude_body_to_ned.norm();
+  if (!trim.state.to_vector().allFinite() || !std::isfinite(quaternion_norm)
+      || std::abs(quaternion_norm - 1.0) > 1e-10 || !trim.controls.to_vector().allFinite()) {
+    throw std::invalid_argument(
+        "linearize_finite_difference: trim state/controls must be finite with a unit quaternion");
+  }
+  if (trim.state.angular_rate_body_rad_s.cwiseAbs().maxCoeff() != 0.0) {
+    throw std::invalid_argument(
+        "linearize_finite_difference: the supported straight-line trim requires zero body rates");
+  }
+  std::vector<bool> retained(kEulerStateSize, false);
+  for (const int index : options.state_subset) {
+    if (index < 0 || index >= kEulerStateSize || retained[static_cast<std::size_t>(index)]) {
+      throw std::invalid_argument(
+          "linearize_finite_difference: state_subset indices must be unique and in range");
+    }
+    retained[static_cast<std::size_t>(index)] = true;
+  }
+
   const Eigen::VectorXd x0 = euler_from_state(trim.state);
   const Eigen::VectorXd u0 = trim.controls.to_vector();
+  const double chart_conditioning = require_chart(x0(kPitch));
+
+  // Check the actual differentiation centre, including its Euler round-trip.
+  // A TrimPoint is a mutable value and may outlive edits to the aircraft or
+  // controls. Its old residual and copied flight-condition fields are not a
+  // certificate that these dynamics are still at equilibrium.
+  const core::State centre = state_from_euler(x0);
+  const core::StateVector centre_rate =
+      aircraft.derivative(centre, trim.controls, trim.atmosphere.delta_isa_k);
+  Eigen::Matrix<double, 6, 1> accelerations;
+  accelerations << centre_rate.segment<3>(core::kVelocityU), centre_rate.segment<3>(core::kRateP);
+  const double residual_norm = accelerations.norm();
+  if (!centre_rate.allFinite() || !std::isfinite(residual_norm)
+      || residual_norm > options.equilibrium_tolerance) {
+    std::ostringstream message;
+    message << "linearize_finite_difference: reference does not satisfy trim equilibrium; "
+            << "actual acceleration residual " << residual_norm << " exceeds the budget "
+            << options.equilibrium_tolerance;
+    throw std::invalid_argument(message.str());
+  }
+  const auto wind = core::to_wind_axes(centre.velocity_body_m_s);
 
   // dx/dt in the Euler coordinates.
   const numerics::VectorFunction state_dynamics = [&](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    (void)require_chart(x(kPitch));
     const core::State state = state_from_euler(x);
-    const core::StateVector rate = aircraft.derivative(state, model::Controls::from_vector(u0));
+    const core::StateVector rate =
+        aircraft.derivative(state, model::Controls::from_vector(u0), trim.atmosphere.delta_isa_k);
     const Eigen::Vector3d attitude_rates =
         euler_rates(x(kRoll), x(kPitch), Eigen::Vector3d(x(kRateP), x(kRateQ), x(kRateR)));
 
@@ -135,7 +196,8 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
   const numerics::VectorFunction control_dynamics =
       [&](const Eigen::VectorXd& u) -> Eigen::VectorXd {
     const core::State state = state_from_euler(x0);
-    const core::StateVector rate = aircraft.derivative(state, model::Controls::from_vector(u));
+    const core::StateVector rate =
+        aircraft.derivative(state, model::Controls::from_vector(u), trim.atmosphere.delta_isa_k);
     const Eigen::Vector3d attitude_rates =
         euler_rates(x0(kRoll), x0(kPitch), Eigen::Vector3d(x0(kRateP), x0(kRateQ), x0(kRateR)));
 
@@ -190,11 +252,13 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
   Linearisation result;
   result.input_names = control_names();
   result.control_steps = full_b.steps;
-  result.chart_conditioning = std::fabs(std::cos(x0(kPitch)));
+  result.chart_conditioning = chart_conditioning;
   result.trim_altitude_m = -trim.state.position_ned_m.z();
-  result.trim_airspeed_m_s = trim.airspeed_m_s;
-  result.trim_alpha_rad = trim.alpha_rad;
-  result.trim_residual_norm = trim.residual_norm;
+  result.trim_delta_isa_k = trim.atmosphere.delta_isa_k;
+  result.trim_airspeed_m_s = wind.airspeed_m_s;
+  result.trim_alpha_rad = wind.alpha_rad;
+  result.trim_residual_norm = residual_norm;
+  result.trim_residual_tolerance = options.equilibrium_tolerance;
 
   const std::vector<std::string> all_names = euler_state_names();
 
@@ -208,11 +272,6 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
     result.neglected_coupling = 0.0;
   } else {
     const std::vector<int>& keep = options.state_subset;
-    for (const int index : keep) {
-      if (index < 0 || index >= kEulerStateSize) {
-        throw std::invalid_argument("linearize_finite_difference: state_subset index out of range");
-      }
-    }
     const auto n = static_cast<Eigen::Index>(keep.size());
     result.a.resize(n, n);
     result.b.resize(n, full_b.value.cols());
@@ -242,10 +301,6 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
     // How much of the full dynamics the reduction threw away. Measured, not
     // assumed: the decoupling of the longitudinal and lateral axes is a
     // property of a symmetric wings-level trim and not of the aircraft.
-    std::vector<bool> retained(kEulerStateSize, false);
-    for (const int index : keep) {
-      retained[static_cast<std::size_t>(index)] = true;
-    }
     double worst_coupling = 0.0;
     for (const int row_index : keep) {
       for (Eigen::Index j = 0; j < kEulerStateSize; ++j) {
@@ -266,6 +321,11 @@ Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
   if (options.report_truncation_error) {
     const double scale = result.a.cwiseAbs().maxCoeff();
     result.worst_relative_truncation = (scale > 0.0) ? result.a_truncation.maxCoeff() / scale : 0.0;
+  }
+  if (!std::isfinite(result.neglected_coupling)
+      || !std::isfinite(result.worst_relative_truncation)) {
+    throw std::runtime_error(
+        "linearize_finite_difference: relative error/coupling summary overflowed");
   }
   return result;
 }

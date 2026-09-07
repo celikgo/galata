@@ -65,10 +65,10 @@ struct NewtonOptions {
   // the cost per iteration constant, which keeps the total work independent of
   // the data.
   //
-  // Sixteen halvings shortens a step by a factor of 65,000. That is enough for
-  // any trim, and it is NOT enough for every problem: from deep inside a flat
-  // region — the tail of an exponential, say — no shortening of a Newton step
-  // improves the residual at all, and the iteration stalls where it stands.
+  // Sixteen trials include the full step and fifteen halvings. A finite trial
+  // budget is not enough for every problem: from deep inside a flat region —
+  // the tail of an exponential, say — none of the tested fractions may improve
+  // the residual, and the iteration stalls where it stands.
   // The residual history shows that plainly, as a flat line.
   int line_search_trials = 16;
 
@@ -104,10 +104,11 @@ struct NewtonResult {
 
 // Solves residual(x) = 0.
 //
-// Returns a result whose `converged` flag must be checked. This deliberately
-// does not throw: whether a non-converged trim is fatal is the caller's
-// decision, and the residual and condition number are more useful than an
-// exception message.
+// Returns a result whose `converged` flag must be checked: ordinary failure to
+// converge is not an exception. Invalid configuration, a non-finite initial
+// residual/Jacobian, changing dimensions or unrepresentable solver arithmetic
+// throws. Non-finite or domain-invalid line-search trials are rejected while
+// the remaining fixed trial fractions are still evaluated.
 [[nodiscard]] NewtonResult solve_newton(const VectorFunction& residual,
                                         const Eigen::VectorXd& initial_guess,
                                         const NewtonOptions& options = {});

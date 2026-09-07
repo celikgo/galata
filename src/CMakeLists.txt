@@ -6,6 +6,8 @@ add_subdirectory(analyze)
 add_subdirectory(model)
 add_subdirectory(trim)
 add_subdirectory(linearize)
+add_subdirectory(synth)
+add_subdirectory(modeling)
 add_subdirectory(pipeline)
 
 if(GALATA_BUILD_CLI)

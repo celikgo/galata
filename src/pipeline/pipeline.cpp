@@ -2,12 +2,18 @@
 
 #include "galata/pipeline/pipeline.hpp"
 
+#include "galata/pipeline/files.hpp"
 #include "galata/version.hpp"
 
+#include "../io/strict_yaml.hpp"
+#include "provenance.hpp"
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -17,12 +23,25 @@ namespace {
 
 ValuePtr convert(const YAML::Node& node, const std::string& path);
 
+void check_keys(const YAML::Node& node,
+                const std::string& path,
+                std::initializer_list<std::string> allowed) {
+  try {
+    io::yaml_keys(node, path, allowed);
+  } catch (const std::exception& error) {
+    throw std::runtime_error(error.what());
+  }
+}
+
 // `{from: stage_id}` is wiring, not data. Recognised here and nowhere else.
 bool is_stage_reference(const YAML::Node& node) {
   return node.IsMap() && node.size() == 1 && node["from"] && node["from"].IsScalar();
 }
 
 ValuePtr convert_scalar(const YAML::Node& node) {
+  if (node.Tag() == "!") {
+    return Value::string(node.Scalar());
+  }
   // yaml-cpp does not tag scalar types, so the kind is recovered by trying the
   // narrowest interpretation first. Order matters: "true" parses as a bool and
   // must not become the string "true", and "1" must not become the string "1"
@@ -33,6 +52,9 @@ ValuePtr convert_scalar(const YAML::Node& node) {
   }
   double as_number = 0.0;
   if (YAML::convert<double>::decode(node, as_number)) {
+    if (!std::isfinite(as_number)) {
+      throw std::runtime_error("pipeline: numeric inputs must be finite");
+    }
     return Value::number(as_number);
   }
   return Value::string(node.Scalar());
@@ -78,7 +100,12 @@ std::vector<std::string> Pipeline::execution_order() const {
   // execution sequence is the one a reader of the file predicts.
   std::map<std::string, std::size_t> index_of;
   for (std::size_t i = 0; i < stages.size(); ++i) {
-    index_of[stages[i].id] = i;
+    if (stages[i].id.empty() || !index_of.emplace(stages[i].id, i).second) {
+      throw std::runtime_error("pipeline: stage ids must be unique non-empty strings");
+    }
+    if (!stages[i].input || stages[i].input->kind() != Value::Kind::Map) {
+      throw std::runtime_error("stage '" + stages[i].id + "': input must be a map");
+    }
   }
 
   std::vector<std::set<std::string>> pending(stages.size());
@@ -136,8 +163,8 @@ std::vector<std::string> Pipeline::execution_order() const {
 Pipeline parse_pipeline(const std::string& yaml_text) {
   YAML::Node root;
   try {
-    root = YAML::Load(yaml_text);
-  } catch (const YAML::Exception& error) {
+    root = io::load_yaml(yaml_text, "pipeline");
+  } catch (const std::exception& error) {
     throw std::runtime_error(std::string("pipeline is not valid YAML: ") + error.what());
   }
 
@@ -146,6 +173,9 @@ Pipeline parse_pipeline(const std::string& yaml_text) {
   }
 
   Pipeline pipeline;
+  pipeline.source_name = "<memory>";
+  pipeline.source_bytes = yaml_text;
+  check_keys(root, "pipeline", {"version", "stages"});
   if (!root["version"]) {
     throw std::runtime_error("pipeline: missing 'version'");
   }
@@ -165,10 +195,14 @@ Pipeline parse_pipeline(const std::string& yaml_text) {
       throw std::runtime_error("pipeline: each stage must be a map");
     }
     Stage stage;
+    check_keys(node, "pipeline stage", {"id", "capability", "input"});
     if (!node["id"]) {
       throw std::runtime_error("pipeline: a stage is missing its 'id'");
     }
     stage.id = node["id"].Scalar();
+    if (!node["id"].IsScalar() || stage.id.empty()) {
+      throw std::runtime_error("pipeline: each stage id must be a non-empty string");
+    }
     if (!seen.insert(stage.id).second) {
       throw std::runtime_error("pipeline: stage id '" + stage.id + "' is used twice");
     }
@@ -176,7 +210,13 @@ Pipeline parse_pipeline(const std::string& yaml_text) {
       throw std::runtime_error("pipeline: stage '" + stage.id + "' is missing its 'capability'");
     }
     stage.capability = node["capability"].Scalar();
+    if (!node["capability"].IsScalar() || stage.capability.empty()) {
+      throw std::runtime_error("stage '" + stage.id + "': capability must be a non-empty string");
+    }
     stage.input = node["input"] ? convert(node["input"], stage.id) : Value::map({});
+    if (stage.input->kind() != Value::Kind::Map) {
+      throw std::runtime_error("stage '" + stage.id + "': input must be a map");
+    }
     pipeline.stages.push_back(std::move(stage));
   }
 
@@ -191,13 +231,9 @@ Pipeline parse_pipeline(const std::string& yaml_text) {
 }
 
 Pipeline load_pipeline(const std::string& path) {
-  std::ifstream file(path);
-  if (!file) {
-    throw std::runtime_error("cannot open pipeline file: " + path);
-  }
-  std::ostringstream buffer;
-  buffer << file.rdbuf();
-  return parse_pipeline(buffer.str());
+  auto pipeline = parse_pipeline(read_file_bytes(path));
+  pipeline.source_name = std::filesystem::canonical(path).string();
+  return pipeline;
 }
 
 const Artifact* RunResult::find(const std::string& stage_id) const {
@@ -213,8 +249,32 @@ RunResult run_pipeline(const Pipeline& pipeline,
                        const Registry& registry,
                        const std::string& base_directory,
                        const std::string& output_directory,
-                       const ProgressCallback& progress) {
+                       const ProgressCallback& progress,
+                       const RunOptions& options) {
+  if (pipeline.version != 1 || pipeline.stages.empty()) {
+    throw std::runtime_error("pipeline: version 1 and at least one stage are required");
+  }
   const std::vector<std::string> order = pipeline.execution_order();
+
+  // Validate every stage before a writer or an expensive solver can run.
+  for (const Stage& stage : pipeline.stages) {
+    const Capability* capability = registry.find(stage.capability);
+    if (!capability) {
+      throw std::runtime_error("stage '" + stage.id + "': no capability named '" + stage.capability
+                               + "'");
+    }
+    if (!stage.input || stage.input->kind() != Value::Kind::Map) {
+      throw std::runtime_error("stage '" + stage.id + "': input must be a map");
+    }
+    for (const auto& [key, value] : stage.input->as_map()) {
+      (void)value;
+      if (std::find(capability->input_keys.begin(), capability->input_keys.end(), key)
+          == capability->input_keys.end()) {
+        throw std::runtime_error("stage '" + stage.id + "' (" + stage.capability
+                                 + "): unknown input key '" + key + "'");
+      }
+    }
+  }
 
   std::map<std::string, const Stage*> by_id;
   for (const Stage& stage : pipeline.stages) {
@@ -222,6 +282,72 @@ RunResult run_pipeline(const Pipeline& pipeline,
   }
 
   RunResult result;
+  const auto executable_path = current_executable();
+  // Snapshot runtime identity before any stage can execute. A concurrent
+  // replacement must not attribute this study to a newer on-disk executable.
+  const auto executable = options.write_manifest ? snapshot_file(executable_path) : FileRecord{};
+  const auto runtime = snapshot_runtime(options.write_manifest);
+  const auto files = std::make_shared<RunFiles>(output_directory, options.overwrite);
+  files->protect_input_path(executable_path);
+  for (const auto& module : runtime.modules) {
+    if (module.storage == "file") {
+      files->protect_input_path(module.path);
+    }
+  }
+  if (!pipeline.source_name.empty() && pipeline.source_name != "<memory>") {
+    files->record_input(pipeline.source_name, pipeline.source_bytes);
+  }
+
+  // Snapshot bounded input roles first, strictest limits first. A legacy
+  // unbounded role referencing the same file must not bypass a model's cap.
+  // All inputs still precede output reservations and capability execution.
+  struct InputRole {
+    const Stage* stage;
+    std::string key;
+    std::size_t limit;
+  };
+
+  std::vector<InputRole> bounded_inputs;
+  for (const auto& stage : pipeline.stages) {
+    const auto* capability = registry.find(stage.capability);
+    for (const auto& [key, limit] : capability->input_file_byte_limits) {
+      bounded_inputs.push_back({&stage, key, limit});
+    }
+  }
+  std::stable_sort(bounded_inputs.begin(), bounded_inputs.end(), [](const auto& a, const auto& b) {
+    return a.limit < b.limit;
+  });
+  const auto read_role =
+      [&](const Stage& stage, const std::string& key, const std::optional<std::size_t> limit) {
+        StageContext context;
+        context.base_directory = base_directory;
+        context.files = files;
+        try {
+          const auto path = stage.input->string_at(key);
+          if (limit)
+            (void)context.read_input(path, *limit);
+          else
+            (void)context.read_input(path);
+        } catch (const std::exception& error) {
+          throw std::runtime_error("stage '" + stage.id + "' (" + stage.capability + ") input '"
+                                   + key + "': " + error.what());
+        }
+      };
+  for (const auto& role : bounded_inputs)
+    read_role(*role.stage, role.key, role.limit);
+  for (const auto& stage : pipeline.stages) {
+    const auto* capability = registry.find(stage.capability);
+    for (const auto& key : capability->input_file_keys) {
+      if (!capability->input_file_byte_limits.contains(key))
+        read_role(stage, key, std::nullopt);
+    }
+  }
+  for (const auto& stage : pipeline.stages) {
+    const auto* capability = registry.find(stage.capability);
+    for (const auto& key : capability->output_file_keys) {
+      files->reserve_output(stage.input->string_at(key));
+    }
+  }
   std::map<std::string, Artifact> produced;
 
   for (const std::string& stage_id : order) {
@@ -238,8 +364,10 @@ RunResult run_pipeline(const Pipeline& pipeline,
 
     StageContext context;
     context.input = stage.input;
+    context.stage_id = stage_id;
     context.base_directory = base_directory;
     context.output_directory = output_directory;
+    context.files = files;
     for (const std::string& reference : stage.input->referenced_stages()) {
       context.upstream[reference] = produced.at(reference);
     }
@@ -251,8 +379,47 @@ RunResult run_pipeline(const Pipeline& pipeline,
       throw std::runtime_error("stage '" + stage_id + "' (" + stage.capability
                                + ") failed: " + error.what());
     }
+    for (const auto& [source, evidence] : artifact.linearization_evidence) {
+      if (!evidence) {
+        throw std::runtime_error("stage '" + stage_id + "': null linearization evidence for '"
+                                 + source + "'");
+      }
+      if (source != stage_id) {
+        bool inherited = false;
+        for (const auto& [upstream_id, upstream] : context.upstream) {
+          (void)upstream_id;
+          const auto origin = upstream.linearization_evidence.find(source);
+          inherited =
+              inherited
+              || (origin != upstream.linearization_evidence.end() && origin->second == evidence);
+        }
+        if (!inherited) {
+          throw std::runtime_error("stage '" + stage_id
+                                   + "': cannot invent linearization evidence for stage '" + source
+                                   + "'");
+        }
+      }
+      try {
+        validate_linearization_evidence(*evidence);
+      } catch (const std::exception& error) {
+        throw std::runtime_error("stage '" + stage_id
+                                 + "': invalid linearization evidence: " + error.what());
+      }
+    }
     artifact.produced_by_capability = stage.capability;
     artifact.produced_by_build = std::string(galata::build_identification());
+    for (const auto& [upstream_id, upstream] : context.upstream) {
+      (void)upstream_id;
+      for (const auto& [source, evidence] : upstream.linearization_evidence) {
+        const auto [record, inserted] =
+            artifact.linearization_evidence.try_emplace(source, evidence);
+        if (!inserted && record->second != evidence) {
+          throw std::runtime_error("stage '" + stage_id
+                                   + "': cannot replace upstream linearization evidence '" + source
+                                   + "'");
+        }
+      }
+    }
 
     if (progress) {
       progress(stage_id, stage.capability, true, artifact.summary);
@@ -260,6 +427,12 @@ RunResult run_pipeline(const Pipeline& pipeline,
 
     produced[stage_id] = artifact;
     result.stages.push_back(StageResult{stage_id, stage.capability, std::move(artifact)});
+  }
+  if (options.write_manifest) {
+    verify_file_unchanged(executable);
+    verify_runtime_unchanged(runtime);
+    result.manifest_path =
+        write_run_manifest(pipeline, result, *files, options, base_directory, executable, runtime);
   }
   return result;
 }

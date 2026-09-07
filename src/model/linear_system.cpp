@@ -2,7 +2,7 @@
 
 #include "galata/model/linear_system.hpp"
 
-#include <yaml-cpp/yaml.h>
+#include "../io/strict_yaml.hpp"
 
 #include <fstream>
 #include <set>
@@ -59,7 +59,14 @@ std::vector<std::string> read_names(const YAML::Node& node) {
   if (!node) {
     return names;
   }
+  if (!node.IsSequence()) {
+    throw std::invalid_argument("linear model: names must be a sequence of non-empty strings");
+  }
+  std::set<std::string> seen;
   for (const YAML::Node& entry : node) {
+    if (!entry.IsScalar() || entry.Scalar().empty() || !seen.insert(entry.Scalar()).second) {
+      throw std::invalid_argument("linear model: names must be unique non-empty strings");
+    }
     names.push_back(entry.Scalar());
   }
   return names;
@@ -178,22 +185,28 @@ void LinearSystem::validate() const {
 }
 
 LinearSystem load_linear_system(const std::string& path) {
-  std::ifstream file(path);
+  std::ifstream file(path, std::ios::binary);
   if (!file) {
     throw std::invalid_argument("cannot open linear system file: " + path);
   }
   std::ostringstream buffer;
   buffer << file.rdbuf();
 
-  YAML::Node root;
-  try {
-    root = YAML::Load(buffer.str());
-  } catch (const YAML::Exception& error) {
-    throw std::invalid_argument(path + ": not valid YAML: " + error.what());
+  if (file.bad()) {
+    throw std::invalid_argument("failed reading model: " + path);
   }
+  return parse_linear_system(buffer.str(), path);
+}
+
+LinearSystem parse_linear_system(const std::string& bytes, const std::string& path) {
+  const YAML::Node root = io::load_yaml(bytes, path);
   if (!root.IsMap()) {
     throw std::invalid_argument(path + ": the document must be a map");
   }
+  io::yaml_keys(
+      root,
+      path,
+      {"description", "citation", "units", "states", "inputs", "outputs", "a", "b", "c", "d"});
   if (!root["a"]) {
     throw std::invalid_argument(path + ": missing 'a' (the state matrix)");
   }

@@ -15,3 +15,7 @@ The format is in [0000-template.md](0000-template.md).
 | [0005](0005-single-source-of-version.md) | One source of version truth | accepted |
 | [0006](0006-equations-of-motion-about-the-cg.md) | The equations of motion are written about the centre of gravity | accepted |
 | [0007](0007-reference-values-from-copyrighted-sources.md) | Scalar reference values may be quoted from copyrighted sources; datasets may not | accepted |
+| [0008](0008-numerical-evidence-authority.md) | Numerical evidence retains its scope and authority | implemented; maintainer review pending |
+| [0009](0009-release-evidence-and-source-identity.md) | Releases consume complete evidence for one immutable source | implemented; hosted verification pending |
+| [0010](0010-continuous-scalar-executable-model.md) | Bounded continuous scalar executable model | implemented feasibility profile; review pending |
+| [0011](0011-source-model-identity-and-project-boundary.md) | Source-model identity and project document boundary | proposed |

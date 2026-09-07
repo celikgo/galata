@@ -16,10 +16,13 @@
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/registry.hpp"
 #include "galata/trim/level.hpp"
 #include "galata/units.hpp"
 #include "galata/version.hpp"
+
+#include "html_report.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -44,7 +47,8 @@ std::string format(double value, int precision = 4) {
 
 Artifact load_state_space(const StageContext& context) {
   const std::string path = context.resolve_input_path(context.input->string_at("path"));
-  const model::LinearSystem system = model::load_linear_system(path);
+  const model::LinearSystem system =
+      model::parse_linear_system(context.read_input(context.input->string_at("path")), path);
 
   std::ostringstream summary;
   summary << system.state_count() << " states";
@@ -111,7 +115,8 @@ Artifact analyze_modes_capability(const StageContext& context) {
 
 Artifact load_aircraft_model(const StageContext& context) {
   const std::string path = context.resolve_input_path(context.input->string_at("path"));
-  const model::Aircraft aircraft = model::load_aircraft(path);
+  const model::Aircraft aircraft =
+      model::parse_aircraft(context.read_input(context.input->string_at("path")), path);
 
   std::ostringstream summary;
   summary << "derivative-buildup model";
@@ -127,11 +132,6 @@ Artifact load_aircraft_model(const StageContext& context) {
 }
 
 // --- trim.level ------------------------------------------------------------
-
-struct TrimArtifact {
-  trim::TrimPoint point;
-  model::Aircraft aircraft;
-};
 
 Artifact trim_level_capability(const StageContext& context) {
   const Artifact& upstream = context.upstream_at("aircraft");
@@ -187,6 +187,7 @@ Artifact linearize_capability(const StageContext& context) {
                              + "'; it must be 'longitudinal', 'lateral' or 'all'");
   }
   options.report_truncation_error = context.input->bool_at("report_truncation_error", true);
+  options.equilibrium_tolerance = context.input->number_at("equilibrium_tolerance", 1e-10);
 
   const linearize::Linearisation linearisation =
       linearize::linearize_finite_difference(trimmed.aircraft, trimmed.point, options);
@@ -198,8 +199,14 @@ Artifact linearize_capability(const StageContext& context) {
 
   std::ostringstream summary;
   summary << linearisation.a.rows() << " states, " << linearisation.b.cols() << " inputs (" << axes
-          << "); worst truncation " << std::scientific << std::setprecision(1)
-          << linearisation.worst_relative_truncation;
+          << "); chart conditioning " << linearisation.chart_conditioning
+          << ", actual equilibrium residual " << std::scientific << std::setprecision(1)
+          << linearisation.trim_residual_norm;
+  if (options.report_truncation_error) {
+    summary << ", worst truncation " << linearisation.worst_relative_truncation;
+  } else {
+    summary << ", truncation not estimated";
+  }
   if (linearisation.neglected_coupling > 1e-6) {
     summary << ", neglected coupling " << linearisation.neglected_coupling;
   }
@@ -208,6 +215,8 @@ Artifact linearize_capability(const StageContext& context) {
   artifact.kind = "linear_system";
   artifact.summary = summary.str();
   artifact.payload = linearisation.to_linear_system(description.str(), trimmed.aircraft.citation);
+  artifact.linearization_evidence.emplace(
+      context.stage_id, std::make_shared<const linearize::Linearisation>(linearisation));
   return artifact;
 }
 
@@ -351,7 +360,7 @@ int resolve_channel(const ValuePtr& input,
     return 0;
   }
   if (entry->kind() == Value::Kind::Number) {
-    const int index = static_cast<int>(entry->as_number());
+    const int index = input->integer_at(key, 0);
     if (index < 0 || index >= static_cast<int>(names.size())) {
       std::ostringstream message;
       message << what << " index " << index << " is out of range; the model has " << names.size();
@@ -377,7 +386,7 @@ analyze::MarginOptions read_margin_options(const StageContext& context) {
   analyze::MarginOptions options;
   options.start_rad_s = context.input->number_at("from_rad_s", options.start_rad_s);
   options.stop_rad_s = context.input->number_at("to_rad_s", options.stop_rad_s);
-  options.grid_points = static_cast<int>(context.input->number_at("points", options.grid_points));
+  options.grid_points = context.input->integer_at("points", options.grid_points);
   return options;
 }
 
@@ -396,7 +405,7 @@ Artifact frequency_response_capability(const StageContext& context) {
 
   const double from = context.input->number_at("from_rad_s", 1.0e-3);
   const double to = context.input->number_at("to_rad_s", 1.0e3);
-  const int points = static_cast<int>(context.input->number_at("points", 500));
+  const int points = context.input->integer_at("points", 500);
   const bool refine = context.input->bool_at("refine_near_modes", true);
 
   const std::vector<double> grid = refine
@@ -452,14 +461,14 @@ Artifact margins_capability(const StageContext& context) {
   if (result.margins.has_gain_margin) {
     summary << "GM " << format(result.margins.gain_margin_db, 2) << " dB";
   } else {
-    summary << "GM infinite";
+    summary << "GM not found in searched band";
   }
   summary << ", ";
   if (result.margins.has_phase_margin) {
     summary << "PM " << format(units::radians_to_degrees(result.margins.phase_margin_rad), 2)
             << " deg";
   } else {
-    summary << "PM infinite";
+    summary << "PM not found in searched band";
   }
 
   Artifact artifact;
@@ -525,7 +534,7 @@ Artifact sigma_capability(const StageContext& context) {
 
   const double from = context.input->number_at("from_rad_s", 1.0e-3);
   const double to = context.input->number_at("to_rad_s", 1.0e3);
-  const int points = static_cast<int>(context.input->number_at("points", 500));
+  const int points = context.input->integer_at("points", 500);
   const bool refine = context.input->bool_at("refine_near_modes", true);
   const std::vector<double> grid = refine
                                        ? analyze::grid_refined_for_modes(system.a, from, to, points)
@@ -615,19 +624,32 @@ void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
     out << "**Model.** " << artifact.system_description << "\n\n";
   }
   out << "**Loop.** " << artifact.loop_name << "\n\n";
+  if (!margins.nominal_stability_checked) {
+    out << "**Nominal closed-loop stability.** Not checked. Delay boundaries assume "
+           "the nominal loop is stable.\n\n";
+  } else if (margins.nominal_closed_loop_stable) {
+    out << "**Nominal closed-loop stability.** Checked: strictly stable.\n\n";
+  } else {
+    out << "**Nominal closed-loop stability.** Checked: unstable or marginal. No positive "
+           "delay tolerance is established; crossover values alone do not establish "
+           "stability.\n\n";
+  }
 
+  if (!margins.nominal_stability_diagnostic.empty()) {
+    out << "**Stability assessment.** " << margins.nominal_stability_diagnostic << "\n\n";
+  }
   out << "| margin | value | at (rad/s) |\n";
   out << "| --- | ---: | ---: |\n";
   out << "| Gain | "
       << (margins.has_gain_margin
               ? format(margins.gain_margin, 4) + " (" + format(margins.gain_margin_db, 2) + " dB)"
-              : std::string("infinite"))
+              : std::string("not found in searched band"))
       << " | " << frequency_or_dash(margins.has_gain_margin, margins.gain_margin_frequency_rad_s)
       << " |\n";
   out << "| Phase | "
       << (margins.has_phase_margin
               ? format(units::radians_to_degrees(margins.phase_margin_rad), 3) + " deg"
-              : std::string("infinite"))
+              : std::string("not found in searched band"))
       << " | " << frequency_or_dash(margins.has_phase_margin, margins.phase_margin_frequency_rad_s)
       << " |\n";
   out << "| Delay | "
@@ -652,10 +674,6 @@ void write_margins_section(std::ostream& out, const MarginArtifact& artifact) {
     out << "\n";
   }
 
-  if (!margins.has_delay_margin && margins.has_phase_margin && margins.phase_margin_rad < 0.0) {
-    out << "*The phase margin is negative: this loop closes unstable, and no delay is what is "
-           "wrong with it.*\n\n";
-  }
   out << "*Searched " << format(margins.searched_from_rad_s, 5) << " to "
       << format(margins.searched_to_rad_s, 2) << " rad/s over " << margins.grid_points
       << " points. A crossover narrower than that spacing would not be found.*\n\n";
@@ -673,29 +691,29 @@ void write_disk_margin_section(std::ostream& out, const DiskMarginArtifact& arti
   out << "| Disk margin alpha | " << format(margin.alpha, 5) << " |\n";
   out << "| Peak of \\|S + (sigma-1)/2\\| | " << format(margin.peak_gain, 5) << " |\n";
   out << "| Critical frequency | " << format(margin.critical_frequency_rad_s, 5) << " rad/s |\n";
-  out << "| Guaranteed gain range | "
+  out << "| Estimated gain range | "
       << (margin.gain_variation_is_bounded
               ? format(margin.gain_variation_min, 4) + " to " + format(margin.gain_variation_max, 4)
                     + " (" + format(margin.gain_variation_min_db, 2) + " to "
                     + format(margin.gain_variation_max_db, 2) + " dB)"
               : format(margin.gain_variation_min, 4) + " upwards, unbounded")
       << " |\n";
-  out << "| Guaranteed phase range | "
+  out << "| Estimated phase range | "
       << (margin.phase_variation_is_bounded
               ? "+/- " + format(units::radians_to_degrees(margin.phase_variation_rad), 3) + " deg"
               : std::string("any phase"))
       << " |\n\n";
 
-  out << "A perturbation on the boundary that destabilises this loop: f = "
+  out << "A candidate boundary perturbation from the sampled peak: f = "
       << format(margin.destabilising_perturbation.real(), 4) << " "
       << (margin.destabilising_perturbation.imag() < 0.0 ? "-" : "+") << " "
       << format(std::abs(margin.destabilising_perturbation.imag()), 4) << "j, which places a "
-      << "closed-loop pole at s = j" << format(margin.critical_frequency_rad_s, 4) << ".\n\n";
+      << "candidate closed-loop pole near s = j" << format(margin.critical_frequency_rad_s, 4)
+      << ".\n\n";
 
-  out << "*The guaranteed gain and phase ranges are SMALLER than the classical margins by "
-         "construction: the disk is inscribed in the stable region, and buys tolerance to "
-         "combined gain and phase variation with some of the room the classical margins claim "
-         "for each alone.*\n\n";
+  out << "**These sampled ranges are estimates, not guaranteed tolerances.** A missed peak "
+         "can make the disk and its gain/phase ranges too large. Use analyze.robust_bounds "
+         "for a separate numerical bound assessment.\n\n";
   out << "*The peak was found by searching " << format(margin.searched_from_rad_s, 5) << " to "
       << format(margin.searched_to_rad_s, 2) << " rad/s over " << margin.grid_points
       << " points and refining. A grid maximum understates the true peak, so this alpha is an "
@@ -743,29 +761,24 @@ void write_sensitivity_section(std::ostream& out, const SensitivityArtifact& art
   out << "| Complementary M_T | " << format(peaks.complementary_peak, 5) << " | "
       << format(peaks.complementary_peak_frequency_rad_s, 5) << " |\n\n";
 
-  out << "M_S is the reciprocal of the shortest distance from the Nyquist curve of the loop to "
-         "the critical point -1, so it covers gain and phase variation together where the "
-         "classical margins hold one fixed while varying the other. The shortest distance here "
-         "is "
-      << format(1.0 / peaks.sensitivity_peak, 5) << ".\n\n";
+  if (peaks.is_single_loop) {
+    out << "For this single loop, M_S is the reciprocal of the shortest distance from the "
+           "Nyquist curve to the critical point -1. The sampled distance estimate is "
+        << format(1.0 / peaks.sensitivity_peak, 5) << ".\n\n";
+  } else {
+    out << "For this multi-loop system, the reciprocal of M_S estimates the smallest "
+           "singular value of I+L over the searched frequencies: "
+        << format(1.0 / peaks.sensitivity_peak, 5)
+        << ". This is not a distance from a scalar Nyquist curve. Per-channel margins "
+           "do not establish simultaneous multi-loop robustness.\n\n";
+  }
 
-  const analyze::GuaranteedMargins bounds = analyze::guaranteed_margins(peaks);
-  if (bounds.applies && bounds.valid) {
-    out << "Classical margins these peaks GUARANTEE (Skogestad & Postlethwaite, 2nd ed., "
-           "equations (2.47) and (2.48)) — lower bounds, so the loop's actual margins are at "
-           "least this good:\n\n";
-    out << "| from | gain margin at least | phase margin at least |\n| --- | ---: | ---: |\n";
-    out << "| M_S | " << format(bounds.gain_margin_from_sensitivity, 4) << " | "
-        << format(units::radians_to_degrees(bounds.phase_margin_from_sensitivity_rad), 3)
-        << " deg |\n";
-    out << "| M_T | " << format(bounds.gain_margin_from_complementary, 4) << " | "
-        << format(units::radians_to_degrees(bounds.phase_margin_from_complementary_rad), 3)
-        << " deg |\n\n";
-  } else if (!bounds.applies) {
-    out << "*No guaranteed gain and phase margins are reported: equations (2.47) and (2.48) "
-           "are stated for SINGLE-LOOP systems and this loop is not one. Applying them "
-           "per-channel to a multi-loop system is the specific error that makes a MIMO design "
-           "look robust when it is not — see Skogestad & Postlethwaite section 3.7.*\n\n";
+  out << "**No guaranteed margins are derived from sampled peaks.** A sampled maximum "
+         "is a lower estimate of the norm; the margin formulas require an upper norm bound. "
+         "Use analyze.robust_bounds for a separate numerical bound assessment.\n\n";
+  if (!peaks.is_single_loop) {
+    out << "*The classical sensitivity-margin formulas are stated for SINGLE-LOOP systems; "
+           "they do not establish simultaneous multi-loop robustness.*\n\n";
   }
 
   out << "*Both peaks are grid maxima and therefore LOWER bounds on the true H-infinity norms; "
@@ -774,9 +787,34 @@ void write_sensitivity_section(std::ostream& out, const SensitivityArtifact& art
       << " rad/s over " << peaks.grid_points << " points.*\n\n";
 }
 
-Artifact write_markdown_report(const StageContext& context) {
-  const std::string relative = context.input->string_at("path");
-  const std::string path = context.resolve_output_path(relative);
+void write_linearization_evidence(std::ostream& out, const Artifact& artifact) {
+  for (const auto& [source, evidence] : artifact.linearization_evidence) {
+    out << "**Upstream linearization evidence — " << source
+        << ".** "
+           "These diagnostics describe the source Jacobian, not an error bound for this "
+           "downstream result. Full step vectors and truncation matrices are retained in the "
+           "run manifest.\n\n";
+    out << std::scientific << std::setprecision(6)
+        << "| Source diagnostic | Value |\n| --- | ---: |\n"
+        << "| Euler chart conditioning | " << evidence->chart_conditioning << " |\n"
+        << "| Minimum supported chart conditioning | " << linearize::kMinimumChartConditioning
+        << " |\n"
+        << "| Recomputed equilibrium residual (m/s^2, rad/s^2 norm) | "
+        << evidence->trim_residual_norm << " |\n"
+        << "| Equilibrium acceptance budget (same norm) | " << evidence->trim_residual_tolerance
+        << " |\n"
+        << "| Neglected coupling ratio | " << evidence->neglected_coupling << " |\n";
+    if (evidence->a_truncation.size() > 0) {
+      out << "| Worst relative Richardson truncation estimate | "
+          << evidence->worst_relative_truncation << " |\n";
+    } else {
+      out << "| Richardson truncation estimate | not requested |\n";
+    }
+    out << "\n" << std::defaultfloat;
+  }
+}
+
+std::string markdown_document(const StageContext& context) {
   const std::string title = context.input->string_at("title", "galata report");
 
   const ValuePtr sections = context.input->get("sections");
@@ -800,7 +838,21 @@ Artifact write_markdown_report(const StageContext& context) {
     const Artifact& artifact = found->second;
 
     out << "## " << stage_id << "\n\n";
-    if (artifact.kind == "modal_table") {
+    if (artifact.kind == "aircraft") {
+      const auto& aircraft = artifact.payload_as<model::Aircraft>("aircraft");
+      out << "**Model.** " << aircraft.description << "\n\n"
+          << "**Source.** " << aircraft.citation << "\n\n"
+          << "| Property | Value |\n|---|---:|\n"
+          << "| Mass (kg) | " << format(aircraft.mass.mass_kg, 6) << " |\n"
+          << "| Wing area (m^2) | " << format(aircraft.geometry.wing_area_m2, 6) << " |\n"
+          << "| Wing span (m) | " << format(aircraft.geometry.wing_span_m, 6) << " |\n"
+          << "| Reference alpha (rad) | " << format(aircraft.aero.reference_alpha_rad, 6) << " |\n"
+          << "| Reference Mach | " << format(aircraft.aero.reference_mach, 6) << " |\n\n"
+          << "Local derivative-buildup model. The run manifest retains the exact coefficient "
+             "input.\n\n";
+    } else if (artifact.kind == "report") {
+      out << "Written report: `" << artifact.payload_as<std::string>("report") << "`.\n\n";
+    } else if (artifact.kind == "modal_table") {
       write_modal_section(out, std::any_cast<const ModalTable&>(artifact.payload));
     } else if (artifact.kind == "trim_point") {
       write_trim_section(out, std::any_cast<const TrimArtifact&>(artifact.payload));
@@ -817,12 +869,10 @@ Artifact write_markdown_report(const StageContext& context) {
       write_sensitivity_section(out, std::any_cast<const SensitivityArtifact&>(artifact.payload));
     } else if (artifact.kind == "disk_margin") {
       write_disk_margin_section(out, std::any_cast<const DiskMarginArtifact&>(artifact.payload));
-    } else {
-      // Reporting an artefact kind this writer does not understand is a gap in
-      // the writer, and it says so rather than silently omitting the section.
-      out << "*No Markdown writer exists for an artefact of kind `" << artifact.kind
-          << "`, so this section is empty. That is a missing feature, not an empty result.*\n\n";
+    } else if (!write_design_section(out, artifact)) {
+      throw std::runtime_error("no report writer exists for artifact kind '" + artifact.kind + "'");
     }
+    write_linearization_evidence(out, artifact);
     out << "_Produced by `" << artifact.produced_by_capability << "`._\n\n";
   }
 
@@ -830,20 +880,39 @@ Artifact write_markdown_report(const StageContext& context) {
   out << "---\n\n";
   out << "Generated by `" << galata::build_identification() << "`.\n";
 
-  std::ofstream file(path);
-  if (!file) {
-    throw std::runtime_error("cannot write report to '" + path + "'");
-  }
-  file << out.str();
-  if (!file) {
-    throw std::runtime_error("failed while writing report to '" + path + "'");
-  }
+  return out.str();
+}
 
+Artifact write_report(const StageContext& context, bool html) {
+  const std::string relative = context.input->string_at("path");
+  const auto markdown = markdown_document(context);
+  std::vector<TimeSeriesChart> charts;
+  if (html) {
+    for (const auto& section : context.input->get("sections")->as_list()) {
+      const auto& stage_id = section->as_stage_reference();
+      for (auto chart : design_charts(context.upstream.at(stage_id))) {
+        chart.title = stage_id + " — " + chart.title;
+        charts.push_back(std::move(chart));
+      }
+    }
+  }
+  const auto bytes =
+      html ? standalone_html(context.input->string_at("title", "galata report"), markdown, charts)
+           : markdown;
+  context.write_output(relative, bytes);
   Artifact artifact;
   artifact.kind = "report";
   artifact.summary = "wrote " + relative;
-  artifact.payload = path;
+  artifact.payload = context.resolve_output_path(relative);
   return artifact;
+}
+
+Artifact write_markdown_report(const StageContext& context) {
+  return write_report(context, false);
+}
+
+Artifact write_html_report(const StageContext& context) {
+  return write_report(context, true);
 }
 
 Registry build_registry() {
@@ -854,7 +923,9 @@ Registry build_registry() {
                  "Load a linear state-space model (A, B, state and input names) from a YAML file",
                  "linear_system",
                  Capability::State::ImplementedUnvalidated,
-                 load_state_space});
+                 load_state_space,
+                 {"path"},
+                 {"path"}});
 
   registry.add(Capability{
       "analyze.modes",
@@ -862,14 +933,17 @@ Registry build_registry() {
       "modes classified by participation",
       "modal_table",
       Capability::State::Implemented,
-      analyze_modes_capability});
+      analyze_modes_capability,
+      {"system", "classify"}});
 
   registry.add(
       Capability{"model.aircraft.derivatives",
                  "Load a nonlinear aircraft model built from a non-dimensional derivative set",
                  "aircraft",
                  Capability::State::Implemented,
-                 load_aircraft_model});
+                 load_aircraft_model,
+                 {"path"},
+                 {"path"}});
 
   registry.add(Capability{
       "trim.level",
@@ -877,22 +951,32 @@ Registry build_registry() {
       "and thrust, by Newton on a square residual",
       "trim_point",
       Capability::State::Implemented,
-      trim_level_capability});
-
-  registry.add(Capability{"linearize.finitediff",
-                          "Linearise about a trim point by central differences, with a Richardson "
-                          "truncation-error estimate per entry",
-                          "linear_system",
-                          Capability::State::Implemented,
-                          linearize_capability});
+      trim_level_capability,
+      {"aircraft",
+       "altitude_m",
+       "airspeed_m_s",
+       "mach",
+       "flight_path_angle_deg",
+       "delta_isa_k",
+       "tolerance"}});
 
   registry.add(
-      Capability{"analyze.freqresp",
-                 "Frequency response of one loop of a linear model, evaluated by Hessenberg solves "
-                 "with the grid refined around the system's own lightly damped modes",
-                 "frequency_response",
+      Capability{"linearize.finitediff",
+                 "Linearise about a trim point by central differences, with a Richardson "
+                 "truncation-error estimate per entry",
+                 "linear_system",
                  Capability::State::Implemented,
-                 frequency_response_capability});
+                 linearize_capability,
+                 {"trim_point", "axes", "report_truncation_error", "equilibrium_tolerance"}});
+
+  registry.add(Capability{
+      "analyze.freqresp",
+      "Frequency response of one loop of a linear model, evaluated by Hessenberg solves "
+      "with the grid refined around the system's own lightly damped modes",
+      "frequency_response",
+      Capability::State::Implemented,
+      frequency_response_capability,
+      {"system", "input", "output", "from_rad_s", "to_rad_s", "points", "refine_near_modes"}});
 
   registry.add(
       Capability{"analyze.margins",
@@ -900,15 +984,17 @@ Registry build_registry() {
                  "frequency at which each occurs",
                  "stability_margins",
                  Capability::State::Implemented,
-                 margins_capability});
+                 margins_capability,
+                 {"system", "input", "output", "from_rad_s", "to_rad_s", "points"}});
 
   registry.add(Capability{
       "analyze.diskmargin",
       "Disk margin of one loop — robustness to simultaneous gain and phase variation — with "
-      "the guaranteed gain and phase range and a destabilising perturbation on the boundary",
+      "estimated gain and phase ranges and a candidate boundary perturbation",
       "disk_margin",
       Capability::State::Implemented,
-      disk_margin_capability});
+      disk_margin_capability,
+      {"system", "input", "output", "skew", "from_rad_s", "to_rad_s", "points"}});
 
   registry.add(Capability{
       "analyze.sigma",
@@ -916,7 +1002,8 @@ Registry build_registry() {
       "spread, and the peak gain",
       "singular_values",
       Capability::State::Implemented,
-      sigma_capability});
+      sigma_capability,
+      {"system", "from_rad_s", "to_rad_s", "points", "refine_near_modes"}});
 
   registry.add(Capability{
       "analyze.sensitivity",
@@ -924,14 +1011,30 @@ Registry build_registry() {
       "negative unit feedback, and the frequencies at which they occur",
       "sensitivity_peaks",
       Capability::State::Implemented,
-      sensitivity_capability});
+      sensitivity_capability,
+      {"system", "from_rad_s", "to_rad_s", "points"}});
 
   registry.add(Capability{"report.markdown",
                           "Write a Markdown report from upstream results",
                           "report",
                           Capability::State::ImplementedUnvalidated,
-                          write_markdown_report});
+                          write_markdown_report,
+                          {"path", "title", "sections"},
+                          {},
+                          {"path"}});
 
+  registry.add(
+      Capability{"report.html",
+                 "Write a self-contained HTML report with readable tables and no remote resources",
+                 "report",
+                 Capability::State::ImplementedUnvalidated,
+                 write_html_report,
+                 {"path", "title", "sections"},
+                 {},
+                 {"path"}});
+
+  register_design_capabilities(registry);
+  register_model_capabilities(registry);
   return registry;
 }
 

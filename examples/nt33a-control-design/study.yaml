@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: Apache-2.0
+# Local engineering demonstration. Weights and actuator specifications below
+# are illustrative study inputs, NOT published NT-33A hardware specifications.
+version: 1
+stages:
+  - id: aircraft
+    capability: model.aircraft.derivatives
+    input: {path: ../../models/nt33a/nt33a-fc1.yaml}
+  - id: trim
+    capability: trim.level
+    input: {aircraft: {from: aircraft}, altitude_m: 0, airspeed_m_s: 69.4944}
+  - id: full_plant
+    capability: linearize.finitediff
+    input: {trim_point: {from: trim}, axes: longitudinal}
+  - id: plant
+    capability: model.channels
+    input: {system: {from: full_plant}, inputs: [elevator]}
+  - id: law
+    capability: synth.lqr
+    input:
+      system: {from: plant}
+      break_at: plant_input
+      q: [[0.001,0,0,0],[0,0.01,0,0],[0,0,1,0],[0,0,0,10]]
+      r: [[1]]
+  - id: closed_loop
+    capability: model.control_system
+    input: {law: {from: law}, use: closed_loop}
+  - id: return_ratio
+    capability: model.control_system
+    input: {law: {from: law}, use: broken_loop}
+  - id: modes
+    capability: analyze.modes
+    input: {system: {from: closed_loop}}
+  - id: margins
+    capability: analyze.margins
+    input: {system: {from: return_ratio}, input: elevator, output: elevator}
+  - id: disk
+    capability: analyze.diskmargin
+    input: {system: {from: return_ratio}, input: elevator, output: elevator}
+  - id: robustness
+    capability: analyze.robust_bounds
+    input: {system: {from: return_ratio}}
+  - id: linear_response
+    capability: sim.linear
+    input:
+      system: {from: closed_loop}
+      initial_state: [0,0,0,0.005]
+      step_s: 0.005
+      steps: 4000
+      sample_stride: 10
+  - id: nonlinear_response
+    capability: sim.nonlinear
+    input:
+      trim_point: {from: trim}
+      law: {from: law}
+      initial_perturbation: {theta: 0.005}
+      step_s: 0.005
+      steps: 4000
+      sample_stride: 10
+      actuators:
+        elevator: {minimum_rad: -0.35, maximum_rad: 0.35, rate_limit_rad_s: 1, time_constant_s: 0.05}
+        aileron: {minimum_rad: -0.35, maximum_rad: 0.35, rate_limit_rad_s: 1, time_constant_s: 0.05}
+        rudder: {minimum_rad: -0.35, maximum_rad: 0.35, rate_limit_rad_s: 1, time_constant_s: 0.05}
+        thrust: {minimum_n: 0, maximum_n: 20000, rate_limit_n_s: 10000, time_constant_s: 0.5}
+  - id: linear_csv
+    capability: report.csv
+    input: {trajectory: {from: linear_response}, path: linear-response.csv}
+  - id: nonlinear_csv
+    capability: report.csv
+    input: {trajectory: {from: nonlinear_response}, path: nonlinear-response.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: NT-33A local full-state-feedback design study
+      sections: [{from: trim}, {from: law}, {from: modes}, {from: margins}, {from: disk}, {from: robustness}, {from: linear_response}, {from: nonlinear_response}]
+      path: control-design.md
+  - id: html_report
+    capability: report.html
+    input:
+      title: NT-33A local full-state-feedback design study
+      sections: [{from: trim}, {from: law}, {from: modes}, {from: margins}, {from: disk}, {from: robustness}, {from: linear_response}, {from: nonlinear_response}]
+      path: control-design.html

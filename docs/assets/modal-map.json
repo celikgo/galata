@@ -1,6 +1,6 @@
 {
   "generator": "galata-modal-map",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "model": "NT-33A, flight condition 1 — sea level, M = 0.204, power approach (230 gal tip tanks, 25% internal fuel, full flaps, gear down, 1.4 Vs)",
   "condition": {"altitude_m": 0, "airspeed_m_s": 69.4944, "mach": 0.204219, "alpha_deg": 2.14812, "residual_norm": 0},
   "modes": [

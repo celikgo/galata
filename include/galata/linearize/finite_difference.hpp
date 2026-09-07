@@ -36,9 +36,9 @@
 // ===========================================================================
 // * Not valid at a trim near 90 degrees of pitch. The Euler chart is singular
 //   there, and so is this. `chart_conditioning` reports |cos(theta)| so the
-//   caller can see it coming; below about 0.1 the result should not be
-//   believed. A vertical-climb trim needs a different chart, not a smaller
-//   step.
+//   caller can see it coming. The routine rejects the trim or any perturbation
+//   with conditioning below kMinimumChartConditioning. A vertical-climb trim
+//   needs a different chart, not a smaller step.
 //
 // * Not exact, and the error is reported rather than assumed. Every entry
 //   carries a Richardson truncation estimate. What that estimate CANNOT see is
@@ -50,7 +50,11 @@
 // * Only as good as the trim. Linearising about a point that is not an
 //   equilibrium gives a state-space model with a spurious constant term that
 //   the A matrix cannot represent, so the model is simply wrong. This is why
-//   trim_level throws rather than returning a best effort.
+//   trim_level throws rather than returning a best effort. This routine also
+//   recomputes the equilibrium using the supplied aircraft, state and controls;
+//   a mutable TrimPoint's recorded residual is not evidence of current validity.
+//   The temperature offset recorded in trim.atmosphere is retained throughout
+//   both the state and control perturbations.
 //
 // * C is the identity over the retained states and D is zero. Output
 //   selection — load factor, flight-path angle, a sensor at a station — is not
@@ -87,6 +91,10 @@ enum EulerStateIndex : int {
 
 inline constexpr int kEulerStateSize = 12;
 
+// Minimum supported |cos(pitch)|, dimensionless. The Euler-rate equations
+// divide by this quantity; enforce the documented chart envelope explicitly.
+inline constexpr double kMinimumChartConditioning = 0.1;
+
 // Names matching the indices above. These are what the modal classifier reads,
 // so they are part of the contract rather than a display detail.
 [[nodiscard]] std::vector<std::string> euler_state_names();
@@ -109,6 +117,11 @@ struct LinearisationOptions {
   std::vector<int> state_subset;
 
   bool report_truncation_error = true;
+
+  // Positive finite budget for the norm of all six dynamic accelerations,
+  // in m/s^2 and rad/s^2, as in LevelTrimRequest. Independent of the stored
+  // trim residual/tolerance: changing metadata must not validate a stale trim.
+  double equilibrium_tolerance = 1e-10;
 };
 
 struct Linearisation {
@@ -147,15 +160,21 @@ struct Linearisation {
   // The trim this was taken about, carried along so a result cannot be
   // separated from the condition it describes (charter rule 9).
   double trim_altitude_m = 0.0;
+  double trim_delta_isa_k = 0.0;  // K, temperature offset retained during differentiation
   double trim_airspeed_m_s = 0.0;
   double trim_alpha_rad = 0.0;
   double trim_residual_norm = 0.0;
+  double trim_residual_tolerance = 1e-10;  // m/s^2 and rad/s^2, actual acceptance budget
 
   // Packaged for the analysis layer.
   [[nodiscard]] model::LinearSystem to_linear_system(const std::string& description,
                                                      const std::string& citation) const;
 };
 
+// Requires finite state/controls, a unit quaternion, zero body rates (the
+// supported straight-line trim), supported chart conditioning and equilibrium
+// within options.equilibrium_tolerance. Invalid input throws before returning
+// any matrices. Flight-condition metadata and residuals are recomputed.
 [[nodiscard]] Linearisation linearize_finite_difference(const model::Aircraft& aircraft,
                                                         const trim::TrimPoint& trim,
                                                         const LinearisationOptions& options = {});

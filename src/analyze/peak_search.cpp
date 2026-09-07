@@ -2,6 +2,7 @@
 
 #include "peak_search.hpp"
 
+#include <cmath>
 #include <stdexcept>
 
 namespace galata::analyze::detail {
@@ -25,10 +26,17 @@ Peak find_peak(const std::function<double(double)>& f,
     throw std::invalid_argument("find_peak: refinement_iterations must be positive");
   }
 
+  const auto evaluate = [&f](double frequency) {
+    const double value = f(frequency);
+    if (!std::isfinite(value)) {
+      throw std::domain_error("find_peak: nonfinite evaluation");
+    }
+    return value;
+  };
   std::size_t peak_index = 0;
-  double peak_value = f(grid[0]);
+  double peak_value = evaluate(grid[0]);
   for (std::size_t index = 1; index < grid.size(); ++index) {
-    const double value = f(grid[index]);
+    const double value = evaluate(grid[index]);
     if (value > peak_value) {
       peak_value = value;
       peak_index = index;
@@ -46,14 +54,14 @@ Peak find_peak(const std::function<double(double)>& f,
       if (first >= second) {
         break;
       }
-      if (f(first) > f(second)) {
+      if (evaluate(first) > evaluate(second)) {
         high = second;
       } else {
         low = first;
       }
     }
     const double refined = 0.5 * (low + high);
-    const double refined_value = f(refined);
+    const double refined_value = evaluate(refined);
     if (refined_value > peak_value) {
       peak_value = refined_value;
       frequency = refined;

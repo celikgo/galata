@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+version: 1
+stages:
+  - id: model
+    capability: model.compile
+    input: {path: model.yaml}
+  - id: response
+    capability: sim.model
+    input:
+      model: {from: model}
+      step_s: 0.125
+      steps: 8
+      sample_stride: 3
+      csv_path: response.csv
+      evidence_path: evidence.json

@@ -2,6 +2,8 @@
 
 #include "galata/pipeline/value.hpp"
 
+#include <cmath>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -57,6 +59,9 @@ ValuePtr Value::boolean(bool value) {
 }
 
 ValuePtr Value::number(double value) {
+  if (!std::isfinite(value)) {
+    throw std::invalid_argument("pipeline numeric inputs must be finite");
+  }
   return ValueFactory::make(Kind::Number, [value](Value& v) { v.number_ = value; });
 }
 
@@ -65,15 +70,29 @@ ValuePtr Value::string(std::string value) {
 }
 
 ValuePtr Value::stage_reference(std::string stage_id) {
+  if (stage_id.empty()) {
+    throw std::invalid_argument("pipeline stage reference must be non-empty");
+  }
   return ValueFactory::make(Kind::StageReference,
                             [&stage_id](Value& v) { v.string_ = std::move(stage_id); });
 }
 
 ValuePtr Value::list(std::vector<ValuePtr> items) {
+  for (const auto& item : items) {
+    if (!item) {
+      throw std::invalid_argument("pipeline list entries require a Value; use Value::null()");
+    }
+  }
   return ValueFactory::make(Kind::List, [&items](Value& v) { v.list_ = std::move(items); });
 }
 
 ValuePtr Value::map(std::map<std::string, ValuePtr> entries) {
+  for (const auto& [key, item] : entries) {
+    (void)key;
+    if (!item) {
+      throw std::invalid_argument("pipeline map entries require a Value; use Value::null()");
+    }
+  }
   return ValueFactory::make(Kind::Map, [&entries](Value& v) { v.map_ = std::move(entries); });
 }
 
@@ -142,6 +161,15 @@ double Value::number_at(const std::string& key) const {
 double Value::number_at(const std::string& key, double fallback) const {
   const ValuePtr found = get(key);
   return found ? found->as_number() : fallback;
+}
+
+int Value::integer_at(const std::string& key, int fallback) const {
+  const double value = number_at(key, fallback);
+  if (!std::isfinite(value) || std::trunc(value) != value || value < std::numeric_limits<int>::min()
+      || value > std::numeric_limits<int>::max()) {
+    throw std::runtime_error("input '" + key + "' must be a finite integer in the int range");
+  }
+  return static_cast<int>(value);
 }
 
 std::string Value::string_at(const std::string& key) const {

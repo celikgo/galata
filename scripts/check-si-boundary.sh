@@ -25,8 +25,8 @@ cd "$(dirname "$0")/.."
 # job. include/galata/units.hpp is deliberately absent too — it is the definition
 # site, and it sits outside include/galata/core/ precisely so that this list does
 # not have to carve out an exception for it.
-CORE_DIRS="src/core src/model src/numerics src/trim src/linearize src/synth src/analyze src/sim src/ident"
-CORE_DIRS="$CORE_DIRS include/galata/core include/galata/model include/galata/numerics"
+CORE_DIRS="src/core src/modeling src/model src/numerics src/trim src/linearize src/synth src/analyze src/sim src/ident"
+CORE_DIRS="$CORE_DIRS include/galata/core include/galata/modeling include/galata/model include/galata/numerics"
 CORE_DIRS="$CORE_DIRS include/galata/trim include/galata/linearize include/galata/synth"
 CORE_DIRS="$CORE_DIRS include/galata/analyze include/galata/sim include/galata/ident"
 
@@ -49,11 +49,11 @@ for dir in $CORE_DIRS; do
     continue
   fi
 
-  files="$(git ls-files "$dir" | grep -E '\.(cpp|hpp|h|c|cc)$' || true)"
+  files="$(git ls-files --cached --others --exclude-standard -- "$dir" | LC_ALL=C sort -u | grep -E '\.(cpp|hpp|h|c|cc)$' || true)"
   [ -n "$files" ] || { skipped="$skipped $dir(empty)"; continue; }
 
   while IFS= read -r f; do
-    [ -n "$f" ] || continue
+    [ -n "$f" ] && [ -f "$f" ] || continue
     scanned=$((scanned + 1))
 
     # Lines carrying an explicit, reviewed exemption are excluded. The marker is

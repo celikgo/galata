@@ -22,7 +22,7 @@ int print_usage(std::ostream& out) {
   out << "galata — flight dynamics, control-law design and simulation\n"
          "\n"
          "usage:\n"
-         "  galata run <pipeline.yaml> [--output-dir <dir>]\n"
+         "  galata run <pipeline.yaml> [--output-dir <dir>] [--overwrite]\n"
          "  galata capabilities [--markdown]\n"
          "  galata --version\n"
          "  galata --help\n"
@@ -32,7 +32,11 @@ int print_usage(std::ostream& out) {
          "\n"
          "Relative paths inside a pipeline resolve against the pipeline file's own\n"
          "directory, so a study is runnable from anywhere. Outputs go to the pipeline's\n"
-         "directory unless --output-dir says otherwise.\n";
+         "directory unless --output-dir says otherwise; missing directories are created.\n"
+         "Output paths must stay inside that directory, without symlinks or '..'.\n"
+         "Existing reports are refused unless --overwrite is supplied. Each successful\n"
+         "run writes an immutable run-<SHA256>.json manifest with input snapshots,\n"
+         "output digests and build provenance.\n";
   return 0;
 }
 
@@ -87,6 +91,7 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
 
   std::string pipeline_path = arguments[0];
   std::string output_directory;
+  galata::pipeline::RunOptions options;
 
   for (std::size_t i = 1; i < arguments.size(); ++i) {
     if (arguments[i] == "--output-dir") {
@@ -95,6 +100,8 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
         return 2;
       }
       output_directory = arguments[++i];
+    } else if (arguments[i] == "--overwrite") {
+      options.overwrite = true;
     } else {
       std::cerr << "galata run: unrecognised argument '" << arguments[i] << "'\n";
       return 2;
@@ -133,10 +140,18 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
                 << std::flush;
     };
 
-    const galata::pipeline::RunResult result = galata::pipeline::run_pipeline(
-        pipeline, galata::pipeline::builtin_registry(), base_directory, output_directory, progress);
+    const galata::pipeline::RunResult result =
+        galata::pipeline::run_pipeline(pipeline,
+                                       galata::pipeline::builtin_registry(),
+                                       base_directory,
+                                       output_directory,
+                                       progress,
+                                       options);
 
     std::cout << "\n" << result.stages.size() << " stages completed.\n";
+    if (!result.manifest_path.empty()) {
+      std::cout << "Run manifest: " << result.manifest_path << "\n";
+    }
     return 0;
   } catch (const std::exception& error) {
     // The message already names the stage and capability; adding a prefix here
@@ -162,10 +177,14 @@ int main(int argc, char** argv) {
     return print_version();
   }
   if (command == "capabilities") {
-    if (arguments.size() > 1 && arguments[1] == "--markdown") {
+    if (arguments.size() == 2 && arguments[1] == "--markdown") {
       return list_capabilities_markdown();
     }
-    return list_capabilities();
+    if (arguments.size() == 1) {
+      return list_capabilities();
+    }
+    std::cerr << "galata capabilities: expected no arguments or --markdown\n";
+    return 2;
   }
   if (command == "run") {
     return run_pipeline_command(std::vector<std::string>(arguments.begin() + 1, arguments.end()));

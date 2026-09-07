@@ -6,11 +6,13 @@
 galata_find_eigen()
 
 add_library(galata_analyze
+  analysis_checks.cpp
   disk_margin.cpp
   peak_search.cpp
   sensitivity.cpp
   singular_values.cpp
   frequency_response.cpp
+  hinfinity.cpp
   margins.cpp
   modes.cpp
 )

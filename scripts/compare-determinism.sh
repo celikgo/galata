@@ -27,9 +27,12 @@ if [ ! -f "$a" ] || [ ! -f "$b" ]; then
 fi
 
 python3 - "$a" "$b" "$tolerance" <<'PY'
+import math
 import sys
 
 path_a, path_b, tolerance = sys.argv[1], sys.argv[2], float(sys.argv[3])
+if not math.isfinite(tolerance) or tolerance <= 0:
+    sys.exit("::error::tolerance must be finite and positive")
 
 # Keys beginning "tier1." are excluded from the cross-platform comparison.
 #
@@ -39,21 +42,32 @@ path_a, path_b, tolerance = sys.argv[1], sys.argv[2], float(sys.argv[3])
 # error. They are still held BYTE-IDENTICAL within a platform by tier 1, which
 # is the stronger claim anyway.
 def load(path):
-    values, skipped = {}, 0
+    values = {}
     with open(path) as handle:
         for line in handle:
             line = line.rstrip("\n")
             if not line or line.startswith("#"):
                 continue
-            key, _, value = line.partition("\t")
-            if key.startswith("tier1."):
-                skipped += 1
-                continue
-            values[key] = float(value)
-    return values, skipped
+            if line.count("\t") != 1:
+                raise ValueError(f"{path}: expected one tab between key and value")
+            key, value = line.split("\t")
+            # Mode labels include embedded ASCII spaces ("roll subsidence").
+            # Preserve those exact keys while refusing ambiguous padding and
+            # control/non-ASCII whitespace; a malformed key must not disappear.
+            if (not key or key != key.strip(" ") or key in values
+                    or any((character.isspace() and character != " ")
+                           or ord(character) < 32 or ord(character) == 127 for character in key)):
+                raise ValueError(f"{path}: empty, malformed or duplicate key {key!r}")
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError(f"{path}: nonfinite value at {key}")
+            values[key] = number
+    return values
 
-a, skipped_a = load(path_a)
-b, skipped_b = load(path_b)
+try:
+    a, b = load(path_a), load(path_b)
+except (OSError, ValueError) as error:
+    sys.exit(f"::error::{error}")
 
 only_a, only_b = set(a) - set(b), set(b) - set(a)
 if only_a or only_b:
@@ -62,6 +76,14 @@ if only_a or only_b:
     for key in sorted(only_b):
         print(f"::error::key present only in {path_b}: {key}")
     sys.exit(1)
+
+# Tier-1-only values may differ, but must still be finite and present in both
+# inputs. Validate their shape before excluding their numerical comparison.
+skipped_a = sum(key.startswith("tier1.") for key in a)
+a = {key: value for key, value in a.items() if not key.startswith("tier1.")}
+b = {key: value for key, value in b.items() if not key.startswith("tier1.")}
+if not a:
+    sys.exit("::error::no cross-platform values to compare")
 
 worst_key, worst = None, 0.0
 identical = 0
@@ -73,7 +95,7 @@ for key in sorted(a):
         identical += 1
         continue
     scale = max(abs(x), abs(y))
-    deviation = abs(x - y) / scale if scale > 0 else abs(x - y)
+    deviation = abs(x / scale - y / scale) if scale > 0 else 0.0
     if deviation > worst:
         worst, worst_key = deviation, key
     if deviation > tolerance:

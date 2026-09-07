@@ -14,8 +14,9 @@
 // equations: the two body-axis translational accelerations and the pitching
 // acceleration must all vanish. The lateral equations are satisfied identically
 // by the symmetry of the condition (no sideslip, wings level, no lateral
-// control), so they are not part of the system; including them would make it
-// rectangular and Newton would not apply.
+// control), so they are not part of the Newton system. A lateral aerodynamic
+// reference offset is rejected, and all six acceleration equations are checked
+// after the solve before any trim is returned.
 //
 // The kinematic constraint is theta = alpha + gamma: wings level with no
 // sideslip, the velocity vector lies in the plane of symmetry at gamma to the
@@ -100,6 +101,7 @@ struct TrimPoint {
 
   // Charter rule 9: a number arrives with the evidence for believing it.
   double residual_norm = 0.0;
+  double residual_tolerance = 1e-10;  // acceleration norm budget used for this trim
 
   // Condition number of the trim Jacobian.
   //

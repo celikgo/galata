@@ -22,9 +22,9 @@
 // with the rates non-dimensionalised as ADR-0002 and Etkin define them:
 // phat = p b / 2V, qhat = q c / 2V, rhat = r b / 2V, ahat = alphadot c / 2V.
 //
-// Lift and drag are in WIND axes and are rotated into body axes through
-// dcm_body_from_wind, so the sign convention is the one ADR-0002 already
-// fixes rather than a second one written out here.
+// Lift and drag are in STABILITY axes and are rotated into body axes through
+// dcm_body_from_stability. Side force is already body-axis: including it in a
+// full wind-axis rotation would double-count the lateral effect of drag.
 //
 // ===========================================================================
 // WHAT THIS IS NOT
@@ -81,7 +81,7 @@ struct AeroDerivatives {
   double reference_alpha_rad = 0.0;  // rad
   double reference_mach = 0.0;       // dimensionless
 
-  // Longitudinal, wind axes for the force coefficients.
+  // Longitudinal, stability axes for the force coefficients.
   double lift_ref = 0.0;             // C_L at the reference condition
   double drag_ref = 0.0;             // C_D at the reference condition
   double pitching_moment_ref = 0.0;  // C_m at the reference condition
@@ -178,9 +178,11 @@ class Aircraft {
   std::string description;
   std::string citation;
 
-  // Throws std::invalid_argument on a model that cannot be simulated. This
-  // includes an alpha-dot force derivative, which would make the model
-  // implicit — see the header's "WHAT THIS IS NOT".
+  // Throws std::invalid_argument on non-finite numeric fields or a model that
+  // cannot be simulated. This includes an alpha-dot force derivative, which
+  // would make the model implicit — see the header's "WHAT THIS IS NOT".
+  // Call after direct C++ edits; derivative() does not repeat this model-level
+  // validation in the integration hot loop.
   void validate() const;
 
   // Aerodynamic and propulsive wrench about the CG, body axes.
@@ -213,6 +215,10 @@ class Aircraft {
 
 // Reads an aircraft from a YAML file. Units in the file are SI, per ADR-0003.
 [[nodiscard]] Aircraft load_aircraft(const std::string& path);
+
+// Parse exactly these bytes; the pipeline records their digest before parsing.
+[[nodiscard]] Aircraft parse_aircraft(const std::string& bytes,
+                                      const std::string& source_name = "model");
 
 }  // namespace galata::model
 

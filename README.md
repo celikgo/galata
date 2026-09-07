@@ -3,23 +3,26 @@
 Flight dynamics, control-law design and simulation — reproducibly, from a file
 you can read, with every number traceable to the routine that produced it.
 
-Today it takes a nonlinear aircraft model, **trims** it, **linearises** about
-that trim, and produces a **labelled** modal table — short period, phugoid,
-Dutch roll, roll subsidence and spiral, identified by eigenvector participation
-rather than by frequency. From non-dimensional derivatives and geometry alone,
-it reproduces NASA CR-2144's published dimensional derivatives to 0.26% and its
-published modes to 1.0%.
+galata is an **offline engineering workbench**. A YAML study can trim and
+linearise a local aircraft model, design continuous LQR state feedback, analyse
+the closed loop, simulate linear and nonlinear responses with explicit actuator
+limits, and write Markdown, HTML and CSV reports with a run manifest.
 
-It evaluates frequency response and reports all four margin types — gain,
-phase, delay and disk — with every crossover and the frequency at which it
-occurs, gated against closed-form transfer functions and a published worked
-example. For multivariable loops it computes principal gains and the
-sensitivity peaks M_S and M_T, which is what catches a design whose
-per-channel margins look comfortable and whose loop is not.
+The analysis includes labelled aircraft modes, frequency response, gain, phase,
+delay and disk margins, and Hamiltonian H-infinity norm brackets for stable
+systems. Published-reference comparisons and numerical checks are recorded
+separately in the [verification report](docs/VERIFICATION.md).
 
-Control synthesis and the nonlinear simulation loop are the point of the
-project and are **not built yet**. The status table below is the authority on
-what exists; the roadmap is the authority on what is intended.
+It is usable for supervised, offline aviation and defence engineering studies
+within these limits. It is **not a qualified tool, an onboard controller, or a
+validated model of an arbitrary aircraft**. The [operating guide](docs/WORKBENCH.md)
+explains the supported workflow and the checks a result still needs.
+
+An experimental [continuous block-model profile](docs/MODEL_FILES.md) now supports
+headless compilation and simulation of scalar feedback diagrams. The
+[working example](examples/continuous-feedback/README.md) records model identity
+and scoped run evidence. Desktop delivery is planned for macOS first, then Linux;
+see the [M1 implementation record](docs/product/M1_IMPLEMENTATION.md).
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
@@ -93,7 +96,7 @@ cmake --preset dev
 cmake --build --preset dev
 
 ctest --preset dev -L validation          # fails if any deviation above exceeds its gate
-./build/dev/src/cli/galata run examples/nt33a-trim-and-linearise/study.yaml
+./build/dev/src/cli/galata run examples/nt33a-trim-and-linearise/study.yaml --output-dir build/trim-study
 ```
 
 The tier carries the ctest **label** `validation`, so `-L` is the flag.
@@ -126,37 +129,26 @@ regression lock holds the gap at its measured size meanwhile.
 
 ---
 
-## Status: 0.2.0 — trim, linearise, analyse
+## Status: 0.3.0 — bounded offline workbench
 
-v0.1 was the spine: trim, linearise, and a classified modal table, validated
-against a published NASA report and driven from a YAML file by a CLI. v0.2 adds
-the frequency-domain tier on top of it — frequency response, all four margin
-types, the sensitivity peaks M_S and M_T, and principal gains for multivariable
-loops — each gated against a closed-form transfer function or a published
-worked example.
-
-The [charter](docs/CHARTER.md) requires that CI exist before the first feature
-and that no capability be documented before it works, so the gates were built
-first and the physics landed against them. What exists today:
+The trim, linearisation and frequency-analysis workflow now connects to control
+synthesis and time-domain simulation. This is a usable CLI and C++ library
+release with a deliberately limited model and controller scope. It does not
+complete the broader desktop, hardware or v1.0 plans in the
+[roadmap](docs/ROADMAP.md).
 
 | Surface | State |
 |---|---|
-| Build system (CMake + vcpkg, four platform/compiler combinations) | working |
-| CI: format, build, test, version consistency, SI boundary, doc links | working |
-| Version single-source-of-truth, with provenance in the build identification | working |
-| ADRs 0001–0007: ABI relationship, conventions, units, determinism, versioning, EOM reference point, reference-value rights | written |
-| Frames, quaternions, state vector, unit boundary (ADR-0002, ADR-0003) | implemented, property-tested |
-| U.S. Standard Atmosphere 1976, −5000 m to 86 km | implemented and **validated** against the published tables |
-| Fixed-step RK4, with Richardson step-size study | implemented, order verified against closed-form solutions |
-| Nonlinear 6-DOF rigid body, general inertia tensor | implemented and **validated** against closed-form solutions of Euler's equations |
-| YAML pipeline runner and the `galata` CLI | working |
-| Runnable examples, executed by the test suite | working (five, four of them executed end to end) |
-| Determinism: bit-identical repeat runs, cross-platform bound measured | working |
-| Nonlinear aircraft model from a derivative buildup | implemented and **validated** |
-| `trim.level` — Newton on a square residual, fixed iteration count | implemented and **validated** |
-| `linearize.finitediff` — central differences with Richardson error estimates | implemented and **validated** |
-| Frequency response, gain/phase/delay/disk margins, M_S and M_T, principal gains | implemented and **validated** |
-| Everything else in §"What it will do" below | **not built** |
+| CLI, strict YAML inputs, contained report outputs and input-snapshot manifests | implemented; integration-tested |
+| Installable C++20 libraries and CMake package | implemented; installed-consumer check |
+| Frames, ISA atmosphere, fixed-step RK4 and general-inertia rigid-body dynamics | implemented; see the V&V report for evidence and scope |
+| Local derivative aircraft, straight-line trim, finite-difference linearisation and mode classification | implemented; published NT-33A flight-condition comparison |
+| Frequency response and sampled margins, sensitivity and principal gains | implemented; reference comparisons retain their frequency-search limitations |
+| CARE, continuous LQR, explicit-gain filtered PID and linear interconnections | implemented; solver evidence and controller assumptions reported separately |
+| Hamiltonian H-infinity, S/T norm and SISO disk-size brackets | implemented; analytic checks, numerical reliability limits, no interval proof |
+| Linear and local nonlinear simulation, with four bounded first-order actuators | implemented; analytic and convergence tests, no flight-test validation |
+| Markdown and self-contained HTML tables, trajectory CSV and run provenance | implemented; integration-tested |
+| Desktop GUI, plugin ABI, hardware interfaces and onboard deployment | not implemented |
 
 The table above is maintained by hand and checked in review. The capability
 table below is not: it is generated from the registry the CLI dispatches
@@ -168,16 +160,31 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 <!-- BEGIN GENERATED CAPABILITY TABLE -->
 | Capability | What it does | Produces | State |
 |---|---|---|---|
-| `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with the guaranteed gain and phase range and a destabilising perturbation on the boundary | `disk_margin` | implemented and validated |
+| `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with estimated gain and phase ranges and a candidate boundary perturbation | `disk_margin` | implemented and validated |
 | `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
+| `analyze.hinfnorm` | Bound a stable continuous-time H-infinity norm using Hamiltonian level tests | `hinfinity_norm` | implemented, unvalidated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
+| `analyze.robust_bounds` | Bound S/T norms and SISO disk size for an internally stable feedback loop | `robust_bounds` | implemented, unvalidated |
 | `analyze.sensitivity` | Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with negative unit feedback, and the frequencies at which they occur | `sensitivity_peaks` | implemented and validated |
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
+| `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
+| `model.compile` | Compile the continuous scalar model profile with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
+| `model.control_system` | Extract the closed loop or plant-input return ratio of an LQR design | `linear_system` | implemented, unvalidated |
+| `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
+| `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
+| `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
+| `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
+| `sim.linear` | Integrate a continuous linear model with a constant input and fixed-step RK4 | `linear_trajectory` | implemented, unvalidated |
+| `sim.model` | Run a compiled continuous scalar model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
+| `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
+| `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
+| `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
+| `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->
 
@@ -186,32 +193,36 @@ published reference; see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 *implemented, unvalidated* means it works and is tested, but no published
 reference has been compared against.
 
-## What this is NOT
+## Scope and limitations
 
-- **Not a certified tool.** Nothing here is DO-178C qualified. It must never be
-  used as evidence in a certification package.
-- **Not a MATLAB replacement.** It covers one workflow well, not a general
-  numerical platform.
-- **Not a flight simulator.** No scenery, no weather rendering, no cockpit, no
-  X-Plane rivalry. The 3-D view is an engineering visualisation, not
-  entertainment.
-- **Not a CFD or panel code.** Aerodynamics come from tabulated or polynomial
-  coefficient models supplied by the user or shipped as cited reference data.
-  The tool never computes aerodynamic coefficients from geometry.
-- **Not an autopilot.** It designs and analyses control laws and can export
-  them; it does not fly real aircraft and ships no airworthy code.
+- **No qualification or airworthiness claim.** The repository provides no tool
+  qualification package or approved certification evidence. Using a result in
+  an assurance process requires application-specific review and independently
+  established evidence.
+- **Local aircraft dynamics.** The derivative model has no stall, Mach schedule,
+  engine map, structural flexibility or validated full flight envelope. The
+  nonlinear driver stops outside its advisory angle-of-attack/Mach guards;
+  staying inside them does not establish model validity.
+- **Continuous control studies.** LQR assumes exact state feedback. PID accepts
+  supplied gains; it does not tune them. Sensors, sampled control, estimator
+  design and flight-code generation are outside this release.
+- **CLI and library.** There is no desktop application, 3-D view, hardware link
+  or onboard execution support.
+
+The [operating guide](docs/WORKBENCH.md) distinguishes numerical convergence,
+published-reference agreement and aircraft-specific validation.
 
 ## Who it is for
 
-Flight control engineers, GNC engineers, controls graduate students and UAV
-autopilot developers — people who currently reach for MATLAB, Simulink, Control
-System Toolbox and Aerospace Blockset to go from trim to linearisation to
-synthesis to analysis to nonlinear verification.
+Flight-control and GNC engineers, controls researchers, students and autopilot
+developers conducting supervised offline studies. Aviation or defence use is
+bounded by the same model, numerical and assurance limits; an industry label
+does not extend the evidence supplied with the tool.
 
 ## Quickstart
 
-Sixty seconds, and it works today. It builds the library, runs the test suite,
-and then runs a real study.
+Build the library and CLI, run the tests, then execute the complete local
+control-design study:
 
 ```bash
 git clone https://github.com/celikgo/galata.git
@@ -224,42 +235,31 @@ cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 
-# Then run the shipped study: it trims a nonlinear NT-33A, linearises it,
-# and reports all five classical modes — every number checked against a
-# published NASA report.
-./build/dev/src/cli/galata run examples/nt33a-trim-and-linearise/study.yaml
+# Trim, design, analyse, simulate, and write reports into a separate directory.
+./build/dev/src/cli/galata run examples/nt33a-control-design/study.yaml --output-dir build/control-study
 ```
 
-That writes `trim-and-modes.md` next to the study: the trim with its residual
-and Jacobian conditioning, the state matrices, and the modal tables with the
-participation factors the labelling rests on. See
-[`examples/nt33a-trim-and-linearise/`](examples/nt33a-trim-and-linearise/README.md).
+The output includes control-design Markdown and HTML reports, linear and
+nonlinear trajectory CSV files, and a content-addressed run manifest. Existing
+reports require an explicit `--overwrite`. The example's controller costs and
+actuator limits are illustrative inputs, not NT-33A hardware specifications.
+See the [example](examples/nt33a-control-design/README.md),
+[study-file contract](docs/STUDY_FILES.md) and
+[operating guide](docs/WORKBENCH.md) for interpreting and repeating the run.
 
 `galata capabilities` lists what your build can do and how far each capability
 has been checked.
 
-Requires CMake 3.24+, Ninja, a C++20 compiler and a vcpkg checkout. Tested on
+Requires CMake 3.25+, Python 3.9+, Ninja, a C++20 compiler and a vcpkg checkout. Tested on
 Linux (GCC and Clang), macOS (AppleClang) and Windows (MSVC) — see
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact matrix.
 
-## What it will do
+## Further development
 
-This section describes the intended product. **Nothing named here is
-implemented** — the two capabilities that used to be listed as intentions,
-modal classification by eigenvector participation and the four margin types,
-have been built and have moved up into the Status table. This section is kept
-so that the decisions recorded in `docs/adr/` have a stated purpose. The Status
-table above is what actually works.
-
-The workflow is trim → linearise → analyse → synthesise → verify, expressed as a
-YAML pipeline that the CLI and (later) the desktop application both execute, so
-that a study is a file rather than a sequence of clicks. Still to come: a
-nonlinear 6-DOF simulation with actuator rate limits in the loop, MIL-STD-1797A
-handling-qualities assessment, LQR and Riccati synthesis, a stable C plugin ABI
-for user-supplied aerodynamic and sensor models, and an AI layer that composes
-and runs these pipelines without ever producing a number itself.
-
-Milestones and their contents are in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+The [roadmap](docs/ROADMAP.md) separates this release from future work:
+broader validated aircraft models, sampled controllers and estimators, handling
+qualities, gain scheduling, hardware integration, a desktop application and a
+stable plugin interface. These are plans, not features of the offline workbench.
 
 ## Engineering rules
 
@@ -323,9 +323,11 @@ no content that is not in the repository.
   checked against a published document, the agreement measured, and what is
   explicitly unvalidated. Generated by CI from the code, not written by hand.
 - [`docs/TESTING.md`](docs/TESTING.md) — the test tiers and what each proves
+- [`docs/WORKBENCH.md`](docs/WORKBENCH.md) — running, reviewing and embedding an offline design study
+- [`docs/STUDY_FILES.md`](docs/STUDY_FILES.md) — accepted YAML, safe output paths and run-record contents
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
-- [`docs/rfc/`](docs/rfc/README.md) — designs proposed but not built, each one written around how
-  it would be verified. [RFC-0001](docs/rfc/0001-control-synthesis.md) is control synthesis.
+- [`docs/rfc/`](docs/rfc/README.md) — design records with implementation status;
+  [RFC-0001](docs/rfc/0001-control-synthesis.md) covers control synthesis
 - [The NT-33A flight-condition report](https://celikgo.github.io/galata/reports/nt33a-fc1.html)
   — the trim point, the modal table, the pole map and the margins for the reference case, drawn
   from a run and diffed by CI. Committed at

@@ -34,14 +34,8 @@ Eigen::MatrixXd difference_jacobian(const VectorFunction& f,
     forward(j) = x(j) + steps(j);
     backward(j) = x(j) - steps(j);
     const double actual = forward(j) - backward(j);
-
-    const Eigen::VectorXd high = f(forward);
-    const Eigen::VectorXd low = f(backward);
-    if (high.size() != low.size()) {
-      throw std::runtime_error("central_difference_jacobian: f returned different sizes");
-    }
-    if (jacobian.size() == 0) {
-      jacobian.resize(high.size(), x.size());
+    if (!forward.allFinite() || !backward.allFinite() || !std::isfinite(actual)) {
+      throw std::runtime_error("central_difference_jacobian: the perturbation overflowed");
     }
     if (actual == 0.0) {
       std::ostringstream message;
@@ -50,7 +44,24 @@ Eigen::MatrixXd difference_jacobian(const VectorFunction& f,
               << ". The step underflowed relative to the value; raise absolute_step.";
       throw std::runtime_error(message.str());
     }
+
+    const Eigen::VectorXd high = f(forward);
+    const Eigen::VectorXd low = f(backward);
+    if (high.size() == 0 || high.size() != low.size()
+        || (j != 0 && high.size() != jacobian.rows())) {
+      throw std::runtime_error(
+          "central_difference_jacobian: f must return a fixed non-empty dimension");
+    }
+    if (!high.allFinite() || !low.allFinite()) {
+      throw std::runtime_error("central_difference_jacobian: f returned a non-finite value");
+    }
+    if (j == 0) {
+      jacobian.resize(high.size(), x.size());
+    }
     jacobian.col(j) = (high - low) / actual;
+    if (!jacobian.col(j).allFinite()) {
+      throw std::runtime_error("central_difference_jacobian: the difference quotient overflowed");
+    }
   }
   return jacobian;
 }
@@ -60,8 +71,15 @@ Eigen::MatrixXd difference_jacobian(const VectorFunction& f,
 Jacobian central_difference_jacobian(const VectorFunction& f,
                                      const Eigen::VectorXd& x,
                                      const JacobianOptions& options) {
-  if (x.size() == 0) {
-    throw std::invalid_argument("central_difference_jacobian: x is empty");
+  if (!f || x.size() == 0 || !x.allFinite()) {
+    throw std::invalid_argument("central_difference_jacobian: f is empty or x is empty/non-finite");
+  }
+  if (!std::isfinite(options.relative_step) || options.relative_step < 0.0
+      || !std::isfinite(options.absolute_step) || options.absolute_step < 0.0
+      || !options.absolute_step_per_component.allFinite()
+      || (options.absolute_step_per_component.array() < 0.0).any()) {
+    throw std::invalid_argument(
+        "central_difference_jacobian: step options must be finite and non-negative");
   }
   if (options.absolute_step_per_component.size() != 0
       && options.absolute_step_per_component.size() != x.size()) {
@@ -76,6 +94,9 @@ Jacobian central_difference_jacobian(const VectorFunction& f,
                              : options.absolute_step;
     steps(j) = std::fmax(options.relative_step * std::fabs(x(j)), floor);
   }
+  if (!steps.allFinite()) {
+    throw std::runtime_error("central_difference_jacobian: a perturbation size overflowed");
+  }
 
   Jacobian result;
   result.steps = steps;
@@ -87,6 +108,10 @@ Jacobian central_difference_jacobian(const VectorFunction& f,
 
   const Eigen::MatrixXd coarse = difference_jacobian(f, x, steps);
   const Eigen::MatrixXd fine = difference_jacobian(f, x, 0.5 * steps);
+  if (coarse.rows() != fine.rows()) {
+    throw std::runtime_error(
+        "central_difference_jacobian: f changed dimension between perturbation sizes");
+  }
 
   // Richardson, order p = 2. The half-step Jacobian is returned as the answer
   // and its error is (coarse - fine) / 3 — a quarter of the full-step error,
@@ -94,6 +119,9 @@ Jacobian central_difference_jacobian(const VectorFunction& f,
   // the half-step answer would overstate it by four.
   result.value = fine;
   result.truncation_estimate = (coarse - fine).cwiseAbs() / 3.0;
+  if (!result.truncation_estimate.allFinite()) {
+    throw std::runtime_error("central_difference_jacobian: truncation estimate overflowed");
+  }
   result.steps = 0.5 * steps;
 
   double worst = 0.0;
@@ -107,6 +135,10 @@ Jacobian central_difference_jacobian(const VectorFunction& f,
         worst = std::fmax(worst, result.truncation_estimate(i, j) / scale);
       }
     }
+  }
+  if (!std::isfinite(worst)) {
+    throw std::runtime_error(
+        "central_difference_jacobian: relative truncation estimate overflowed");
   }
   result.worst_relative_truncation = worst;
   return result;

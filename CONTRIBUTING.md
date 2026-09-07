@@ -92,3 +92,28 @@ which is why it is written down rather than inferred.
 Conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, `build:`,
 `refactor:`). One logical change per commit. A commit that adds a capability
 adds its CI gate and its tests in the same commit — charter rule 1.
+
+## Numerical changes and architecture
+
+Before changing a public numerical contract, record its assumptions, units,
+accepted domain, failure behavior and evidence type in an ADR. Include the
+migration needed by library callers. Use the [ADR template](docs/adr/0000-template.md)
+and [numerical evidence decision](docs/adr/0008-numerical-evidence-authority.md).
+A pipeline execution success is not a numerical reliability or engineering
+acceptance decision.
+
+For a numerical defect, first retain an independent counterexample: an analytic
+identity, a cited reference or a separately derived calculation. Test the direct
+C++ entry point and the user-visible report when both expose the defect. Ask a
+reviewer who did not implement the fix to check its assumptions and failure
+cases. Do not loosen a published discrepancy lock or turn a current output into
+its own reference value.
+
+Run `python3 -m unittest discover -s tests/scripts` when changing build,
+provenance or release gates. Include negative cases: missing checks, a different
+commit, stale configuration or altered input must be refused. Release work is
+reviewed against [ADR-0009](docs/adr/0009-release-evidence-and-source-identity.md).
+
+Future block libraries and model examples must document their redistribution
+license and source. The Simulink-style roadmap describes compatibility goals;
+it does not grant permission to copy proprietary blocks, models or vendor code.

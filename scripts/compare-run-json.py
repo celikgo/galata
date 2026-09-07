@@ -38,8 +38,31 @@ ABSOLUTE_FLOOR = 1e-9
 if len(sys.argv) != 3:
     sys.exit(f"usage: {sys.argv[0]} <committed.json> <generated.json>")
 
-committed = json.loads(open(sys.argv[1], encoding="utf-8").read())
-generated = json.loads(open(sys.argv[2], encoding="utf-8").read())
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def reject_constant(value):
+    raise ValueError(f"nonfinite JSON constant: {value}")
+
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        committed = json.load(handle, object_pairs_hook=unique_object,
+                              parse_constant=reject_constant)
+    with open(sys.argv[2], encoding="utf-8") as handle:
+        generated = json.load(handle, object_pairs_hook=unique_object,
+                              parse_constant=reject_constant)
+except (OSError, ValueError) as error:
+    sys.exit(f"invalid run record: {error}")
+
+if any(not isinstance(record, dict) or not record for record in (committed, generated)):
+    sys.exit("invalid run record: expected a nonempty object")
 
 problems = []
 worst, worst_at = 0.0, ""
@@ -60,16 +83,17 @@ def walk(a, b, path):
         for i, (u, v) in enumerate(zip(a, b)):
             walk(u, v, f"{path}[{i}]")
     elif isinstance(a, bool) or isinstance(b, bool) or a is None or b is None:
-        if a != b:
+        if type(a) is not type(b) or a != b:
             problems.append(f"{path}: {a!r} vs {b!r}")
     elif isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        if math.isnan(a) or math.isnan(b):
-            problems.append(f"{path}: not a number ({a} vs {b})")
+        if any(isinstance(value, float) and not math.isfinite(value) for value in (a, b)):
+            problems.append(f"{path}: nonfinite number ({a} vs {b})")
             return
         delta = abs(a - b)
         if delta <= ABSOLUTE_FLOOR:
             return
-        relative = delta / max(abs(a), abs(b))
+        scale = max(abs(a), abs(b))
+        relative = abs(a / scale - b / scale)
         if relative > worst:
             worst, worst_at = relative, path
         if relative > RELATIVE_TOLERANCE:
@@ -77,7 +101,7 @@ def walk(a, b, path):
     else:
         # Strings: the mode LABELS live here, and a relabelled mode is exactly
         # the failure this gate is for. Compared exactly, on purpose.
-        if a != b:
+        if type(a) is not type(b) or a != b:
             problems.append(f"{path}: {a!r} vs {b!r}")
 
 

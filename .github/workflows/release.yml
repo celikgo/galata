@@ -5,8 +5,8 @@
 # Charter rule 2 applies to a release asset exactly as it applies to a document:
 # a binary attached to a release is a claim that this code, at this tag, builds
 # and passes its own gates on that platform. So this workflow does not just
-# compile — it runs the full test suite on each platform and refuses to package
-# anything that fails. An artefact that shipped without its tests run is a
+# compile — it invokes the complete CI graph for one resolved commit and refuses
+# to package anything without that exact source evidence. An artefact that shipped without its tests run is a
 # claim nobody checked.
 #
 # The archive carries the models and the examples alongside the binary, because
@@ -17,8 +17,9 @@
 #   * pushing a tag matching v* — the normal path for a new release;
 #   * workflow_dispatch with a tag name — the backfill path, used to attach
 #     assets to a tag that was published before this workflow existed. The
-#     workflow definition comes from the default branch; the SOURCE comes from
-#     the tag, so the binary is built from what that tag actually contains.
+#     workflow definition comes from the selected dispatch branch; the SOURCE
+#     is resolved from the tag once. Tags predating the required gate scripts
+#     are unsupported rather than silently packaged without the current checks.
 
 name: Release
 
@@ -28,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to build and attach assets to (e.g. v0.1.0)'
+        description: 'Existing version tag containing the current assurance infrastructure'
         required: true
         type: string
 
@@ -50,33 +51,58 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
+      source_sha: ${{ steps.pick.outputs.source_sha }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - id: pick
-        run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          case "$tag" in
-            v*) ;;
-            *) echo "::error::'$tag' is not a v-prefixed tag"; exit 1 ;;
-          esac
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Building release assets for $tag"
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 scripts/resolve-release.py "$REQUESTED_TAG"
+
+  verify-ci:
+    name: Complete CI for release source
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
 
   package:
     name: Package (${{ matrix.name }})
-    needs: resolve
+    needs: [resolve, verify-ci]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64,  os: ubuntu-24.04,   preset: ci-linux-gcc, exe: '',     archive: tar.gz }
-          - { name: macos-arm64,   os: macos-14,       preset: ci-macos,     exe: '',     archive: tar.gz }
-          - { name: windows-x86_64, os: windows-2022,  preset: ci-windows,   exe: '.exe', archive: zip }
+          - { name: linux-x86_64,   os: ubuntu-24.04,  preset: ci-linux-gcc }
+          - { name: macos-arm64,    os: macos-14,      preset: ci-macos }
+          - { name: windows-x86_64, os: windows-2022, preset: ci-windows }
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve.outputs.tag }}
+          ref: ${{ needs.resolve.outputs.source_sha }}
+
+      - name: Package only the CI-verified source
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+          VERIFIED_SOURCE_SHA: ${{ needs.verify-ci.outputs.source_sha }}
+        run: python3 scripts/check-ci-source.py
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-evidence-${{ needs.resolve.outputs.source_sha }}
+          path: ${{ runner.temp }}/ci-evidence
+
+      - name: Release tag names the source version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: test "$(cat VERSION)" = "${RELEASE_TAG#v}"
 
       - uses: ./.github/actions/setup-cpp
         with:
@@ -92,151 +118,58 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
-      - name: Stage the archive contents
+      - name: Package current sources and smoke-test the extracted CLI
         shell: bash
-        run: |
-          set -euo pipefail
-          tag='${{ needs.resolve.outputs.tag }}'
-          stage="galata-${tag}-${{ matrix.name }}"
-          bin="build/${{ matrix.preset }}/src/cli/galata${{ matrix.exe }}"
-
-          test -x "$bin" || { echo "::error::$bin was not built"; exit 1; }
-
-          # The commit the SOURCE came from. github.sha is the ref the workflow
-          # was dispatched from, which on the backfill path is the default
-          # branch, not the tag — printing it would misattribute the build.
-          commit="$(git rev-parse HEAD)"
-
-          mkdir -p "$stage/bin"
-          cp "$bin" "$stage/bin/"
-
-          # Windows links the vcpkg dependencies dynamically (the x64-windows
-          # triplet is a shared build), and the CMake toolchain deploys the DLLs
-          # next to the executable rather than into it. Copying only the .exe
-          # produces an archive whose binary cannot start at all — which is what
-          # the staged smoke test below caught. Linux and macOS need nothing
-          # here: their vcpkg triplets are static.
-          if [ -n "${{ matrix.exe }}" ]; then
-            bindir="$(dirname "$bin")"
-            echo "runtime files next to the executable:"
-            ls -la "$bindir"
-            found=0
-            for dll in "$bindir"/*.dll; do
-              [ -e "$dll" ] || continue
-              cp "$dll" "$stage/bin/"
-              found=$((found + 1))
-            done
-            # Fall back to the vcpkg install tree if the toolchain did not
-            # deploy them, rather than shipping an archive that cannot run.
-            if [ "$found" -eq 0 ]; then
-              for dll in build/${{ matrix.preset }}/vcpkg_installed/*/bin/*.dll; do
-                [ -e "$dll" ] || continue
-                cp "$dll" "$stage/bin/"
-                found=$((found + 1))
-              done
-            fi
-            echo "staged $found DLL(s) alongside the executable"
-          fi
-
-          # Licence and attribution travel with the binary — Apache-2.0 section 4
-          # requires it of anyone redistributing, and that includes us.
-          cp LICENSE NOTICE README.md VERSION "$stage/"
-
-          # The quickstart's study resolves ../../models/... relative to itself,
-          # so both trees must keep their layout.
-          cp -R examples "$stage/examples"
-          cp -R models "$stage/models"
-          cp -R docs "$stage/docs"
-
-          # A one-page orientation for someone who downloaded a tarball rather
-          # than cloning. It states only what the archive contains.
-          cat > "$stage/RUNNING.txt" <<TXT
-          galata ${tag} — ${{ matrix.name }}
-
-          bin/galata${{ matrix.exe }} is a self-contained command-line binary.
-
-            bin/galata${{ matrix.exe }} --version
-            bin/galata${{ matrix.exe }} capabilities
-            bin/galata${{ matrix.exe }} run examples/nt33a-trim-and-linearise/study.yaml
-
-          'capabilities' lists what this build can do and how far each capability
-          has been checked against a published reference. docs/VERIFICATION.md is
-          the V&V report: what was compared, against which document, and what is
-          explicitly unvalidated.
-
-          Built from tag ${tag}, commit ${commit}, on ${{ matrix.os }}.
-          This binary is not DO-178C qualified and must never be used as evidence
-          in a certification package.
-
-          Apache-2.0. See LICENSE and NOTICE.
-          TXT
-
-          echo "STAGE=$stage" >> "$GITHUB_ENV"
-
-      # Smoke-test the staged tree, not the build tree: this is the thing a
-      # person actually downloads, and a packaging mistake that leaves the
-      # example unable to find its model would otherwise ship silently.
-      - name: The staged archive runs
-        shell: bash
-        working-directory: ${{ env.STAGE }}
-        run: |
-          set -euo pipefail
-          "./bin/galata${{ matrix.exe }}" --version
-          "./bin/galata${{ matrix.exe }}" capabilities
-          "./bin/galata${{ matrix.exe }}" run \
-            examples/nt33a-trim-and-linearise/study.yaml --output-dir .
-          test -s trim-and-modes.md
-          rm -f trim-and-modes.md
-
-      - name: Archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ '${{ matrix.archive }}' = 'zip' ]; then
-            7z a -tzip "${STAGE}.zip" "${STAGE}" >/dev/null
-            asset="${STAGE}.zip"
-          else
-            tar --create --gzip --file "${STAGE}.tar.gz" "${STAGE}"
-            asset="${STAGE}.tar.gz"
-          fi
-          # Checksums are generated here, on the machine that built the file,
-          # so they cover the artefact as uploaded.
-          if command -v sha256sum >/dev/null; then
-            sha256sum "$asset" > "${asset}.sha256"
-          else
-            shasum -a 256 "$asset" > "${asset}.sha256"
-          fi
-          cat "${asset}.sha256"
-          echo "ASSET=$asset" >> "$GITHUB_ENV"
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: >-
+          python3 scripts/package-release.py "build/${{ matrix.preset }}"
+          --output-dir release-assets --release-sha "$RELEASE_SOURCE_SHA"
+          --ci-evidence "$RUNNER_TEMP/ci-evidence/ci-evidence.json"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
-          path: |
-            ${{ env.ASSET }}
-            ${{ env.ASSET }}.sha256
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 7
 
   publish:
     name: Attach assets to the release
-    needs: [resolve, package]
+    needs: [resolve, verify-ci, package]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-evidence-${{ needs.resolve.outputs.source_sha }}
+          path: ${{ runner.temp }}/ci-evidence
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           merge-multiple: true
           path: assets
 
+      - name: Verify all package identities against complete CI evidence
+        env:
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
+        run: >-
+          python3 scripts/check-release-evidence.py assets
+          "$RUNNER_TEMP/ci-evidence/ci-evidence.json" "$RELEASE_SOURCE_SHA"
+
       - name: One checksum file for the whole release
         working-directory: assets
         run: |
           set -euo pipefail
-          cat ./*.sha256 | sort -k2 > SHA256SUMS.txt
+          cp "$RUNNER_TEMP/ci-evidence/ci-evidence.json" CI-EVIDENCE.json
           rm -f ./*.sha256
+          sha256sum ./* | sort -k2 > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" SHA256SUMS.txt
           cat SHA256SUMS.txt
           ls -la
 
@@ -248,6 +181,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_SOURCE_SHA: ${{ needs.resolve.outputs.source_sha }}
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -256,6 +190,8 @@ jobs:
             echo "  gh release create $TAG --title ... --notes-file ..."
             exit 1
           fi
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          python3 scripts/resolve-release.py "$TAG" --expected-sha "$RELEASE_SOURCE_SHA"
           gh release upload "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --clobber
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
             --jq '.assets[] | "\(.name)  \(.size) bytes"'

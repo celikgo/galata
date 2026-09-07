@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic first-order system: dx/dt = 1 m/s - x/(1 s), x(0) = 0 m.
+schema: galata.model.v1
+profile: continuous-scalar.v1
+blocks:
+  - id: command
+    kind: constant
+    output: {dimension: [1, 0, -1, 0, 0, 0, 0, 0], frame: none}
+    value: 1
+  - id: feedback
+    kind: gain
+    output: {dimension: [1, 0, -1, 0, 0, 0, 0, 0], frame: none}
+    coefficient: {value: 1, dimension: [0, 0, -1, 0, 0, 0, 0, 0]}
+  - id: rate
+    kind: sum
+    output: {dimension: [1, 0, -1, 0, 0, 0, 0, 0], frame: none}
+    signs: [1, -1]
+  - id: x
+    kind: integrator
+    output: {dimension: [1, 0, 0, 0, 0, 0, 0, 0], frame: none}
+    initial_value: 0
+  - id: y
+    kind: output
+    output: {dimension: [1, 0, 0, 0, 0, 0, 0, 0], frame: none}
+connections:
+  - {source: command, target: rate, input: 0}
+  - {source: feedback, target: rate, input: 1}
+  - {source: rate, target: x, input: 0}
+  - {source: x, target: feedback, input: 0}
+  - {source: x, target: y, input: 0}

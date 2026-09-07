@@ -21,14 +21,16 @@
 //                    reported as a ratio and not only in decibels.
 //   GAIN CROSSOVER   a frequency where |L(jw)| = 1.
 //   PHASE MARGIN     pi + arg L(jw_gc) at a gain crossover, reduced into
-//                    (-pi, pi]: the extra phase lag the loop tolerates. In
+//                    (-pi, pi]: the signed angular distance to -1. In
 //                    RADIANS — this is the numerical core, where ADR-0003
 //                    admits no other angle unit. Degrees are applied at the
 //                    boundary, by the report writers.
-//   DELAY MARGIN     phase_margin / w_gc, in seconds: the smallest
-//                    transport delay that consumes the phase margin. A delay
-//                    contributes -w*tau of phase, so the same phase margin at a
-//                    higher crossover frequency buys LESS time.
+//   DELAY MARGIN     The non-negative phase lag reaching -1, divided by w_gc,
+//                    in seconds. For a negative signed phase margin, add 2*pi
+//                    before dividing: delay can only add lag. Zero means the
+//                    loop already reaches -1 at a gain crossover. Nominal
+//                    stability is a prerequisite for interpreting this as a
+//                    tolerable delay, checked by the state-space overload.
 //
 // ALL crossovers are reported, not just one. A loop whose magnitude crosses
 // unity three times has three phase margins, and an implementation that
@@ -58,10 +60,14 @@
 //   says anything about tolerance to the two together, which is again the disk
 //   margin's job.
 //
-// * Nothing here proves closed-loop stability. Margins are distances from the
-//   critical point, not a Nyquist encirclement count; an unstable open loop can
-//   show a comfortable-looking gain margin and still close unstable. Check the
-//   closed-loop eigenvalues.
+// * Crossover margins alone do not prove closed-loop stability. The state-space
+//   overload checks the nominal closed-loop eigenvalues and reports zero delay
+//   tolerance when they are not strictly stable. The evaluator overload cannot
+//   check stability; its delay margins assume the caller has established it.
+//   Stability requires residual, eigenvector-conditioning and axis-separation
+//   checks. Ill-conditioned/defective realizations may be refused even when
+//   truly stable. Numerically unresolved boundary poles establish no positive
+//   delay tolerance. These are numerical checks, not interval certificates.
 //
 // * Crossovers are found by SEARCHING A FREQUENCY GRID. A crossover pair
 //   narrower than the grid spacing is not found, and the reported range says
@@ -82,9 +88,9 @@ namespace galata::analyze {
 struct GainCrossing {
   double frequency_rad_s;
   double phase_margin_rad;
-  // phase_margin_rad divided by the frequency. Negative when the
-  // phase margin is negative: no delay makes such a loop stable, and reporting
-  // a positive time there would invent a margin that does not exist.
+  // The first non-negative lag reaching -1, divided by frequency, in seconds.
+  // A negative signed phase margin needs a further full turn of lag. This is
+  // crossover geometry; it is a tolerable delay only for a stable nominal loop.
   double delay_margin_s;
 };
 
@@ -114,13 +120,22 @@ struct StabilityMargins {
   double phase_margin_rad;
   double phase_margin_frequency_rad_s;
 
-  // The smallest transport delay that destabilises: the minimum over gain
-  // crossings with a positive phase margin. Absent when there is no such
-  // crossing — including when a phase margin exists but is negative, since the
-  // loop is then already unstable and no delay can be blamed for it.
+  // The smallest non-negative delay reaching the stability boundary over gain
+  // crossings. Infinite and absent when there is no crossing in the band.
+  // For a state-space loop that is not strictly stable, zero and absent: no
+  // additional delay tolerance exists around that nominal system.
   bool has_delay_margin;
   double delay_margin_s;
   double delay_margin_frequency_rad_s;
+
+  // The evaluator overload cannot establish nominal stability. The state-space
+  // overload checks all poles of the selected negative-unit-feedback loop.
+  bool nominal_stability_checked = false;
+  bool nominal_closed_loop_stable = false;
+  // Explains stable/nonstable/boundary numerical evidence. At an unresolved
+  // imaginary-axis boundary the stable flag is false and delay tolerance zero;
+  // severely ill-conditioned eigensystems instead throw before returning.
+  std::string nominal_stability_diagnostic;
 
   // What was actually searched, so that "no crossing" can be read as "none in
   // this band" rather than as "none anywhere".
@@ -140,7 +155,8 @@ struct MarginOptions {
   // Golden-section steps used to refine a peak once the grid has bracketed it
   // (disk margins). Fixed for the same reason.
   int peak_refinement_iterations = 100;
-  // Frequencies to search. Empty means "build one": the LinearSystem overload
+  // Positive, finite, strictly increasing frequencies to search, in rad/s.
+  // Empty means "build one": the LinearSystem overload
   // refines around the loop's own lightly damped modes, the evaluator overload
   // uses a plain logarithmic grid.
   std::vector<double> frequencies;
@@ -149,6 +165,9 @@ struct MarginOptions {
 // L evaluated at jw. Any loop that can be evaluated at a frequency can be
 // measured, including one carrying a Pade-approximated delay or a
 // non-rational term the state-space path cannot express.
+// Every evaluation, including refinement points, must have finite components
+// and magnitude; nonfinite results throw std::domain_error rather than imply
+// an absent crossover or unlimited margin.
 using LoopEvaluator = std::function<std::complex<double>(double frequency_rad_s)>;
 
 [[nodiscard]] StabilityMargins stability_margins(const LoopEvaluator& loop,

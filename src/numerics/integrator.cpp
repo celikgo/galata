@@ -15,6 +15,7 @@
 #include "galata/numerics/integrator.hpp"
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -24,18 +25,41 @@ Eigen::VectorXd rk4_step(const DerivativeFunction& derivative,
                          double time_s,
                          const Eigen::VectorXd& state,
                          double step_s) {
+  if (!derivative || state.size() == 0 || !state.allFinite() || !std::isfinite(time_s)
+      || !std::isfinite(step_s) || !(step_s > 0.0)) {
+    throw std::invalid_argument(
+        "rk4_step: derivative/state must be non-empty, state/time finite and step positive/finite");
+  }
   const double half = 0.5 * step_s;
+  if (!(step_s / 6.0 > 0.0) || !(time_s + half > time_s) || !(time_s + step_s > time_s + half)
+      || !std::isfinite(time_s + step_s)) {
+    throw std::invalid_argument("rk4_step: stage times or integration weight are unrepresentable");
+  }
+  const auto evaluate = [&](double time, const Eigen::VectorXd& point) -> Eigen::VectorXd {
+    if (!point.allFinite()) {
+      throw std::runtime_error("rk4_step: intermediate state overflowed");
+    }
+    const Eigen::VectorXd rate = derivative(time, point);
+    if (rate.size() != state.size() || !rate.allFinite()) {
+      throw std::runtime_error("rk4_step: derivative dimension changed or value is non-finite");
+    }
+    return rate;
+  };
 
-  const Eigen::VectorXd k1 = derivative(time_s, state);
-  const Eigen::VectorXd k2 = derivative(time_s + half, state + half * k1);
-  const Eigen::VectorXd k3 = derivative(time_s + half, state + half * k2);
-  const Eigen::VectorXd k4 = derivative(time_s + step_s, state + step_s * k3);
+  const Eigen::VectorXd k1 = evaluate(time_s, state);
+  const Eigen::VectorXd k2 = evaluate(time_s + half, state + half * k1);
+  const Eigen::VectorXd k3 = evaluate(time_s + half, state + half * k2);
+  const Eigen::VectorXd k4 = evaluate(time_s + step_s, state + step_s * k3);
 
   // Summed as (k1 + 2(k2 + k3) + k4) * h/6 rather than as four separately
   // scaled terms. The grouping is fixed and written out because floating-point
   // addition is not associative: a different grouping gives a different last
   // bit, and ADR-0004's bit-identity tier is a claim about this expression.
-  return state + (step_s / 6.0) * (k1 + 2.0 * (k2 + k3) + k4);
+  const Eigen::VectorXd next = state + (step_s / 6.0) * (k1 + 2.0 * (k2 + k3) + k4);
+  if (!next.allFinite()) {
+    throw std::runtime_error("rk4_step: completed state overflowed");
+  }
+  return next;
 }
 
 Trajectory integrate_fixed_step(const DerivativeFunction& derivative,
@@ -53,10 +77,23 @@ Trajectory integrate_fixed_step(const DerivativeFunction& derivative,
     throw std::invalid_argument("integrate_fixed_step: sample_stride is "
                                 + std::to_string(sample_stride) + ", must be at least 1");
   }
-  if (!(step_s > 0.0)) {
+  if (!std::isfinite(step_s) || !(step_s > 0.0)) {
     throw std::invalid_argument("integrate_fixed_step: step is " + std::to_string(step_s)
                                 + ", must be positive and finite");
   }
+  if (!derivative || initial_state.size() == 0 || !initial_state.allFinite()
+      || !std::isfinite(initial_time_s) || !std::isfinite(step_s * static_cast<double>(step_count))
+      || !std::isfinite(initial_time_s + step_s * static_cast<double>(step_count))) {
+    throw std::invalid_argument(
+        "integrate_fixed_step: derivative/state must be non-empty and state/time span finite");
+  }
+
+  const auto require_projection = [&](const Eigen::VectorXd& projected) {
+    if (projected.size() != initial_state.size() || !projected.allFinite()) {
+      throw std::runtime_error(
+          "integrate_fixed_step: projection changed state dimension or produced non-finite values");
+    }
+  };
 
   Trajectory trajectory;
   trajectory.step_s = step_s;
@@ -72,6 +109,7 @@ Trajectory integrate_fixed_step(const DerivativeFunction& derivative,
     // Project the initial condition too. A caller who hands over a quaternion
     // that is unit only to six digits should not have that error integrated.
     projection(state);
+    require_projection(state);
   }
 
   trajectory.times_s.push_back(initial_time_s);
@@ -84,6 +122,7 @@ Trajectory integrate_fixed_step(const DerivativeFunction& derivative,
     state = rk4_step(derivative, time_s, state, step_s);
     if (projection) {
       projection(state);
+      require_projection(state);
     }
     const int completed = step + 1;
     if (completed % sample_stride == 0) {
@@ -100,6 +139,11 @@ StepSizeStudy step_size_study(const DerivativeFunction& derivative,
                               double coarse_step_s,
                               int coarse_step_count,
                               const ProjectionFunction& projection) {
+  if (coarse_step_count < 1 || coarse_step_count > std::numeric_limits<int>::max() / 4
+      || !std::isfinite(coarse_step_s) || !(0.25 * coarse_step_s > 0.0)) {
+    throw std::invalid_argument(
+        "step_size_study: coarse count and step must permit positive representable refinements");
+  }
   const auto final_state = [&](double step_s, int count) {
     return integrate_fixed_step(
                derivative, initial_state, initial_time_s, step_s, count, count, projection)
@@ -117,6 +161,9 @@ StepSizeStudy step_size_study(const DerivativeFunction& derivative,
   study.final_at_h_4 = fine;
   study.difference_h_to_h2 = (coarse - medium).norm();
   study.difference_h2_to_h4 = (medium - fine).norm();
+  if (!std::isfinite(study.difference_h_to_h2) || !std::isfinite(study.difference_h2_to_h4)) {
+    throw std::runtime_error("step_size_study: state-difference norm overflowed");
+  }
 
   constexpr double kOrder = 4.0;
   const double two_to_p = std::pow(2.0, kOrder);
@@ -132,6 +179,9 @@ StepSizeStudy step_size_study(const DerivativeFunction& derivative,
     // order estimate is meaningless. Report zero rather than a NaN or an
     // infinity that a caller might plot.
     study.observed_order = 0.0;
+  }
+  if (!std::isfinite(study.estimated_error_at_h) || !std::isfinite(study.observed_order)) {
+    throw std::runtime_error("step_size_study: error or order estimate is unrepresentable");
   }
   return study;
 }

@@ -3,6 +3,8 @@
 add_executable(galata_unit_tests
   ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_version.cpp
+  test_modeling.cpp
+  test_model_io.cpp
   test_units.cpp
   test_quaternion.cpp
   test_frames.cpp
@@ -16,6 +18,12 @@ add_executable(galata_unit_tests
   test_sensitivity.cpp
   test_jacobian.cpp
   test_newton.cpp
+  test_atmosphere.cpp
+  test_flight_condition.cpp
+  test_control.cpp
+  test_hinfinity.cpp
+  test_nonlinear.cpp
+  test_linear_simulation.cpp
 )
 
 target_link_libraries(galata_unit_tests
@@ -24,6 +32,11 @@ target_link_libraries(galata_unit_tests
     galata::numerics
     galata::analyze
     galata::model
+    galata::modeling
+    galata::trim
+    galata::linearize
+    galata::synth
+    galata::simulation
     galata::warnings
     GTest::gtest_main
 )

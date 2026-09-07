@@ -68,6 +68,11 @@ using ProjectionFunction = std::function<void(Eigen::VectorXd&)>;
 //   ----+----------------------
 //       | 1/6  1/3  1/3  1/6
 //
+// Requires a finite non-empty state, finite time and a positive finite step
+// whose stage times are distinct and whose integration weight is representable.
+// Invalid inputs throw;
+// non-finite states/derivatives and derivative dimension changes throw before
+// returning a state, including when an intermediate RK stage is invalid.
 [[nodiscard]] Eigen::VectorXd rk4_step(const DerivativeFunction& derivative,
                                        double time_s,
                                        const Eigen::VectorXd& state,
@@ -91,6 +96,8 @@ struct Trajectory {
 //
 // Sample times are computed as t0 + k*step rather than accumulated, so the
 // reported time does not drift over a long run.
+// Initial values and the complete time span must be finite. Projection must
+// preserve the state dimension and finiteness, including at zero duration.
 [[nodiscard]] Trajectory integrate_fixed_step(const DerivativeFunction& derivative,
                                               const Eigen::VectorXd& initial_state,
                                               double initial_time_s,
@@ -139,6 +146,8 @@ struct StepSizeStudy {
 // This is the only error information a fixed-step integrator can honestly
 // offer, so the interface makes it cheap rather than leaving each caller to
 // improvise it.
+// The positive coarse count must permit multiplication by four without integer
+// overflow, and all refined steps and returned estimates must be representable.
 [[nodiscard]] StepSizeStudy step_size_study(const DerivativeFunction& derivative,
                                             const Eigen::VectorXd& initial_state,
                                             double initial_time_s,

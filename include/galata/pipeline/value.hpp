@@ -71,6 +71,7 @@ class Value {
   // specification, not like a cast failure.
   [[nodiscard]] double number_at(const std::string& key) const;
   [[nodiscard]] double number_at(const std::string& key, double fallback) const;
+  [[nodiscard]] int integer_at(const std::string& key, int fallback) const;
   [[nodiscard]] std::string string_at(const std::string& key) const;
   [[nodiscard]] std::string string_at(const std::string& key, const std::string& fallback) const;
   [[nodiscard]] bool bool_at(const std::string& key, bool fallback) const;

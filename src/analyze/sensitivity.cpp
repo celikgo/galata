@@ -4,6 +4,7 @@
 
 #include "galata/analyze/frequency_response.hpp"
 
+#include "analysis_checks.hpp"
 #include "peak_search.hpp"
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
@@ -28,18 +29,35 @@ struct SensitivityPair {
 // is nearly singular by definition, which is exactly where inverting it would
 // lose the digits that matter.
 SensitivityPair pair_at(const Eigen::MatrixXcd& loop_response) {
+  if (!loop_response.allFinite()) {
+    throw std::domain_error("sensitivity_peaks: nonfinite loop response");
+  }
   const Eigen::Index n = loop_response.rows();
   const Eigen::MatrixXcd shifted = Eigen::MatrixXcd::Identity(n, n) + loop_response;
 
   Eigen::JacobiSVD<Eigen::MatrixXcd> svd(shifted);
+  if (svd.info() != Eigen::Success || !svd.singularValues().allFinite()) {
+    throw std::runtime_error("sensitivity_peaks: singular-value decomposition failed");
+  }
   const double smallest = svd.singularValues()(n - 1);
+  if (!(smallest > 0.0)) {
+    throw std::domain_error("sensitivity_peaks: singular I+L at a searched frequency");
+  }
 
   SensitivityPair pair{};
   pair.sensitivity = smallest > 0.0 ? 1.0 / smallest : std::numeric_limits<double>::infinity();
 
   // T from a SOLVE of (I + L) T = L, not from an inversion.
   const Eigen::MatrixXcd complementary = shifted.partialPivLu().solve(loop_response);
+  if (!complementary.allFinite()) {
+    throw std::domain_error("sensitivity_peaks: nonfinite complementary sensitivity");
+  }
   Eigen::JacobiSVD<Eigen::MatrixXcd> complementary_svd(complementary);
+  if (complementary_svd.info() != Eigen::Success
+      || !complementary_svd.singularValues().allFinite()) {
+    throw std::runtime_error(
+        "sensitivity_peaks: complementary singular-value decomposition failed");
+  }
   pair.complementary = complementary_svd.singularValues()(0);
   return pair;
 }
@@ -65,7 +83,9 @@ SensitivityPeaks sensitivity_peaks(const model::LinearSystem& loop, const Margin
   const Eigen::MatrixXd c = loop.output_matrix();
   const Eigen::MatrixXd d = loop.feedthrough_matrix();
   const Eigen::MatrixXd shifted_feedthrough = Eigen::MatrixXd::Identity(outputs, inputs) + d;
-  if (std::abs(shifted_feedthrough.determinant()) == 0.0) {
+  const Eigen::FullPivLU<Eigen::MatrixXd> feedthrough_solve(shifted_feedthrough);
+  if (!shifted_feedthrough.allFinite() || !feedthrough_solve.isInvertible()
+      || feedthrough_solve.rcond() < 1e-8) {
     throw std::invalid_argument(
         "sensitivity_peaks: I + D is singular, so the loop is ill-posed — the closed loop has "
         "no solution at infinite frequency");
@@ -73,24 +93,8 @@ SensitivityPeaks sensitivity_peaks(const model::LinearSystem& loop, const Margin
 
   // S has the closed-loop poles. A peak of an unstable S over a finite grid is
   // not a robustness measure, so refuse rather than report one.
-  const Eigen::MatrixXd closed = loop.a - loop.b * shifted_feedthrough.inverse() * c;
-  Eigen::EigenSolver<Eigen::MatrixXd> solver(closed, /*computeEigenvectors=*/false);
-  if (solver.info() != Eigen::Success) {
-    throw std::runtime_error("sensitivity_peaks: closed-loop eigenvalue computation failed");
-  }
-  double worst_real = -std::numeric_limits<double>::infinity();
-  for (Eigen::Index index = 0; index < solver.eigenvalues().size(); ++index) {
-    worst_real = std::max(worst_real, solver.eigenvalues()(index).real());
-  }
-  if (worst_real >= 0.0) {
-    std::ostringstream message;
-    message << "sensitivity_peaks: the nominal closed loop is unstable (rightmost pole at real "
-               "part "
-            << worst_real
-            << "). S has that pole too, and the peak of an unstable S over a finite grid is a "
-               "number that means nothing.";
-    throw std::invalid_argument(message.str());
-  }
+  const Eigen::MatrixXd closed = loop.a - loop.b * feedthrough_solve.solve(c);
+  detail::require_hurwitz(closed, "sensitivity_peaks");
 
   std::vector<double> grid = options.frequencies;
   if (grid.empty()) {
@@ -99,9 +103,7 @@ SensitivityPeaks sensitivity_peaks(const model::LinearSystem& loop, const Margin
     grid = grid_refined_for_modes(
         closed, options.start_rad_s, options.stop_rad_s, options.grid_points);
   }
-  if (grid.size() < 2) {
-    throw std::invalid_argument("sensitivity_peaks: need at least two frequencies");
-  }
+  detail::require_frequency_grid(grid, "sensitivity_peaks");
 
   const FrequencyResponse response = frequency_response(loop, grid);
 
@@ -141,19 +143,26 @@ SensitivityPeaks sensitivity_peaks(const model::LinearSystem& loop, const Margin
   return peaks;
 }
 
-GuaranteedMargins guaranteed_margins(const SensitivityPeaks& peaks) {
+GuaranteedMargins guaranteed_margins(const SensitivityNormUpperBounds& bounds) {
+  if (bounds.evidence.empty() || !std::isfinite(bounds.sensitivity_upper)
+      || !std::isfinite(bounds.complementary_upper) || bounds.sensitivity_upper < 0.0
+      || bounds.complementary_upper < 0.0) {
+    throw std::invalid_argument(
+        "guaranteed_margins: finite nonnegative full-norm upper bounds and evidence required");
+  }
   GuaranteedMargins result{};
-  result.applies = peaks.is_single_loop;
+  result.applies = bounds.is_single_loop;
   if (!result.applies) {
     return result;
   }
 
-  const double sensitivity = peaks.sensitivity_peak;
-  const double complementary = peaks.complementary_peak;
+  const double sensitivity = bounds.sensitivity_upper;
+  const double complementary = bounds.complementary_upper;
 
   // Domain guards. The book's own Remark on p. 37 notes that M_S must exceed 1
-  // whenever a -180 degree crossing exists at all, so M_S <= 1 here means the
-  // grid did not reach the peak rather than that the loop is extraordinary.
+  // whenever a -180 degree crossing exists at all. With an upper bound <= 1
+  // the gain-increase formula is outside its domain; this API reports that
+  // domain restriction, rather than interpreting it as a failed grid search.
   const bool gain_bounds_defined = sensitivity > 1.0 && complementary > 0.0;
   const bool phase_bounds_defined = sensitivity >= 0.5 && complementary >= 0.5;
   result.valid = gain_bounds_defined && phase_bounds_defined;

@@ -1,0 +1,18 @@
+# SOURCE: SLICOT BB01AD and SB02MD routine documentation; retrieved 2026-09-06.
+# https://www.slicot.org/objects/software/shared/doc/BB01AD.html
+# https://www.slicot.org/objects/software/shared/doc/SB02MD.html
+# BB01AD references J. Abels and P. Benner, CAREX version 2.0, SLICOT Working Note 1999-14.
+# RIGHTS: Not a US Government work; not public domain. Only small worked-example
+# scalar results quoted for verification under ADR-0007; no source code or full
+# benchmark collection reproduced. Current SLICOT source is BSD-3-Clause:
+# https://github.com/SLICOT/SLICOT-Reference/blob/main/LICENSE
+# TRANSCRIPTION METHOD: read HTML Program Data and Program Results tables.
+# Independently checked by substituting the analytic double-integrator solution:
+# for A12=e, G22=1, Q=diag(q1,q2), X12=sqrt(q1),
+# X22=sqrt(q2+2*e*sqrt(q1)), X11=sqrt(q1)*X22/e.
+# The chosen parameter e is exact decimal input. Reported X uses four decimal
+# places; acceptance budget is half the last printed place, before computation.
+# Coverage is two worked examples including CAREX 2.3; NOT the entire CAREX suite.
+case,epsilon,q2,x11,x12,x22,absolute_budget,location
+carex_2_3,0.1234,1,9.0486,1.0000,1.1166,0.00005,BB01AD Program Data and Program Results
+sb02md,1,2,2.0000,1.0000,2.0000,0.00005,SB02MD Program Data and Program Results

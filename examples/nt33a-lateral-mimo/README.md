@@ -49,46 +49,38 @@ The report puts these side by side:
 
 | measure | value |
 | --- | ---: |
-| Aileron→bank channel, gain margin | infinite |
+| Aileron→bank channel, gain margin | not found in the searched band |
 | Aileron→bank channel, phase margin | 48.5 deg |
 | M_S, the whole 2×2 loop | 1.85 |
 | M_T, the whole 2×2 loop | 1.80 |
 
-Read the first two rows alone and the loop looks excellent: unlimited gain
-tolerance and a healthy phase margin. But those numbers were computed with the
-rudder loop **held open** — they describe a different system from the one that
-actually flies.
+The channel has a healthy sampled phase margin, but it was computed with the
+rudder loop **held open**. It describes a different feedback system from the
+closed two-channel loop. A missing gain-margin crossover is also a search
+result, not evidence of unlimited tolerance.
 
-M_S = 1.85 is the honest number. It says the Nyquist curve of the multivariable
-loop comes within 0.54 of the critical point, and it accounts for both channels
-varying at once. Skogestad and Postlethwaite's rule of thumb is M_S below about
-2, so this design passes — but with far less room than "infinite gain margin"
-suggested.
+The sampled M_S estimate is 1.85. Its reciprocal, about 0.54, estimates the
+smallest singular value of I+L over the searched frequencies. This is a
+multivariable singular-value separation, not the distance from a scalar Nyquist
+curve to −1. The estimate is below the textbook rule of thumb of M_S around 2,
+but a sampled lower norm estimate cannot establish that the full norm meets a
+limit or that an aircraft design is accepted.
 
 ## Why no guaranteed margins are printed
 
-For a single loop, galata reports the classical margins that M_S and M_T
-*guarantee*, from Skogestad & Postlethwaite equations (2.47) and (2.48). For
-this example it refuses, and says so in the report.
-
-That is the source's own scope, not caution added here. Those equations sit in a
-chapter whose remit is SISO, and the book never restates them for MIMO. Its
-spinning-satellite example shows a plant with excellent margins "when
-considering one loop at a time" that is destabilised by small *simultaneous*
-input gain errors — precisely the error that applying a per-channel bound to a
-multi-loop system would reproduce.
+Sampled sensitivity peaks are lower estimates of the true norms. The classical
+sensitivity-to-margin formulas require upper norm bounds, so sampled results
+cannot supply guarantees even for a single loop. Those formulas also apply only
+to SISO systems: applying them independently to this MIMO loop would not
+establish simultaneous robustness. The report states both limitations.
 
 ## What it does not tell you
 
 M_S is a distance from the critical point, not a Nyquist encirclement count.
-It establishes nothing about closed-loop stability on its own; galata checks the
-closed-loop eigenvalues before reporting a peak at all, and refuses if they are
-in the right half-plane.
+It establishes nothing about closed-loop stability on its own. The numerical
+stability assessment must resolve the nominal loop before reporting a peak;
+ill-conditioned cases are refused rather than declared stable.
 
-The peaks are grid maxima and so are **lower** bounds on the true H∞ norms —
-the error is in the optimistic direction. The report prints the band and point
-count searched. See `include/galata/analyze/sensitivity.hpp`.
-
-The feedback gains here are chosen to make the example work, not designed.
-Nothing in this directory is a control design, and nothing in galata is
-certification evidence — see `docs/CHARTER.md`.
+The report prints the searched band and point count. The feedback gains here
+are chosen to demonstrate the example, not designed for an aircraft. No
+application-specific qualification or certification evidence is claimed.

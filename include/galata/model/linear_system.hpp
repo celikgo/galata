@@ -104,6 +104,10 @@ struct LinearSystem {
 // on any structural problem.
 [[nodiscard]] LinearSystem load_linear_system(const std::string& path);
 
+// Parse exactly these bytes; the pipeline records their digest before parsing.
+[[nodiscard]] LinearSystem parse_linear_system(const std::string& bytes,
+                                               const std::string& source_name = "model");
+
 }  // namespace galata::model
 
 #endif  // GALATA_MODEL_LINEAR_SYSTEM_HPP

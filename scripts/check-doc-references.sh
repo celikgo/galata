@@ -30,13 +30,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-docs="$(git ls-files '*.md')"
+docs="$(git ls-files --cached --others --exclude-standard -- '*.md' | LC_ALL=C sort -u)"
 if [ -z "$docs" ]; then
   printf '::error::no Markdown files found — this gate would be vacuously green\n'
   exit 1
 fi
 
-sources="$(git ls-files 'tests/*.cpp')"
+sources="$(git ls-files --cached --others --exclude-standard -- 'tests/*.cpp' | LC_ALL=C sort -u)"
 if [ -z "$sources" ]; then
   printf '::error::no test sources found — the test-name half of this gate would be vacuously green\n'
   exit 1
@@ -68,14 +68,16 @@ TEST_SPAN = re.compile(r"^(?:[A-Za-z0-9_]+/)?([A-Z][A-Za-z0-9_]*\.[A-Z][A-Za-z0-
 TEST_MACRO = re.compile(r"\bTEST(?:_F|_P)?\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)")
 
 
-def tracked(pattern):
-    out = subprocess.run(["git", "ls-files", pattern], capture_output=True, text=True, check=True)
-    return [line for line in out.stdout.split("\n") if line]
+def sources_in_worktree(pattern):
+    out = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard",
+                          "-z", "--", pattern], capture_output=True, check=True)
+    return sorted({os.fsdecode(name) for name in out.stdout.split(b"\0")
+                   if name and (root / os.fsdecode(name)).is_file()})
 
 
 # --- what actually exists -------------------------------------------------
 registered = set()
-for source in tracked("tests/*.cpp"):
+for source in sources_in_worktree("tests/*.cpp"):
     text = (root / source).read_text(encoding="utf-8")
     for match in TEST_MACRO.finditer(text):
         registered.add(f"{match.group(1)}.{match.group(2)}")
@@ -114,7 +116,7 @@ problems = []
 paths_checked = tests_checked = 0
 used_allowances = set()
 
-for document in tracked("*.md"):
+for document in sources_in_worktree("*.md"):
     fenced = False
     for number, line in enumerate((root / document).read_text(encoding="utf-8").splitlines(), 1):
         if line.lstrip().startswith("```"):
@@ -148,7 +150,7 @@ for document in tracked("*.md"):
 
 # --- report ----------------------------------------------------------------
 print(f"Doc references: {paths_checked} path(s) and {tests_checked} test name(s) "
-      f"across {len(tracked('*.md'))} document(s); "
+      f"across {len(sources_in_worktree('*.md'))} document(s); "
       f"{len(registered)} registered tests; {len(allowed)} allowed exception(s).")
 
 stale = sorted(set(allowed) - used_allowances)

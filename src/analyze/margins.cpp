@@ -4,6 +4,8 @@
 
 #include "galata/analyze/frequency_response.hpp"
 
+#include "analysis_checks.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -71,6 +73,16 @@ double phase_margin_at(std::complex<double> value) {
   return margin;
 }
 
+// Delay only adds phase LAG. A negative signed phase margin describes the
+// shorter rotation in the opposite direction; it does not establish nominal
+// instability. Continue around the circle to obtain the first non-negative
+// lag which reaches -1, retaining zero when the loop is already there.
+double delay_margin_at(double phase_margin, double frequency) {
+  const double lag =
+      phase_margin < 0.0 ? phase_margin + 2.0 * std::numbers::pi_v<double> : phase_margin;
+  return lag / frequency;
+}
+
 }  // namespace
 
 StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOptions& options) {
@@ -85,16 +97,15 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   if (grid.empty()) {
     grid = logarithmic_grid(options.start_rad_s, options.stop_rad_s, options.grid_points);
   }
-  if (grid.size() < 2) {
-    throw std::invalid_argument(
-        "stability_margins: need at least two frequencies to bracket a "
-        "crossing");
-  }
+  detail::require_frequency_grid(grid, "stability_margins");
+  const auto evaluate = [&loop](double frequency) {
+    return detail::checked_loop_value(loop, frequency, "stability_margins");
+  };
 
   std::vector<std::complex<double>> sampled;
   sampled.reserve(grid.size());
   for (const double frequency : grid) {
-    sampled.push_back(loop(frequency));
+    sampled.push_back(evaluate(frequency));
   }
 
   StabilityMargins margins{};
@@ -103,8 +114,8 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   margins.grid_points = static_cast<int>(grid.size());
 
   // --- Gain crossings: |L| = 1. -------------------------------------------
-  const auto magnitude_excess = [&loop](double frequency) {
-    return std::abs(loop(frequency)) - 1.0;
+  const auto magnitude_excess = [&evaluate](double frequency) {
+    return std::abs(evaluate(frequency)) - 1.0;
   };
   for (std::size_t index = 1; index < grid.size(); ++index) {
     const double before = std::abs(sampled[index - 1]) - 1.0;
@@ -120,11 +131,11 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
                                                                       grid[index],
                                                                       before,
                                                                       options.bisection_iterations);
-    const double phase_margin = phase_margin_at(loop(frequency));
+    const double phase_margin = phase_margin_at(evaluate(frequency));
     GainCrossing crossing{};
     crossing.frequency_rad_s = frequency;
     crossing.phase_margin_rad = phase_margin;
-    crossing.delay_margin_s = phase_margin / frequency;
+    crossing.delay_margin_s = delay_margin_at(phase_margin, frequency);
     margins.gain_crossings.push_back(crossing);
   }
 
@@ -135,7 +146,7 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   // bookkeeping: a bisection driven by unwrapped phase has to decide which
   // 360-degree branch an intermediate sample belongs to, and get it right at
   // exactly the frequencies where the phase is moving fastest.
-  const auto imaginary_part = [&loop](double frequency) { return loop(frequency).imag(); };
+  const auto imaginary_part = [&evaluate](double frequency) { return evaluate(frequency).imag(); };
   for (std::size_t index = 1; index < grid.size(); ++index) {
     const double before = sampled[index - 1].imag();
     const double after = sampled[index].imag();
@@ -156,7 +167,7 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
                                                                       grid[index],
                                                                       before,
                                                                       options.bisection_iterations);
-    const std::complex<double> value = loop(frequency);
+    const std::complex<double> value = evaluate(frequency);
     if (value.real() >= 0.0) {
       continue;
     }
@@ -214,7 +225,7 @@ StabilityMargins stability_margins(const LoopEvaluator& loop, const MarginOption
   margins.delay_margin_s = infinity;
   margins.delay_margin_frequency_rad_s = not_a_number;
   for (const GainCrossing& crossing : margins.gain_crossings) {
-    if (crossing.phase_margin_rad > 0.0 && crossing.delay_margin_s < margins.delay_margin_s) {
+    if (crossing.delay_margin_s < margins.delay_margin_s) {
       margins.has_delay_margin = true;
       margins.delay_margin_s = crossing.delay_margin_s;
       margins.delay_margin_frequency_rad_s = crossing.frequency_rad_s;
@@ -234,6 +245,27 @@ StabilityMargins stability_margins(const model::LinearSystem& loop,
                                    const MarginOptions& options) {
   loop.validate();
 
+  if (input_index < 0 || input_index >= loop.input_count() || output_index < 0
+      || output_index >= loop.output_count()) {
+    throw std::out_of_range("stability_margins: input or output index is out of range");
+  }
+  const double feedthrough = loop.feedthrough_matrix()(output_index, input_index);
+  if (1.0 + feedthrough == 0.0) {
+    throw std::invalid_argument(
+        "stability_margins: direct feedthrough -1 makes negative unit feedback ill-posed");
+  }
+  const Eigen::MatrixXd closed =
+      loop.a
+      - loop.b.col(input_index) * loop.output_matrix().row(output_index) / (1.0 + feedthrough);
+  if (!closed.allFinite()) {
+    throw std::invalid_argument("stability_margins: closing the feedback loop overflowed");
+  }
+  const auto stability = detail::assess_hurwitz(closed);
+  if (stability.status == detail::HurwitzStatus::Unresolved) {
+    throw std::runtime_error("stability_margins: " + stability.diagnostic);
+  }
+  const bool nominal_stable = stability.status == detail::HurwitzStatus::Stable;
+
   MarginOptions resolved = options;
   if (resolved.frequencies.empty()) {
     resolved.frequencies = grid_refined_for_modes(
@@ -247,7 +279,19 @@ StabilityMargins stability_margins(const model::LinearSystem& loop,
     return single_loop_response(loop, input_index, output_index, {frequency})
         .response.front()(0, 0);
   };
-  return stability_margins(evaluator, resolved);
+  StabilityMargins margins = stability_margins(evaluator, resolved);
+  margins.nominal_stability_checked = true;
+  margins.nominal_closed_loop_stable = nominal_stable;
+  margins.nominal_stability_diagnostic = stability.diagnostic;
+  if (!nominal_stable) {
+    // There is no positive stability tolerance around an unstable or marginal
+    // baseline. Keep the crossover geometry, but do not label it a delay that
+    // can safely be added to the nominal system.
+    margins.has_delay_margin = false;
+    margins.delay_margin_s = 0.0;
+    margins.delay_margin_frequency_rad_s = std::numeric_limits<double>::quiet_NaN();
+  }
+  return margins;
 }
 
 }  // namespace galata::analyze

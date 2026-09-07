@@ -76,8 +76,9 @@ struct MassProperties {
   // has the right handedness.
   Eigen::Matrix3d inertia_cg_body_kg_m2 = Eigen::Matrix3d::Zero();
 
-  // Throws std::invalid_argument unless the mass is positive and the inertia
-  // tensor is symmetric and positive definite. Checked rather than assumed
+  // Throws std::invalid_argument unless all entries are finite, the mass is
+  // positive, and the inertia tensor is symmetric, positive definite and
+  // satisfies the principal-moment triangle inequalities. Checked rather than assumed
   // because an asymmetric or indefinite tensor produces a solve that succeeds
   // and returns nonsense.
   void validate() const;

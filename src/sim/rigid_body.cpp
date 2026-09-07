@@ -26,13 +26,16 @@
 namespace galata::sim {
 
 void MassProperties::validate() const {
-  if (!(mass_kg > 0.0)) {
+  if (!std::isfinite(mass_kg) || !(mass_kg > 0.0)) {
     std::ostringstream message;
     message << "MassProperties: mass is " << mass_kg << " kg, must be positive and finite";
     throw std::invalid_argument(message.str());
   }
 
   const Eigen::Matrix3d& inertia = inertia_cg_body_kg_m2;
+  if (!inertia.allFinite()) {
+    throw std::invalid_argument("MassProperties: inertia tensor must contain only finite entries");
+  }
 
   // Symmetry first: an asymmetric tensor is almost always a transcription slip
   // (a product of inertia entered in one place and not its mirror), and every
@@ -49,7 +52,7 @@ void MassProperties::validate() const {
   // Positive definiteness. An indefinite tensor is not a physical rigid body,
   // and the solve below would succeed on one anyway and return nonsense.
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(inertia);
-  if (solver.info() != Eigen::Success) {
+  if (solver.info() != Eigen::Success || !solver.eigenvalues().allFinite()) {
     throw std::invalid_argument("MassProperties: inertia tensor eigendecomposition failed");
   }
   const double smallest = solver.eigenvalues().minCoeff();

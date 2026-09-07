@@ -58,14 +58,14 @@ governing margin is 48 degrees, at a frequency more than twice as high.
 This is why `analyze.margins` returns every crossover and not just one, and why
 the report prints them all.
 
-## The gain margin is infinite, and that is not reassuring
+## A missing crossover does not establish unlimited tolerance
 
-The phase never reaches −180 degrees inside the searched band, so there is no
-phase crossover and the gain margin is infinite. Taken alone that reads as a
-loop with unlimited gain tolerance.
+The phase never reaches −180 degrees inside the searched band. The report
+therefore says the gain margin was not found in that band; a finite search
+cannot establish unlimited gain tolerance.
 
-The disk margin says otherwise. It reports a guaranteed gain range of roughly
-0.39 to 2.56 and a guaranteed phase range of about ±47 degrees — because it is
+The disk margin says otherwise. It reports an estimated gain range of roughly
+0.39 to 2.56 and an estimated phase range of about ±47 degrees — because it is
 asking a different question: not "how much gain change alone" or "how much phase
 change alone", but how much of **both together**. Real actuators and real
 sensors vary in both.
@@ -79,3 +79,8 @@ The disk margin's peak is found by searching a frequency grid, so it is an
 upper bound on the true margin — the error is in the optimistic direction. The
 report prints the band and point count that were searched. See
 `include/galata/analyze/disk_margin.hpp`.
+
+The refined frequency search can miss peaks. These ranges are optimistic
+estimates and establish no guaranteed tolerance; use the separate
+`analyze.robust_bounds` capability to assess numerical bounds. A missing classical
+crossover is reported as not found in the searched band.

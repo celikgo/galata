@@ -130,6 +130,9 @@ bool is_within_envelope(double geometric_altitude_m) noexcept {
 }
 
 AtmosphereState isa(double geometric_altitude_m, double delta_isa_k) {
+  if (!std::isfinite(delta_isa_k)) {
+    throw std::invalid_argument("galata::core::isa: the temperature offset must be finite");
+  }
   if (!is_within_envelope(geometric_altitude_m)) {
     throw std::out_of_range(
         "galata::core::isa: geometric altitude " + std::to_string(geometric_altitude_m) +
@@ -164,6 +167,11 @@ AtmosphereState isa(double geometric_altitude_m, double delta_isa_k) {
   }
 
   const double temperature = standard_temperature + delta_isa_k;
+  if (!std::isfinite(temperature) || !(temperature > 0.0)) {
+    throw std::invalid_argument(
+        "galata::core::isa: the temperature offset must leave a positive, finite absolute "
+        "temperature");
+  }
 
   AtmosphereState state;
   state.geometric_altitude_m = geometric_altitude_m;
@@ -178,6 +186,13 @@ AtmosphereState isa(double geometric_altitude_m, double delta_isa_k) {
   // Equation (51), Sutherland's law.
   state.dynamic_viscosity_pa_s =
       kSutherlandBeta * temperature * std::sqrt(temperature) / (temperature + kSutherlandConstant);
+  if (!std::isfinite(state.density_kg_m3) || !(state.density_kg_m3 > 0.0)
+      || !std::isfinite(state.speed_of_sound_m_s) || !(state.speed_of_sound_m_s > 0.0)
+      || !std::isfinite(state.dynamic_viscosity_pa_s) || !(state.dynamic_viscosity_pa_s > 0.0)) {
+    throw std::invalid_argument(
+        "galata::core::isa: the temperature offset produces an unrepresentable atmospheric "
+        "state");
+  }
   return state;
 }
 

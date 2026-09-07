@@ -28,6 +28,7 @@ add_executable(galata_validation_tests
   test_disk_margin_seiler.cpp
   test_sensitivity_bounds.cpp
   test_case_registry.cpp
+  test_care_slicot.cpp
 )
 
 target_include_directories(galata_validation_tests
@@ -44,6 +45,7 @@ target_link_libraries(galata_validation_tests
     galata::analyze
     galata::trim
     galata::linearize
+    galata::synth
     galata::validation_reference
     galata::pipeline
     galata::warnings

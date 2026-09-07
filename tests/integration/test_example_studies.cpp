@@ -37,8 +37,12 @@ galata::pipeline::RunResult run_example(const std::string& example, const std::s
 
   const galata::pipeline::Pipeline pipeline =
       galata::pipeline::load_pipeline((directory / study).string());
-  return galata::pipeline::run_pipeline(
-      pipeline, galata::pipeline::builtin_registry(), directory.string(), output.string());
+  return galata::pipeline::run_pipeline(pipeline,
+                                        galata::pipeline::builtin_registry(),
+                                        directory.string(),
+                                        output.string(),
+                                        nullptr,
+                                        galata::pipeline::RunOptions{.overwrite = true});
 }
 
 TEST(ExampleNt33aLateralModes, RunsEndToEnd) {
@@ -140,11 +144,11 @@ TEST(ExampleNt33aBankLoopMargins, ReportsTheThreeCrossoversItsReadmeQuotes) {
 
   // Infinite gain margin, which is exactly the case the disk margin exists to
   // qualify. The README says so; the report must too.
-  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+  EXPECT_NE(text.find("| Gain | not found in searched band |"), std::string::npos);
 }
 
 TEST(ExampleNt33aBankLoopMargins, DiskMarginQualifiesTheInfiniteGainMargin) {
-  // The README claims a guaranteed gain range of roughly 0.39 to 2.56 and a
+  // The README claims an estimated gain range of roughly 0.39 to 2.56 and a
   // phase range of about +/- 47 degrees for a loop whose classical gain margin
   // is infinite. Those numbers are the example's whole argument, so they are
   // checked against the report a user actually reads.
@@ -155,14 +159,19 @@ TEST(ExampleNt33aBankLoopMargins, DiskMarginQualifiesTheInfiniteGainMargin) {
 
   EXPECT_NE(text.find("| Disk margin alpha | 0.87548 |"), std::string::npos);
   EXPECT_NE(text.find("0.3911 to 2.5571"), std::string::npos)
-      << "guaranteed gain range not as the README quotes it";
+      << "estimated gain range not as the README quotes it";
   EXPECT_NE(text.find("+/- 47.282 deg"), std::string::npos)
-      << "guaranteed phase range not as the README quotes it";
+      << "estimated phase range not as the README quotes it";
 
   // The claim the example exists to make: a BOUNDED robustness margin sitting
   // underneath an INFINITE classical gain margin. If either half of that stops
   // being true, the example stops making its point and this fails.
-  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+  EXPECT_NE(text.find("| Gain | not found in searched band |"), std::string::npos);
+
+  const auto* margins = result.find("margins");
+  ASSERT_NE(margins, nullptr);
+  EXPECT_NE(margins->summary.find("GM not found in searched band"), std::string::npos);
+  EXPECT_EQ(margins->summary.find("GM infinite"), std::string::npos);
 
   // And the report must say how the peak was found, since a grid maximum makes
   // the disk margin an optimistic bound.
@@ -191,11 +200,12 @@ TEST(ExampleNt33aLateralMimo, ShowsThePerChannelMarginsBeingOptimistic) {
 
   EXPECT_NE(text.find("| Sensitivity M_S | 1.84855 |"), std::string::npos);
   EXPECT_NE(text.find("| Complementary M_T | 1.80178 |"), std::string::npos);
-  EXPECT_NE(text.find("| Gain | infinite |"), std::string::npos);
+  EXPECT_NE(text.find("| Gain | not found in searched band |"), std::string::npos);
   EXPECT_NE(text.find("48.486 deg"), std::string::npos);
 
   // The shortest distance to the critical point, which the README quotes.
   EXPECT_NE(text.find("0.54097"), std::string::npos);
+  EXPECT_NE(text.find("smallest singular value of I+L"), std::string::npos);
 }
 
 TEST(ExampleNt33aLateralMimo, ReportsTwoPrincipalGainsAndTheirSpread) {

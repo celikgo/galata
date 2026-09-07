@@ -14,6 +14,7 @@ galata_find_eigen()
 
 add_library(galata_core
   version.cpp
+  sha256.cpp
   quaternion.cpp
   frames.cpp
   state.cpp

@@ -38,7 +38,7 @@ fail=0
 checked=0
 warned=0
 
-docs="$(git ls-files '*.md')"
+docs="$(git ls-files --cached --others --exclude-standard -- '*.md' | LC_ALL=C sort -u)"
 if [ -z "$docs" ]; then
   printf '::error::no Markdown files found — this gate would be vacuously green\n'
   exit 1
@@ -47,6 +47,7 @@ fi
 # --- Absolute URLs --------------------------------------------------------
 urls="$(
   printf '%s\n' "$docs" | while IFS= read -r f; do
+    [ -f "$f" ] || continue
     grep -oE 'https?://[^][ )>"'"'"'`]+' "$f" || true
   done | sed -E 's/[.,;:]+$//' | LC_ALL=C sort -u
 )"
@@ -104,7 +105,7 @@ fi
 printf '\nRelative links\n'
 relative_found=0
 while IFS= read -r f; do
-  [ -n "$f" ] || continue
+  [ -n "$f" ] && [ -f "$f" ] || continue
   dir="$(dirname "$f")"
   targets="$(grep -oE '\]\([^)#][^)]*\)' "$f" | sed -E 's/^\]\(//; s/\)$//' || true)"
   [ -n "$targets" ] || continue

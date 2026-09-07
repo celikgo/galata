@@ -472,7 +472,7 @@ def nyquist(run):
         # The perturbed loop is f&#183;L for f in the disk, so the closed loop is
         # stable for all of them exactly when L avoids {-1/f}. That image is
         # itself a disk, and it meets the real axis at -1/gamma_min and
-        # -1/gamma_max — the two gain limits the margin guarantees.
+        # -1/gamma_max — the two estimated gain limits.
         left_x, right_x = -1.0 / g_min, -1.0 / g_max
         centre = (left_x + right_x) / 2.0
         radius = abs(left_x - right_x) / 2.0
@@ -913,11 +913,11 @@ def section_loop(run):
 
     governing = [
         ["Gain margin",
-         "infinite" if not margins["has_gain_margin"]
+         "not found in searched band" if not margins["has_gain_margin"]
          else f'{num(margins["gain_margin"], 4)} ({num(margins["gain_margin_db"], 2)} dB)',
          num(margins["gain_margin_frequency_rad_s"], 5)],
         ["Phase margin",
-         "infinite" if not margins["has_phase_margin"]
+         "not found in searched band" if not margins["has_phase_margin"]
          else f'{num(margins["phase_margin_deg"], 3)} deg',
          num(margins["phase_margin_frequency_rad_s"], 5)],
         ["Delay margin",
@@ -937,30 +937,15 @@ def section_loop(run):
         ["Disk margin &alpha;", num(disk["alpha"], 5), "&mdash;"],
         ["Peak of |S + (&sigma;&minus;1)/2|", num(disk["peak_gain"], 5), "&mdash;"],
         ["Critical frequency", num(disk["critical_frequency_rad_s"], 5), "rad/s"],
-        ["Guaranteed gain range", gain_range, "&mdash;"],
-        ["Guaranteed phase range", phase_range, "&mdash;"],
+        ["Estimated gain range", gain_range, "&mdash;"],
+        ["Estimated phase range", phase_range, "&mdash;"],
         ["Sensitivity peak M<sub>S</sub>", num(sens["m_s"], 5),
          f'at {num(sens["m_s_frequency_rad_s"], 4)} rad/s'],
         ["Complementary peak M<sub>T</sub>", num(sens["m_t"], 5),
          f'at {num(sens["m_t_frequency_rad_s"], 4)} rad/s'],
     ]
 
-    guaranteed = ""
-    if sens["guaranteed_applies"] and sens["guaranteed_valid"]:
-        guaranteed = f"""
-<h3>What those peaks <em>guarantee</em></h3>
-<p>Skogestad &amp; Postlethwaite, 2nd&nbsp;ed., equations (2.47) and (2.48).
-Lower bounds: the loop&rsquo;s actual margins are at least this good. The two
-gain-margin bounds have different functional forms &mdash;
-M<sub>S</sub>/(M<sub>S</sub>&minus;1) against 1&nbsp;+&nbsp;1/M<sub>T</sub>
-&mdash; which is easy to blur from memory.</p>
-{table(["From", "Gain margin at least", "Phase margin at least"],
-       [["M<sub>S</sub>", num(sens["gain_margin_from_m_s"], 4),
-         f'{num(sens["phase_margin_from_m_s_deg"], 3)} deg'],
-        ["M<sub>T</sub>", num(sens["gain_margin_from_m_t"], 4),
-         f'{num(sens["phase_margin_from_m_t_deg"], 3)} deg']],
-       numeric={1, 2})}
-"""
+    guaranteed = ""  # Sampled peaks never establish guaranteed margin evidence.
 
     return f"""
 <h2 id="loop">One closed loop</h2>
@@ -999,6 +984,8 @@ loop&rsquo;s own lightly damped modes. Computed by
 </figure>
 
 <h3>The governing margins</h3>
+<p><b>Nominal closed-loop stability:</b>
+{"internally stable, checked from the state-space closed-loop poles" if margins["nominal_closed_loop_stable"] else "not established as strictly stable; crossover values alone are not a stability claim"}.</p>
 {table(["Margin", "Value", "At (rad/s)"], governing, numeric={1, 2})}
 
 <h3>Every crossover, not just the governing one</h3>
@@ -1009,9 +996,9 @@ as comfortable at the largest of them.</p>
 {routine(loop["margins_routine"])}
 <p class="note-box">Crossovers are found by <b>searching a frequency grid</b>. A
 crossover pair narrower than the grid spacing is not found, which is why the band
-and the point count travel with the result. Nothing here proves closed-loop
-stability either: margins are distances from the critical point, not a Nyquist
-encirclement count.</p>
+and the point count travel with the result. Nominal stability is checked
+separately from the closed-loop poles; these crossover distances do not include
+unmodelled dynamics or actuator constraints.</p>
 
 <h2 id="disk">Gain and phase together</h2>
 <p>The gain margin is the tolerable gain change with <em>no</em> phase change;
@@ -1026,12 +1013,12 @@ exactly when L(j&omega;) misses the shaded region.</p>
 <figcaption><b>Nyquist, against the disk the loop must avoid.</b> Axes are the
 real and imaginary parts of L(j&omega;), dimensionless. The shaded disk meets the
 real axis at &minus;1/&gamma;<sub>min</sub> and &minus;1/&gamma;<sub>max</sub>,
-the two gain limits the margin guarantees, and the marked point is where the
+the two estimated gain limits, and the marked point is where the
 curve touches it &mdash; the boundary perturbation
 f = {num(disk["destabilising_perturbation_re"], 4)}
 {"&minus;" if disk["destabilising_perturbation_im"] < 0 else "+"}
 {num(abs(disk["destabilising_perturbation_im"]), 4)}j places a closed-loop pole
-exactly at s = j{num(disk["critical_frequency_rad_s"], 4)}. The low-frequency arm
+near s = j{num(disk["critical_frequency_rad_s"], 4)}. The low-frequency arm
 runs off the panel. Computed by
 <code>{esc(loop["disk_routine"])}</code>.</figcaption>
 </figure>
@@ -1043,7 +1030,8 @@ margin, M<sub>S</sub> and M<sub>T</sub> are all found by searching a refined
 frequency grid and not by the exact Hamiltonian-eigenvalue method, so each peak
 is a lower bound on the true H-infinity norm and each derived margin is an
 <em>upper</em> bound on the true one. The error is in the optimistic direction.
-Treat a marginal result as marginal.</p>
+These sampled results establish no guaranteed tolerance. Use the separate
+numerical-bound capabilities to assess conservative margins.</p>
 """
 
 

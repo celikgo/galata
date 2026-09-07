@@ -18,8 +18,10 @@
 #include "galata/pipeline/value.hpp"
 
 #include <any>
+#include <cstddef>
 #include <functional>
 #include <map>
+#include <memory>
 // <stdexcept> for the std::runtime_error thrown by payload_as below. libstdc++
 // and libc++ both pull it in transitively through one of the headers above;
 // MSVC's standard library does not, and this header failed to compile on
@@ -28,7 +30,13 @@
 #include <string>
 #include <vector>
 
+namespace galata::linearize {
+struct Linearisation;
+}
+
 namespace galata::pipeline {
+
+class RunFiles;
 
 // Everything a stage produces, with the provenance charter rule 9 requires: a
 // number never reaches the user without knowing which capability made it, from
@@ -42,6 +50,13 @@ struct Artifact {
   // A one-line human summary, printed by the CLI as each stage completes.
   std::string summary;
   std::any payload;
+
+  // Immutable diagnostics of each source Jacobian, keyed by its study stage.
+  // The executor preserves the union through downstream transformations. These
+  // qualify the source linearization, not the numerical error of derived results.
+  // New records must use the executing stage ID; inherited records retain the
+  // same pointer. Null, nonfinite or malformed source diagnostics are refused.
+  std::map<std::string, std::shared_ptr<const linearize::Linearisation>> linearization_evidence;
 
   // Throws with a message naming both kinds when the cast fails, rather than
   // returning a null pointer the caller might not check.
@@ -67,11 +82,18 @@ struct StageContext {
   std::string base_directory;
   // Where output files go. Relative output paths resolve against this.
   std::string output_directory;
+  // Shared run-scoped file access: contains writes and records the bytes used.
+  std::shared_ptr<RunFiles> files;
+  // Study-local identity of the executing stage; empty for direct invocations.
+  std::string stage_id;
 
   // Resolves `{from: id}` and returns the referenced artefact.
   [[nodiscard]] const Artifact& upstream_at(const std::string& key) const;
   [[nodiscard]] std::string resolve_input_path(const std::string& path) const;
   [[nodiscard]] std::string resolve_output_path(const std::string& path) const;
+  [[nodiscard]] std::string read_input(const std::string& path) const;
+  [[nodiscard]] std::string read_input(const std::string& path, std::size_t max_bytes) const;
+  void write_output(const std::string& path, const std::string& bytes) const;
 };
 
 using CapabilityFunction = std::function<Artifact(const StageContext&)>;
@@ -87,6 +109,16 @@ struct Capability {
   enum class State { Implemented, ImplementedUnvalidated, Stub };
   State state = State::ImplementedUnvalidated;
   CapabilityFunction run;
+  // Closed input vocabulary. Empty means no inputs, never "accept anything".
+  // Validated before any stage executes, including out-of-tree registrations.
+  std::vector<std::string> input_keys = {};
+  // Optional file roles, used to snapshot inputs and preflight all outputs
+  // before execution. The keys must also occur in input_keys.
+  std::vector<std::string> input_file_keys = {};
+  std::vector<std::string> output_file_keys = {};
+  // Optional positive byte limits for declared input file roles. Preflight
+  // snapshots these before unbounded roles, and the reader also checks caches.
+  std::map<std::string, std::size_t> input_file_byte_limits = {};
 };
 
 [[nodiscard]] std::string to_string(Capability::State state);

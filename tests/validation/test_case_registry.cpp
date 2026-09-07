@@ -20,6 +20,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -27,6 +28,38 @@ using galata::validation::Case;
 using galata::validation::claims_a_comparison;
 using galata::validation::Status;
 using galata::validation::validation_cases;
+
+bool has_validating_case(const std::string& capability, const std::vector<Case>& cases) {
+  for (const Case& validation_case : cases) {
+    if (validation_case.status != Status::Validated
+        && validation_case.status != Status::ValidatedWithCaveat) {
+      continue;
+    }
+    for (const std::string& named : validation_case.capabilities) {
+      if (named == capability) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+TEST(ValidationCaseRegistry, ADiscrepancyAloneCannotValidateACapability) {
+  // A published comparison that disagrees is evidence, but cannot support an
+  // "implemented and validated" claim without another case that agrees.
+  Case comparison;
+  comparison.capabilities = {"example"};
+  for (const Status status : {Status::KnownDiscrepancy,
+                              Status::Unvalidated,
+                              Status::SelfConsistent,
+                              Status::NotImplemented}) {
+    comparison.status = status;
+    EXPECT_FALSE(has_validating_case("example", {comparison}));
+  }
+  comparison.status = Status::Validated;
+  EXPECT_TRUE(has_validating_case("example", {comparison}));
+  EXPECT_FALSE(has_validating_case("a-different-capability", {comparison}));
+}
 
 TEST(ValidationCaseRegistry, IsNotEmptyAndHasUniqueIds) {
   const auto& cases = validation_cases();
@@ -97,18 +130,7 @@ TEST(ValidationCaseRegistry, CapabilitiesClaimingValidationAreBackedByACase) {
     if (capability->state != galata::pipeline::Capability::State::Implemented) {
       continue;
     }
-    bool backed = false;
-    for (const Case& validation_case : validation_cases()) {
-      if (!claims_a_comparison(validation_case.status)) {
-        continue;
-      }
-      for (const std::string& named : validation_case.capabilities) {
-        if (named == capability->id) {
-          backed = true;
-        }
-      }
-    }
-    EXPECT_TRUE(backed)
+    EXPECT_TRUE(has_validating_case(capability->id, validation_cases()))
         << "capability '" << capability->id
         << "' declares State::Implemented, which renders as 'implemented and validated', but "
            "no validation case backs it. Either add a case to "

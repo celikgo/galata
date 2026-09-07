@@ -156,6 +156,8 @@ struct AtmosphereState {
 // rather than clamping because a silently clamped atmosphere produces a
 // confidently wrong density, and a confidently wrong density produces a
 // confidently wrong trim.
+// Throws std::invalid_argument for a non-finite offset, a non-positive absolute
+// temperature, or an offset whose derived properties overflow or underflow.
 [[nodiscard]] AtmosphereState isa(double geometric_altitude_m, double delta_isa_k = 0.0);
 
 }  // namespace galata::core

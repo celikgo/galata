@@ -36,11 +36,25 @@ permissions:
   contents: read
 
 jobs:
+  verify-ci:
+    name: Complete CI for documentation source
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_sha: ${{ github.sha }}
+
   build:
+    needs: verify-ci
     name: Build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Render only the CI-verified source
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          VERIFIED_SOURCE_SHA: ${{ needs.verify-ci.outputs.source_sha }}
+        run: python3 scripts/check-ci-source.py
 
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }

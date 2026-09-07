@@ -29,9 +29,11 @@ two files, which is the byte comparison; the tool prints at `%.17g`, which
 round-trips a double exactly, so byte-identical output means bit-identical values
 rather than values that merely print the same.
 
-There is no test that runs a *pipeline* twice and diffs its output files. That
-would be the stronger check, because it would cover the report writers as well as
-the numerics, and nothing currently gates those.
+The integration test
+`ProductFiles.ExplicitRepeatReusesIdenticalManifestAndChangedInputMakesANewOne`
+also runs a study twice and checks identical content-addressed manifests. This
+covers its report bytes through the manifest output hashes; it does not establish
+repeatability for every possible study or concurrent dynamic-loader activity.
 
 **Tier 2 — same source, different platform: agreement to a published bound.**
 Output produced on Linux, macOS and Windows agrees to a documented tolerance —
@@ -44,9 +46,8 @@ every fingerprint key prefixed `tier1.` before it compares anything. Dividing by
 the perturbation h amplifies a libm disagreement by 1/h, which on a small matrix
 entry reaches about 1e-8 relative through nobody's error — past this gate. Those
 values are held byte-identical *within* a platform by tier 1 instead, which is
-the stronger claim; the rest is what the 1e-9 bound covers. The split is 47
-excluded of 145 fingerprinted values as this is written, and
-`docs/VERIFICATION.md` reports both counts from the run rather than from here.
+the stronger claim; the rest is what the 1e-9 bound covers. `docs/VERIFICATION.md` reports the current included/excluded counts from the
+run; this record deliberately carries no hand-maintained fingerprint counts.
 
 The *observed* deviation is printed by every comparison rather than merely
 bounded, and it is read from the workflow log. It is deliberately **not**
@@ -115,8 +116,9 @@ linked to the document that defines it.
   x86-64 System V, 64-bit on MSVC and 128-bit quad on AArch64 Linux. A result
   that touches it is non-portable by construction.
 - **Locale-independent formatting, delivered by never changing the locale — and
-  now gated.** Nothing in galata calls `setlocale` or `imbue`, so the process
-  stays in the `"C"` locale and a decimal comma cannot reach a result file.
+  now gated.** The CLI does not adopt the environment locale. Run manifests additionally
+  use the classic locale explicitly. Other report streams still rely on the
+  process locale; the embedded-host limitation below remains.
   Output goes through `std::printf` in `tools/determinism` and through iostreams
   with `std::setprecision` in the pipeline's report writers, and both take their
   decimal point from that locale.

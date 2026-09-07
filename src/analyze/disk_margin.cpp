@@ -4,8 +4,8 @@
 
 #include "galata/analyze/frequency_response.hpp"
 
+#include "analysis_checks.hpp"
 #include "peak_search.hpp"
-#include <Eigen/Eigenvalues>
 
 #include <cmath>
 #include <limits>
@@ -18,7 +18,7 @@ namespace {
 // | S(jw) + (sigma - 1)/2 |, the quantity whose peak IS the reciprocal of the
 // disk margin (eq:alphadm).
 double shifted_sensitivity_gain(const LoopEvaluator& loop, double frequency, double skew) {
-  const std::complex<double> l = loop(frequency);
+  const std::complex<double> l = detail::checked_loop_value(loop, frequency, "disk_margin");
   const std::complex<double> sensitivity = 1.0 / (1.0 + l);
   return std::abs(sensitivity + (skew - 1.0) / 2.0);
 }
@@ -40,9 +40,7 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
   if (grid.empty()) {
     grid = logarithmic_grid(options.start_rad_s, options.stop_rad_s, options.grid_points);
   }
-  if (grid.size() < 2) {
-    throw std::invalid_argument("disk_margin: need at least two frequencies");
-  }
+  detail::require_frequency_grid(grid, "disk_margin");
 
   const auto gain = [&loop, skew](double frequency) {
     return shifted_sensitivity_gain(loop, frequency, skew);
@@ -81,6 +79,10 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
   }
 
   const double alpha = 1.0 / peak_value;
+  if (!std::isfinite(alpha)) {
+    throw std::domain_error(
+        "disk_margin: reciprocal peak overflow; margin is numerically unresolved");
+  }
   margin.alpha = alpha;
 
   // eq:galphamax.
@@ -114,7 +116,8 @@ DiskMargin disk_margin(const LoopEvaluator& loop, double skew, const MarginOptio
   }
 
   // The destabilising perturbation from the theorem's proof.
-  const std::complex<double> sensitivity = 1.0 / (1.0 + loop(critical_frequency));
+  const std::complex<double> sensitivity =
+      1.0 / (1.0 + detail::checked_loop_value(loop, critical_frequency, "disk_margin"));
   const std::complex<double> shifted = sensitivity + (skew - 1.0) / 2.0;
   margin.destabilising_delta = 1.0 / shifted;
   const std::complex<double> numerator = 2.0 + (1.0 - skew) * margin.destabilising_delta;
@@ -132,6 +135,10 @@ DiskMargin disk_margin(const model::LinearSystem& loop,
                        double skew,
                        const MarginOptions& options) {
   loop.validate();
+  if (input_index < 0 || input_index >= loop.input_count() || output_index < 0
+      || output_index >= loop.output_count()) {
+    throw std::out_of_range("disk_margin: input or output index is out of range");
+  }
 
   // The theorem assumes the NOMINAL closed loop is stable. Without that,
   // alpha_max is a number with no meaning attached, so refuse rather than
@@ -146,23 +153,7 @@ DiskMargin disk_margin(const model::LinearSystem& loop,
   }
   const Eigen::MatrixXd closed = loop.a - b * c / (1.0 + feedthrough);
 
-  Eigen::EigenSolver<Eigen::MatrixXd> solver(closed, /*computeEigenvectors=*/false);
-  if (solver.info() != Eigen::Success) {
-    throw std::runtime_error("disk_margin: closed-loop eigenvalue computation failed");
-  }
-  double worst_real = -std::numeric_limits<double>::infinity();
-  for (Eigen::Index index = 0; index < solver.eigenvalues().size(); ++index) {
-    worst_real = std::max(worst_real, solver.eigenvalues()(index).real());
-  }
-  if (worst_real >= 0.0) {
-    std::ostringstream message;
-    message << "disk_margin: the nominal closed loop is already unstable (rightmost pole at real "
-               "part "
-            << worst_real
-            << "). The disk margin theorem assumes nominal stability; applied here it would "
-               "return a number that means nothing.";
-    throw std::invalid_argument(message.str());
-  }
+  detail::require_hurwitz(closed, "disk_margin");
 
   MarginOptions resolved = options;
   if (resolved.frequencies.empty()) {

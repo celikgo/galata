@@ -147,6 +147,56 @@ TEST(DiskMargin, RefusesWhatItCannotCompute) {
   EXPECT_THROW((void)disk_margin(evaluator, 0.0, single_point), std::invalid_argument);
 }
 
+TEST(DiskMargin, RejectsInvalidChannelsBeforeAccessingTheMatrices) {
+  const auto loop = chain(1.0);
+  for (const int invalid : {-1, 1}) {
+    EXPECT_THROW((void)disk_margin(loop, invalid, 0), std::out_of_range);
+    EXPECT_THROW((void)disk_margin(loop, 0, invalid), std::out_of_range);
+  }
+}
+
+TEST(DiskMargin, NonfiniteEvaluatorsCannotBecomeAnUnboundedMargin) {
+  for (const double invalid :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+    for (const auto value : {std::complex<double>(invalid, 0), std::complex<double>(0, invalid)}) {
+      EXPECT_THROW((void)disk_margin([value](double) { return value; }), std::domain_error);
+    }
+  }
+  // A finite evaluator can also produce a singular shifted sensitivity. It is
+  // a failed evaluation of this theorem, not the identically zero norm case.
+  EXPECT_THROW((void)disk_margin([](double) { return std::complex<double>(-1, 0); }),
+               std::domain_error);
+  // A nonzero subnormal shifted sensitivity must not overflow alpha and then
+  // generate NaN gain ranges under the label of an unlimited margin.
+  EXPECT_THROW((void)disk_margin([](double) { return std::complex<double>(1, 4e-320); }),
+               std::domain_error);
+  MarginOptions options;
+  options.frequencies = {1.0, 2.0};
+  const LoopEvaluator bad_between_samples = [](double frequency) {
+    if (frequency == 1.0 || frequency == 2.0) {
+      return 1.0 / std::complex<double>(1.0, frequency);
+    }
+    return std::complex<double>(std::numeric_limits<double>::quiet_NaN(), 0.0);
+  };
+  EXPECT_THROW((void)disk_margin(bad_between_samples, 0, options), std::domain_error);
+}
+
+TEST(DiskMargin, RequiresAFinitePositiveIncreasingSearchGrid) {
+  const LoopEvaluator evaluator = [](double frequency) {
+    return 1.0 / std::complex<double>(1.0, frequency);
+  };
+  for (const std::vector<double>& grid : {std::vector<double>{0, 1},
+                                          {1, 1},
+                                          {2, 1},
+                                          {-1, 1},
+                                          {1, std::numeric_limits<double>::infinity()},
+                                          {1, std::numeric_limits<double>::quiet_NaN()}}) {
+    MarginOptions options;
+    options.frequencies = grid;
+    EXPECT_THROW((void)disk_margin(evaluator, 0, options), std::invalid_argument);
+  }
+}
+
 TEST(DiskMargin, AMoreDampedLoopHasALargerMargin) {
   // A monotonicity property rather than a value: pulling the third pole of
   // 1/(s(s+1)(s+p)) further left makes the loop more robust, so alpha must

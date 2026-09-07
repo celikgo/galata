@@ -41,6 +41,28 @@ core::State state_from_unknowns(double alpha_rad,
 TrimPoint trim_level(const model::Aircraft& aircraft, const LevelTrimRequest& request) {
   aircraft.validate();
 
+  if (!std::isfinite(request.airspeed_m_s) || request.airspeed_m_s < 0.0
+      || !std::isfinite(request.mach) || request.mach < 0.0
+      || !std::isfinite(request.flight_path_angle_rad) || !std::isfinite(request.residual_tolerance)
+      || !(request.residual_tolerance > 0.0)) {
+    throw std::invalid_argument(
+        "trim_level: speed and Mach must be finite and non-negative, flight-path angle must "
+        "be finite, and residual_tolerance must be positive and finite");
+  }
+  if (!request.use_default_guess
+      && (!std::isfinite(request.initial_alpha_rad) || !std::isfinite(request.initial_elevator_rad)
+          || !std::isfinite(request.initial_thrust_n))) {
+    throw std::invalid_argument("trim_level: the initial guess must be finite");
+  }
+  // The three-unknown solve assumes a plane of symmetry through the CG.
+  // A lateral reference offset transfers lift and drag into roll/yaw moments
+  // which this residual has no controls to balance.
+  if (!aircraft.cg_to_aero_reference_m.allFinite() || aircraft.cg_to_aero_reference_m.y() != 0.0) {
+    throw std::invalid_argument(
+        "trim_level: the aerodynamic reference offset must be finite with zero lateral "
+        "component; asymmetric trim is not supported");
+  }
+
   const bool has_airspeed = request.airspeed_m_s > 0.0;
   const bool has_mach = request.mach > 0.0;
   if (has_airspeed == has_mach) {
@@ -52,8 +74,8 @@ TrimPoint trim_level(const model::Aircraft& aircraft, const LevelTrimRequest& re
   const core::AtmosphereState atmosphere = core::isa(request.altitude_m, request.delta_isa_k);
   const double airspeed =
       has_airspeed ? request.airspeed_m_s : request.mach * atmosphere.speed_of_sound_m_s;
-  if (!(airspeed > 0.0)) {
-    throw std::invalid_argument("trim_level: the resolved airspeed is not positive");
+  if (!std::isfinite(airspeed) || !(airspeed > 0.0)) {
+    throw std::invalid_argument("trim_level: the resolved airspeed must be positive and finite");
   }
 
   const double dynamic_pressure = 0.5 * atmosphere.density_kg_m3 * airspeed * airspeed;
@@ -123,6 +145,19 @@ TrimPoint trim_level(const model::Aircraft& aircraft, const LevelTrimRequest& re
       solved.solution(0), request.altitude_m, airspeed, request.flight_path_angle_rad);
   trim.controls.elevator_rad = solved.solution(1);
   trim.controls.thrust_n = solved.solution(2);
+
+  // Verify all six dynamic equations before calling the point a trim. The
+  // reduced Newton residual alone cannot establish lateral equilibrium, and
+  // position rates are deliberately excluded for a translating aircraft.
+  const core::StateVector rate =
+      aircraft.derivative(trim.state, trim.controls, request.delta_isa_k);
+  Eigen::Matrix<double, 6, 1> accelerations;
+  accelerations << rate.segment<3>(core::kVelocityU), rate.segment<3>(core::kRateP);
+  if (!rate.allFinite() || !(accelerations.norm() <= request.residual_tolerance)) {
+    throw std::runtime_error(
+        "trim_level: the solved longitudinal residual does not satisfy all six dynamic "
+        "equilibrium equations; no trim is returned");
+  }
   trim.atmosphere = atmosphere;
   trim.alpha_rad = solved.solution(0);
   trim.flight_path_angle_rad = request.flight_path_angle_rad;
@@ -132,6 +167,7 @@ TrimPoint trim_level(const model::Aircraft& aircraft, const LevelTrimRequest& re
       (atmosphere.speed_of_sound_m_s > 0.0) ? airspeed / atmosphere.speed_of_sound_m_s : 0.0;
   trim.dynamic_pressure_pa = dynamic_pressure;
   trim.residual_norm = solved.residual_norm;
+  trim.residual_tolerance = request.residual_tolerance;
   trim.jacobian_condition_number = solved.jacobian_condition_number;
   trim.residual_history = solved.residual_history;
   trim.envelope = aircraft.envelope(trim.state, atmosphere);

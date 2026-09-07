@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 
 # ---------------------------------------------------------------------------
 # Version: single source of truth (docs/adr/0005-single-source-of-version.md).
@@ -69,6 +69,8 @@ if(BUILD_TESTING AND GALATA_BUILD_TESTS)
 endif()
 
 message(STATUS "")
+
+include(GalataInstall)
 message(STATUS "galata configuration")
 message(STATUS "  Version:        ${PROJECT_VERSION}")
 message(STATUS "  ABI version:    ${GALATA_ABI_VERSION}")

@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 
 namespace {
 
@@ -184,6 +185,88 @@ TEST(Rk4, RejectsArgumentsThatWouldMakeStepCountAmbiguous) {
   EXPECT_THROW((void)galata::numerics::integrate_fixed_step(zero, scalar(0.0), 0.0, 0.1, -1),
                std::invalid_argument);
   EXPECT_THROW((void)galata::numerics::integrate_fixed_step(zero, scalar(0.0), 0.0, 0.1, 10, 0),
+               std::invalid_argument);
+}
+
+TEST(Rk4, RejectsNonFiniteInputsAndUnrepresentableTimeSpansBeforeEvaluation) {
+  int calls = 0;
+  const DerivativeFunction zero = [&](double, const Eigen::VectorXd&) {
+    ++calls;
+    return scalar(0.0);
+  };
+  for (const double bad :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW((void)rk4_step(zero, 0.0, scalar(1.0), bad), std::invalid_argument);
+    EXPECT_THROW((void)rk4_step(zero, bad, scalar(1.0), 0.1), std::invalid_argument);
+    EXPECT_THROW((void)rk4_step(zero, 0.0, scalar(bad), 0.1), std::invalid_argument);
+    EXPECT_THROW((void)galata::numerics::integrate_fixed_step(zero, scalar(1.0), 0.0, bad, 0),
+                 std::invalid_argument);
+    EXPECT_THROW((void)galata::numerics::integrate_fixed_step(zero, scalar(bad), 0.0, 0.1, 0),
+                 std::invalid_argument);
+    EXPECT_THROW((void)galata::numerics::integrate_fixed_step(zero, scalar(1.0), bad, 0.1, 0),
+                 std::invalid_argument);
+  }
+  EXPECT_THROW((void)galata::numerics::integrate_fixed_step(
+                   zero, scalar(1.0), 0.0, std::numeric_limits<double>::max(), 2),
+               std::invalid_argument);
+  EXPECT_THROW((void)rk4_step(zero, 1e20, scalar(1.0), 0.1), std::invalid_argument)
+      << "at this epoch binary64 cannot represent distinct RK stage times";
+  EXPECT_EQ(calls, 0);
+}
+
+TEST(Rk4, RejectsInvalidIntermediateDerivativesAndArithmetic) {
+  const DerivativeFunction nonfinite = [](double time, const Eigen::VectorXd&) {
+    return scalar(time == 0.0 ? 1.0 : std::numeric_limits<double>::quiet_NaN());
+  };
+  EXPECT_THROW((void)rk4_step(nonfinite, 0.0, scalar(0.0), 0.1), std::runtime_error);
+  const DerivativeFunction wrong_dimension = [](double, const Eigen::VectorXd&) {
+    return Eigen::VectorXd::Zero(2).eval();
+  };
+  EXPECT_THROW((void)rk4_step(wrong_dimension, 0.0, scalar(0.0), 0.1), std::runtime_error);
+  const DerivativeFunction huge = [](double, const Eigen::VectorXd&) {
+    return scalar(std::numeric_limits<double>::max());
+  };
+  EXPECT_THROW((void)rk4_step(huge, 0.0, scalar(1.0), 4.0), std::runtime_error);
+}
+
+TEST(Rk4, RejectsAnUnderflowedWeightThatWouldEraseARepresentableStateIncrement) {
+  // The stage times 0, h/2, h remain distinct, and h*f is representable, but
+  // the fixed RK4 grouping must not silently multiply the slopes by h/6 = 0.
+  const double step = 2.0 * std::numeric_limits<double>::denorm_min();
+  const DerivativeFunction slope = [](double, const Eigen::VectorXd&) { return scalar(1e307); };
+  ASSERT_GT(step * 1e307, 0.0);
+  EXPECT_THROW((void)rk4_step(slope, 0.0, scalar(0.0), step), std::invalid_argument);
+}
+
+TEST(Rk4, ProjectionCannotHideNonFiniteStatesOrChangeTheirDimension) {
+  const DerivativeFunction zero = [](double, const Eigen::VectorXd&) { return scalar(0.0); };
+  const galata::numerics::ProjectionFunction poison = [](Eigen::VectorXd& x) {
+    x(0) = std::numeric_limits<double>::infinity();
+  };
+  const galata::numerics::ProjectionFunction resize = [](Eigen::VectorXd& x) {
+    x = Eigen::VectorXd::Zero(2);
+  };
+  EXPECT_THROW(
+      (void)galata::numerics::integrate_fixed_step(zero, scalar(1.0), 0.0, 0.1, 0, 1, poison),
+      std::runtime_error);
+  EXPECT_THROW(
+      (void)galata::numerics::integrate_fixed_step(zero, scalar(1.0), 0.0, 0.1, 0, 1, resize),
+      std::runtime_error);
+  const galata::numerics::ProjectionFunction conceal = [](Eigen::VectorXd& x) { x(0) = 0.0; };
+  EXPECT_THROW((void)galata::numerics::integrate_fixed_step(
+                   zero, scalar(std::numeric_limits<double>::quiet_NaN()), 0.0, 0.1, 0, 1, conceal),
+               std::invalid_argument);
+}
+
+TEST(Rk4, StepSizeStudyRejectsRefinementOverflowBeforeRunningTheCoarseStudy) {
+  const DerivativeFunction unexpected = [](double, const Eigen::VectorXd&) -> Eigen::VectorXd {
+    throw std::logic_error("the invalid refinement must be rejected before derivative evaluation");
+  };
+  EXPECT_THROW((void)galata::numerics::step_size_study(
+                   unexpected, scalar(1.0), 0.0, 0.1, std::numeric_limits<int>::max() / 4 + 1),
+               std::invalid_argument);
+  EXPECT_THROW((void)galata::numerics::step_size_study(
+                   unexpected, scalar(1.0), 0.0, std::numeric_limits<double>::denorm_min(), 1),
                std::invalid_argument);
 }
 

@@ -144,7 +144,7 @@ svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial
 <div class="meta">
 <span><b>Condition</b> 0 m, 69.494 m/s,
 M&nbsp;0.2042</span>
-<span><b>Built by</b> galata 0.2.0</span>
+<span><b>Built by</b> galata 0.3.0</span>
 <span><b>Emitter</b> <code>galata-report-data</code></span>
 <span><a href="https://celikgo.github.io/galata/">Documentation</a></span>
 <span><a href="https://github.com/celikgo/galata">Source</a></span>
@@ -438,7 +438,9 @@ loop&rsquo;s own lightly damped modes. Computed by
 </figure>
 
 <h3>The governing margins</h3>
-<div class="tw"><table><thead><tr><th class="">Margin</th><th class="n">Value</th><th class="n">At (rad/s)</th></tr></thead><tbody><tr><td class="">Gain margin</td><td class="n">infinite</td><td class="n">&mdash;</td></tr><tr><td class="">Phase margin</td><td class="n">48.497 deg</td><td class="n">1.60954</td></tr><tr><td class="">Delay margin</td><td class="n">0.52588 s</td><td class="n">1.60954</td></tr></tbody></table></div>
+<p><b>Nominal closed-loop stability:</b>
+internally stable, checked from the state-space closed-loop poles.</p>
+<div class="tw"><table><thead><tr><th class="">Margin</th><th class="n">Value</th><th class="n">At (rad/s)</th></tr></thead><tbody><tr><td class="">Gain margin</td><td class="n">not found in searched band</td><td class="n">&mdash;</td></tr><tr><td class="">Phase margin</td><td class="n">48.497 deg</td><td class="n">1.60954</td></tr><tr><td class="">Delay margin</td><td class="n">0.52588 s</td><td class="n">1.60954</td></tr></tbody></table></div>
 
 <h3>Every crossover, not just the governing one</h3>
 <p>A loop whose magnitude crosses unity three times has three phase margins. An
@@ -448,9 +450,9 @@ as comfortable at the largest of them.</p>
 <p class="routine">Computed by <code>galata::analyze::stability_margins</code>.</p>
 <p class="note-box">Crossovers are found by <b>searching a frequency grid</b>. A
 crossover pair narrower than the grid spacing is not found, which is why the band
-and the point count travel with the result. Nothing here proves closed-loop
-stability either: margins are distances from the critical point, not a Nyquist
-encirclement count.</p>
+and the point count travel with the result. Nominal stability is checked
+separately from the closed-loop poles; these crossover distances do not include
+unmodelled dynamics or actuator constraints.</p>
 
 <h2 id="disk">Gain and phase together</h2>
 <p>The gain margin is the tolerable gain change with <em>no</em> phase change;
@@ -505,32 +507,25 @@ exactly when L(j&omega;) misses the shaded region.</p>
 <figcaption><b>Nyquist, against the disk the loop must avoid.</b> Axes are the
 real and imaginary parts of L(j&omega;), dimensionless. The shaded disk meets the
 real axis at &minus;1/&gamma;<sub>min</sub> and &minus;1/&gamma;<sub>max</sub>,
-the two gain limits the margin guarantees, and the marked point is where the
+the two estimated gain limits, and the marked point is where the
 curve touches it &mdash; the boundary perturbation
 f = 0.8550
 &minus;
 0.8894j places a closed-loop pole
-exactly at s = j1.7574. The low-frequency arm
+near s = j1.7574. The low-frequency arm
 runs off the panel. Computed by
 <code>galata::analyze::disk_margin</code>.</figcaption>
 </figure>
 
-<div class="tw"><table><thead><tr><th class="">Quantity</th><th class="n">Value</th><th class="">Where</th></tr></thead><tbody><tr><td class="">Disk margin &alpha;</td><td class="n">0.87606</td><td class="">&mdash;</td></tr><tr><td class="">Peak of |S + (&sigma;&minus;1)/2|</td><td class="n">1.14147</td><td class="">&mdash;</td></tr><tr><td class="">Critical frequency</td><td class="n">1.75745</td><td class="">rad/s</td></tr><tr><td class="">Guaranteed gain range</td><td class="n">0.3908 to 2.5589 (-8.16 to 8.16 dB)</td><td class="">&mdash;</td></tr><tr><td class="">Guaranteed phase range</td><td class="n">&plusmn;47.310 deg</td><td class="">&mdash;</td></tr><tr><td class="">Sensitivity peak M<sub>S</sub></td><td class="n">1.44941</td><td class="">at 2.0441 rad/s</td></tr><tr><td class="">Complementary peak M<sub>T</sub></td><td class="n">1.25447</td><td class="">at 1.4844 rad/s</td></tr></tbody></table></div>
-
-<h3>What those peaks <em>guarantee</em></h3>
-<p>Skogestad &amp; Postlethwaite, 2nd&nbsp;ed., equations (2.47) and (2.48).
-Lower bounds: the loop&rsquo;s actual margins are at least this good. The two
-gain-margin bounds have different functional forms &mdash;
-M<sub>S</sub>/(M<sub>S</sub>&minus;1) against 1&nbsp;+&nbsp;1/M<sub>T</sub>
-&mdash; which is easy to blur from memory.</p>
-<div class="tw"><table><thead><tr><th class="">From</th><th class="n">Gain margin at least</th><th class="n">Phase margin at least</th></tr></thead><tbody><tr><td class="">M<sub>S</sub></td><td class="n">3.2251</td><td class="n">40.360 deg</td></tr><tr><td class="">M<sub>T</sub></td><td class="n">1.7972</td><td class="n">46.978 deg</td></tr></tbody></table></div>
+<div class="tw"><table><thead><tr><th class="">Quantity</th><th class="n">Value</th><th class="">Where</th></tr></thead><tbody><tr><td class="">Disk margin &alpha;</td><td class="n">0.87606</td><td class="">&mdash;</td></tr><tr><td class="">Peak of |S + (&sigma;&minus;1)/2|</td><td class="n">1.14147</td><td class="">&mdash;</td></tr><tr><td class="">Critical frequency</td><td class="n">1.75745</td><td class="">rad/s</td></tr><tr><td class="">Estimated gain range</td><td class="n">0.3908 to 2.5589 (-8.16 to 8.16 dB)</td><td class="">&mdash;</td></tr><tr><td class="">Estimated phase range</td><td class="n">&plusmn;47.310 deg</td><td class="">&mdash;</td></tr><tr><td class="">Sensitivity peak M<sub>S</sub></td><td class="n">1.44941</td><td class="">at 2.0441 rad/s</td></tr><tr><td class="">Complementary peak M<sub>T</sub></td><td class="n">1.25447</td><td class="">at 1.4844 rad/s</td></tr></tbody></table></div>
 
 <p class="note-box"><b>Every peak on this page is a grid maximum.</b> The disk
 margin, M<sub>S</sub> and M<sub>T</sub> are all found by searching a refined
 frequency grid and not by the exact Hamiltonian-eigenvalue method, so each peak
 is a lower bound on the true H-infinity norm and each derived margin is an
 <em>upper</em> bound on the true one. The error is in the optimistic direction.
-Treat a marginal result as marginal.</p>
+These sampled results establish no guaranteed tolerance. Use the separate
+numerical-bound capabilities to assess conservative margins.</p>
 
 
 <h2 id="matrices">The state matrices these came from</h2>
@@ -602,7 +597,7 @@ score column is for.</p>
 <footer>
 Generated by <code>scripts/gen-report-page.py</code> from
 <code>docs/assets/nt33a-fc1-run.json</code>, emitted by
-<code>tools/report/galata-report-data</code> at galata 0.2.0.
+<code>tools/report/galata-report-data</code> at galata 0.3.0.
 No hand-entered numbers, no network requests, no scripts.
 &middot; <a href="https://celikgo.github.io/galata/verification.html">V&amp;V report</a>
 &middot; <a href="https://github.com/celikgo/galata">github.com/celikgo/galata</a>

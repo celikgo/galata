@@ -49,14 +49,20 @@
 
 #include "fingerprint.hpp"
 
+#include "galata/analyze/disk_margin.hpp"
+#include "galata/analyze/hinfinity.hpp"
 #include "galata/analyze/modes.hpp"
+#include "galata/analyze/sensitivity.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/numerics/integrator.hpp"
+#include "galata/sim/linear.hpp"
+#include "galata/sim/nonlinear.hpp"
 #include "galata/sim/rigid_body.hpp"
+#include "galata/synth/control.hpp"
 #include "galata/trim/level.hpp"
 
 #include <cmath>
@@ -180,6 +186,29 @@ void fingerprint_trim_and_linearisation(const std::string& model_path, const Emi
   emit("trim.dynamic_pressure_pa", point.dynamic_pressure_pa);
   emit("trim.mach", point.mach);
 
+  // Fixed controls, a small pitch perturbation and bounded actuators. No
+  // finite-difference input: this exercises the nonlinear simulation path
+  // independently of the tier-1-only linearised aircraft below.
+  sim::NonlinearRequest simulation;
+  simulation.step_s = 0.005;
+  simulation.step_count = 200;
+  simulation.sample_stride = 200;
+  simulation.perturbation_state_names = {"theta"};
+  simulation.initial_perturbation = Eigen::VectorXd::Constant(1, 0.001);
+  for (std::size_t i = 0; i < 3; ++i) {
+    simulation.actuators[i] = {-0.35, 0.35, 1.0, 0.05};
+  }
+  simulation.actuators[3] = {0.0, 20000.0, 10000.0, 0.5};
+  const auto flight = sim::simulate_nonlinear(aircraft, point, simulation);
+  if (!flight.completed) {
+    throw std::runtime_error("determinism nonlinear simulation failed: "
+                             + flight.termination_reason);
+  }
+  const auto final_state = flight.samples.back().state.to_vector();
+  for (Eigen::Index i = 0; i < final_state.size(); ++i) {
+    emit("simulation.nonlinear.1s.state." + std::to_string(i), final_state(i));
+  }
+
   // Everything below is downstream of a finite difference. Tier 1 only.
   for (const bool longitudinal : {true, false}) {
     linearize::LinearisationOptions options;
@@ -209,6 +238,58 @@ void fingerprint_trim_and_linearisation(const std::string& model_path, const Emi
   }
 }
 
+void fingerprint_control_design(const Emit& emit) {
+  // Analytic double integrator, Q=I, R=1: well-conditioned and independent
+  // of finite differences. Schur vectors themselves have arbitrary phases;
+  // fingerprint the invariant solution and its resulting response.
+  model::LinearSystem plant;
+  plant.a = Eigen::Matrix2d::Zero();
+  plant.a(0, 1) = 1.0;
+  plant.b = Eigen::Vector2d(0.0, 1.0);
+  plant.state_names = {"position", "velocity"};
+  plant.input_names = {"force"};
+  const auto design =
+      synth::design_lqr(plant, Eigen::Matrix2d::Identity(), Eigen::MatrixXd::Identity(1, 1));
+  for (Eigen::Index i = 0; i < 2; ++i) {
+    emit("synthesis.lqr.k." + std::to_string(i), design.riccati.k(0, i));
+    for (Eigen::Index j = 0; j < 2; ++j) {
+      emit("synthesis.care.x." + std::to_string(i) + "." + std::to_string(j),
+           design.riccati.x(i, j));
+    }
+  }
+  const auto response = sim::simulate_linear(
+      design.closed_loop, Eigen::Vector2d(1.0, 0.0), Eigen::VectorXd::Zero(1), 0.005, 400, 400);
+  emit("simulation.linear.2s.position", response.states.back()(0));
+  emit("simulation.linear.2s.velocity", response.states.back()(1));
+
+  // Include loop analysis and norm bracketing in the same-binary fingerprint.
+  // Their search decisions are not assigned a cross-platform tolerance by
+  // this small case; the multi-platform gate still compares the algebraic
+  // control solution and smooth trajectories above.
+  model::LinearSystem loop;
+  loop.a = Eigen::Matrix3d::Zero();
+  loop.a(0, 1) = 1.0;
+  loop.a(1, 2) = 1.0;
+  loop.a.row(2) << -1.0, -3.0, -3.0;
+  loop.b = Eigen::Vector3d(0.0, 0.0, 1.0);
+  loop.c = Eigen::RowVector3d(2.0, 0.0, 0.0);
+  loop.state_names = {"x0", "x1", "x2"};
+  loop.input_names = {"input"};
+  loop.output_names = {"output"};
+  const auto margins = analyze::stability_margins(loop, 0, 0);
+  const auto disk = analyze::disk_margin(loop, 0, 0);
+  const auto peaks = analyze::sensitivity_peaks(loop);
+  const auto bounded = analyze::sensitivity_norm_bounds(loop);
+  emit("tier1.analysis.disk.alpha", disk.alpha);
+  emit("tier1.analysis.sensitivity.grid_peak", peaks.sensitivity_peak);
+  emit("tier1.analysis.sensitivity.lower", bounded.sensitivity.lower_bound);
+  emit("tier1.analysis.sensitivity.upper", bounded.sensitivity.upper_bound);
+  for (std::size_t i = 0; i < margins.gain_crossings.size(); ++i) {
+    emit("tier1.analysis.gain_crossover." + std::to_string(i),
+         margins.gain_crossings[i].frequency_rad_s);
+  }
+}
+
 }  // namespace
 
 void fingerprint(const std::string& model_path, const Emit& emit) {
@@ -216,6 +297,7 @@ void fingerprint(const std::string& model_path, const Emit& emit) {
   fingerprint_rigid_body(emit);
   fingerprint_modes(emit);
   fingerprint_trim_and_linearisation(model_path, emit);
+  fingerprint_control_design(emit);
 }
 
 Amplification amplification_study() {

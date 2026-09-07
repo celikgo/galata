@@ -22,6 +22,7 @@
 
 #include "galata/analyze/disk_margin.hpp"
 #include "galata/analyze/frequency_response.hpp"
+#include "galata/analyze/hinfinity.hpp"
 #include "galata/analyze/sensitivity.hpp"
 
 #include <Eigen/Dense>
@@ -29,8 +30,16 @@
 
 #include <cmath>
 #include <complex>
+#include <limits>
+#include <type_traits>
 
 namespace {
+
+// A sampled lower estimate must not implicitly satisfy a full-norm upper-bound
+// contract. This is deliberately a compile-time API boundary, not a flag that
+// callers can forget to inspect on an otherwise valid-looking result.
+static_assert(!std::is_invocable_v<decltype(&galata::analyze::guaranteed_margins),
+                                   const galata::analyze::SensitivityPeaks&>);
 
 using galata::analyze::disk_margin;
 using galata::analyze::logarithmic_grid;
@@ -247,6 +256,88 @@ TEST(Sensitivity, ReportsTheSearchedBand) {
   EXPECT_GE(peaks.grid_points, 300);
   EXPECT_EQ(peaks.sensitivity.size(), peaks.frequencies_rad_s.size());
   EXPECT_EQ(peaks.complementary_sensitivity.size(), peaks.frequencies_rad_s.size());
+}
+
+TEST(Sensitivity, DefaultBandCannotGuaranteeMarginsFromAMissedPeak) {
+  auto loop = tutorial_loop();
+  // Time scaling moves the sensitivity maximum below the DEFAULT search band
+  // without changing any gain or phase margin of the rational loop.
+  const double rate = 0.001 / 2.8;
+  loop.a *= rate;
+  loop.b *= rate;
+  const auto sampled = sensitivity_peaks(loop);
+
+  // Independent rational evaluation finds the unity crossover of the unscaled
+  // tutorial. |L|^2=625/((10-10w^2)^2+(10w-w^3)^2).
+  double low = 0.0, high = 10.0;
+  for (int i = 0; i < 80; ++i) {
+    const double w = (low + high) / 2.0;
+    const double real = 10.0 - 10.0 * w * w;
+    const double imaginary = 10.0 * w - w * w * w;
+    if (real * real + imaginary * imaginary < 625.0) {
+      low = w;
+    } else {
+      high = w;
+    }
+  }
+  const std::complex<double> s(0.0, (low + high) / 2.0);
+  const double actual_phase =
+      std::acos(-1.0) + std::arg(25.0 / (s * s * s + 10.0 * s * s + 10.0 * s + 10.0));
+  const double false_guarantee = 2.0 * std::asin(1.0 / (2.0 * sampled.sensitivity_peak));
+  EXPECT_GT(false_guarantee, actual_phase);
+
+  const auto norms = galata::analyze::sensitivity_norm_bounds(loop);
+  ASSERT_TRUE(norms.internally_stable);
+  ASSERT_TRUE(norms.sensitivity.numerically_reliable);
+  ASSERT_TRUE(norms.complementary.numerically_reliable);
+  const auto guaranteed =
+      galata::analyze::guaranteed_margins({norms.sensitivity.upper_bound,
+                                           norms.complementary.upper_bound,
+                                           true,
+                                           "Numerical Hamiltonian full-norm upper endpoints"});
+  ASSERT_TRUE(guaranteed.valid);
+  EXPECT_LE(guaranteed.phase_margin_from_sensitivity_rad, actual_phase);
+  EXPECT_LE(guaranteed.phase_margin_from_complementary_rad, actual_phase);
+}
+
+TEST(Sensitivity, UnresolvedInternalStabilityCannotBecomeAStabilityAssurance) {
+  auto loop = diagonal_loop();
+  constexpr double t = 1e13;
+  // Exact integer entries: trace=-2, determinant=-3, hence poles +1 and -3.
+  // All entries are exactly represented in double. An unqualified eigensolver
+  // can instead return a stable-looking conjugate pair for this nonnormal A.
+  loop.a << t - 1, t - 2, -t - 2, -t - 1;
+  loop.b = Eigen::MatrixXd::Zero(2, 1);
+  loop.c = Eigen::MatrixXd::Zero(1, 2);
+  loop.input_names = {"u"};
+  loop.output_names = {"output"};
+  EXPECT_THROW((void)sensitivity_peaks(loop), std::runtime_error);
+  EXPECT_THROW((void)galata::analyze::stability_margins(loop, 0, 0), std::runtime_error);
+  EXPECT_THROW((void)disk_margin(loop, 0, 0), std::runtime_error);
+  EXPECT_THROW((void)galata::analyze::hinfinity_norm(loop), std::runtime_error);
+
+  // Refusal is intentionally conservative: a defective stable Jordan block
+  // also has unresolved eigenvector conditioning and must not be labelled an
+  // established stable realization by these numerical preconditions.
+  loop.a << -1, 1, 0, -1;
+  EXPECT_THROW((void)sensitivity_peaks(loop), std::runtime_error);
+  EXPECT_THROW((void)galata::analyze::stability_margins(loop, 0, 0), std::runtime_error);
+}
+
+TEST(Sensitivity, UpperBoundEvidenceMustBeExplicitAndFinite) {
+  using galata::analyze::guaranteed_margins;
+  using galata::analyze::SensitivityNormUpperBounds;
+  EXPECT_THROW((void)guaranteed_margins(SensitivityNormUpperBounds{2, 2, true, ""}),
+               std::invalid_argument);
+  for (double invalid :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -1.0}) {
+    EXPECT_THROW(
+        (void)guaranteed_margins(SensitivityNormUpperBounds{invalid, 2, true, "invalid fixture"}),
+        std::invalid_argument);
+    EXPECT_THROW(
+        (void)guaranteed_margins(SensitivityNormUpperBounds{2, invalid, true, "invalid fixture"}),
+        std::invalid_argument);
+  }
 }
 
 }  // namespace

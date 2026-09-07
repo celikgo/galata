@@ -2,13 +2,40 @@
 
 # RFC-0001: Control synthesis, and how it will be verified before it is written
 
-- **Status:** draft — no code exists, and none should be written against this until it is accepted
+- **Status:** accepted for the bounded offline implementation described below; the original proposal follows for context
 - **Date:** 2026-08-24
 - **Affects:** `synth.*` capabilities, `src/synth/`, `docs/VERIFICATION.md`, ADR-0004
-- **Supersedes:** nothing. Refines the v0.2 "Remaining" line in [ROADMAP.md](../ROADMAP.md).
+- **Supersedes:** nothing. Refines the original analysis-and-design milestone; the bounded offline scope is recorded in [ROADMAP.md](../ROADMAP.md).
 
-**Everything in this document is a plan.** Nothing described here is implemented. The README's
-Status table is the authority on what works today.
+The README's Status table remains the authority on implemented capabilities.
+
+Acceptance decision, 2026-09-06, under the owner's instruction to complete the
+engineering product: the first implementation uses Laub's ordered complex Schur
+method for dense continuous-time problems with positive-definite R. Cholesky
+solves form the Hamiltonian without constructing an explicit inverse. Singular
+or indefinite R, poorly separated spectra and ill-conditioned invariant
+subspaces are rejected. The generalised-pencil solver remains future work;
+this release does not claim the full CAREX parameter domain.
+
+The reference questions are resolved as follows. The SLICOT project's
+[current source licence](https://github.com/SLICOT/SLICOT-Reference/blob/main/LICENSE)
+is BSD-3-Clause. This implementation does not copy its Fortran code or its full
+benchmark collection. It quotes only the small worked-result tables from the
+[BB01AD](https://www.slicot.org/objects/software/shared/doc/BB01AD.html) and
+[SB02MD](https://www.slicot.org/objects/software/shared/doc/SB02MD.html)
+documentation under ADR-0007, with reference provenance and budgets derived
+from the printed decimals. BB01AD supplies one CAREX example, not the whole
+collection. No published aircraft LQR design satisfying all of section 2.5's
+criteria has been transcribed: that case is explicitly unvalidated. Aircraft
+examples test the workflow and local nonlinear response; they do not claim
+agreement with published aircraft controller gains.
+
+Schur decomposition uses Eigen's deterministic same-binary implementation;
+its internal QR convergence is data dependent, just as the existing modal
+eigensolver's is. The original assertion below that Schur iteration consists
+only of a fixed sequence is incorrect. Our Schur reordering is dimension
+bounded, and repeatability is tested. This is not a worst-case execution-time
+guarantee or an onboard controller implementation.
 
 ## Why this document exists at all
 

@@ -19,18 +19,23 @@
 name: Determinism
 
 on:
-  pull_request:
-    branches: [main, master]
-  push:
-    branches: [main, master]
-  merge_group:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: false
+        default: ''
+        type: string
+    outputs:
+      source_sha:
+        description: Source verified by all fingerprint jobs and comparisons.
+        value: ${{ jobs.compare.outputs.source_sha }}
   schedule:
     # Nightly, so a libm update on a runner image is noticed as a change in the
     # observed cross-platform deviation rather than as a surprise in a PR.
     - cron: "17 4 * * *"
 
 concurrency:
-  group: determinism-${{ github.ref }}
+  group: determinism-${{ github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -38,6 +43,7 @@ permissions:
 
 env:
   VCPKG_DISABLE_METRICS: "1"
+  EXPECTED_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
 
 jobs:
   fingerprint:
@@ -53,6 +59,12 @@ jobs:
           - { name: windows, os: windows-2022, preset: ci-windows }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
 
       - uses: ./.github/actions/setup-cpp
         with:
@@ -96,10 +108,18 @@ jobs:
 
   compare:
     name: Tier 2 — cross-platform agreement
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
     needs: [fingerprint]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
@@ -111,8 +131,8 @@ jobs:
         run: |
           shopt -s nullglob
           files=(fingerprints/fingerprint-*.txt)
-          if [ "${#files[@]}" -lt 2 ]; then
-            echo "::error::need at least two platform fingerprints, found ${#files[@]}"
+          if [ "${#files[@]}" -ne 3 ]; then
+            echo "::error::need all three platform fingerprints, found ${#files[@]}"
             exit 1
           fi
 

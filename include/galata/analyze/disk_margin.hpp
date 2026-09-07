@@ -136,6 +136,9 @@ struct DiskMargin {
 
 // Refines the search grid around the CLOSED-loop modes, which is where the
 // peak of S sits, and refuses a loop whose nominal closed loop is unstable.
+// A numerically unresolved or ill-conditioned internal realization is also
+// refused; a stable but defective realization may require a different basis.
+// Invalid channel indices throw std::out_of_range before accessing matrices.
 [[nodiscard]] DiskMargin disk_margin(const model::LinearSystem& loop,
                                      int input_index,
                                      int output_index,

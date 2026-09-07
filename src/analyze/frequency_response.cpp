@@ -80,7 +80,8 @@ HessenbergSolution solve_upper_hessenberg(Eigen::MatrixXcd m,
 }  // namespace
 
 std::vector<double> logarithmic_grid(double start_rad_s, double stop_rad_s, int count) {
-  if (!(start_rad_s > 0.0) || !(stop_rad_s > 0.0)) {
+  if (!std::isfinite(start_rad_s) || !std::isfinite(stop_rad_s) || !(start_rad_s > 0.0)
+      || !(stop_rad_s > 0.0)) {
     throw std::invalid_argument(
         "logarithmic_grid: both endpoints must be strictly positive — a logarithmic sweep "
         "cannot contain zero");
@@ -217,6 +218,9 @@ FrequencyResponse frequency_response(const model::LinearSystem& system,
     }
     HessenbergSolution solved = solve_upper_hessenberg(std::move(shifted), reduced_b, frequency);
     result.response.push_back(reduced_c * solved.solution + complex_d);
+    if (!result.response.back().allFinite() || !std::isfinite(solved.pivot_ratio)) {
+      throw std::domain_error("frequency response: nonfinite solve or response; rescale the model");
+    }
     result.pivot_ratio.push_back(solved.pivot_ratio);
   }
   return result;

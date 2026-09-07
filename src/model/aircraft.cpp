@@ -17,12 +17,13 @@
 #include "galata/core/frames.hpp"
 #include "galata/core/quaternion.hpp"
 
-#include <yaml-cpp/yaml.h>
+#include "../io/strict_yaml.hpp"
 
 #include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace galata::model {
 namespace {
@@ -33,14 +34,18 @@ namespace {
 constexpr double kMinimumAirspeed = 1.0;  // m/s
 
 double read_number(const YAML::Node& node, const char* key, double fallback) {
-  return node[key] ? node[key].as<double>() : fallback;
+  const double value = node[key] ? node[key].as<double>() : fallback;
+  if (!std::isfinite(value)) {
+    throw std::invalid_argument("aircraft model: '" + std::string(key) + "' must be finite");
+  }
+  return value;
 }
 
 double require_number(const YAML::Node& node, const char* key, const std::string& path) {
   if (!node[key]) {
     throw std::invalid_argument(path + ": missing required key '" + std::string(key) + "'");
   }
-  return node[key].as<double>();
+  return read_number(node, key, 0.0);
 }
 
 }  // namespace
@@ -103,14 +108,57 @@ Controls Controls::from_vector(const Eigen::VectorXd& u) {
 void Aircraft::validate() const {
   mass.validate();
 
-  if (!(geometry.wing_area_m2 > 0.0)) {
-    throw std::invalid_argument("Aircraft: wing area must be positive");
+  if (!std::isfinite(geometry.wing_area_m2) || !(geometry.wing_area_m2 > 0.0)) {
+    throw std::invalid_argument("Aircraft: wing area must be positive and finite");
   }
-  if (!(geometry.wing_span_m > 0.0)) {
-    throw std::invalid_argument("Aircraft: wing span must be positive");
+  if (!std::isfinite(geometry.wing_span_m) || !(geometry.wing_span_m > 0.0)) {
+    throw std::invalid_argument("Aircraft: wing span must be positive and finite");
   }
-  if (!(geometry.mean_aerodynamic_chord_m > 0.0)) {
-    throw std::invalid_argument("Aircraft: mean aerodynamic chord must be positive");
+  if (!std::isfinite(geometry.mean_aerodynamic_chord_m)
+      || !(geometry.mean_aerodynamic_chord_m > 0.0)) {
+    throw std::invalid_argument("Aircraft: mean aerodynamic chord must be positive and finite");
+  }
+
+  // validate() is also the public C++ boundary. The YAML adapter's scalar
+  // checks do not protect a model assembled or modified directly in memory.
+  const std::pair<const char*, double> coefficients[] = {
+      {"reference_alpha_rad", aero.reference_alpha_rad},
+      {"reference_mach", aero.reference_mach},
+      {"lift_ref", aero.lift_ref},
+      {"drag_ref", aero.drag_ref},
+      {"pitching_moment_ref", aero.pitching_moment_ref},
+      {"lift_alpha", aero.lift_alpha},
+      {"drag_alpha", aero.drag_alpha},
+      {"pitching_moment_alpha", aero.pitching_moment_alpha},
+      {"lift_pitch_rate", aero.lift_pitch_rate},
+      {"pitching_moment_pitch_rate", aero.pitching_moment_pitch_rate},
+      {"lift_alpha_dot", aero.lift_alpha_dot},
+      {"drag_alpha_dot", aero.drag_alpha_dot},
+      {"pitching_moment_alpha_dot", aero.pitching_moment_alpha_dot},
+      {"lift_elevator", aero.lift_elevator},
+      {"drag_elevator", aero.drag_elevator},
+      {"pitching_moment_elevator", aero.pitching_moment_elevator},
+      {"side_force_beta", aero.side_force_beta},
+      {"rolling_moment_beta", aero.rolling_moment_beta},
+      {"yawing_moment_beta", aero.yawing_moment_beta},
+      {"rolling_moment_roll_rate", aero.rolling_moment_roll_rate},
+      {"yawing_moment_roll_rate", aero.yawing_moment_roll_rate},
+      {"rolling_moment_yaw_rate", aero.rolling_moment_yaw_rate},
+      {"yawing_moment_yaw_rate", aero.yawing_moment_yaw_rate},
+      {"side_force_aileron", aero.side_force_aileron},
+      {"rolling_moment_aileron", aero.rolling_moment_aileron},
+      {"yawing_moment_aileron", aero.yawing_moment_aileron},
+      {"side_force_rudder", aero.side_force_rudder},
+      {"rolling_moment_rudder", aero.rolling_moment_rudder},
+      {"yawing_moment_rudder", aero.yawing_moment_rudder}};
+  for (const auto& [name, value] : coefficients) {
+    if (!std::isfinite(value)) {
+      throw std::invalid_argument("Aircraft: aero." + std::string(name) + " must be finite");
+    }
+  }
+  if (!std::isfinite(thrust_incidence_rad) || !cg_to_aero_reference_m.allFinite()) {
+    throw std::invalid_argument(
+        "Aircraft: thrust incidence and aerodynamic reference must be finite");
   }
   // A chord longer than the span is a units mix-up, not an aircraft.
   if (geometry.mean_aerodynamic_chord_m > geometry.wing_span_m) {
@@ -271,23 +319,27 @@ core::StateVector Aircraft::derivative(const core::State& state,
 }
 
 Aircraft load_aircraft(const std::string& path) {
-  std::ifstream file(path);
+  std::ifstream file(path, std::ios::binary);
   if (!file) {
     throw std::invalid_argument("cannot open aircraft file: " + path);
   }
   std::ostringstream buffer;
   buffer << file.rdbuf();
 
-  YAML::Node root;
-  try {
-    root = YAML::Load(buffer.str());
-  } catch (const YAML::Exception& error) {
-    throw std::invalid_argument(path + ": not valid YAML: " + error.what());
+  if (file.bad()) {
+    throw std::invalid_argument("failed reading model: " + path);
   }
+  return parse_aircraft(buffer.str(), path);
+}
+
+Aircraft parse_aircraft(const std::string& bytes, const std::string& path) {
+  const YAML::Node root = io::load_yaml(bytes, path);
   if (!root.IsMap()) {
     throw std::invalid_argument(path + ": the document must be a map");
   }
 
+  io::yaml_keys(
+      root, path, {"description", "citation", "geometry", "mass", "aero", "thrust_incidence_rad"});
   Aircraft aircraft;
   aircraft.description = root["description"] ? root["description"].Scalar() : std::string{};
   aircraft.citation = root["citation"] ? root["citation"].Scalar() : std::string{};
@@ -296,6 +348,8 @@ Aircraft load_aircraft(const std::string& path) {
   if (!geometry) {
     throw std::invalid_argument(path + ": missing 'geometry'");
   }
+  io::yaml_keys(
+      geometry, path + ".geometry", {"wing_area_m2", "wing_span_m", "mean_aerodynamic_chord_m"});
   aircraft.geometry.wing_area_m2 = require_number(geometry, "wing_area_m2", path);
   aircraft.geometry.wing_span_m = require_number(geometry, "wing_span_m", path);
   aircraft.geometry.mean_aerodynamic_chord_m =
@@ -305,6 +359,13 @@ Aircraft load_aircraft(const std::string& path) {
   if (!mass) {
     throw std::invalid_argument(path + ": missing 'mass'");
   }
+  io::yaml_keys(mass,
+                path + ".mass",
+                {"mass_kg",
+                 "inertia_xx_kg_m2",
+                 "inertia_yy_kg_m2",
+                 "inertia_zz_kg_m2",
+                 "product_of_inertia_xz_kg_m2"});
   aircraft.mass.mass_kg = require_number(mass, "mass_kg", path);
   const double ixx = require_number(mass, "inertia_xx_kg_m2", path);
   const double iyy = require_number(mass, "inertia_yy_kg_m2", path);
@@ -321,6 +382,38 @@ Aircraft load_aircraft(const std::string& path) {
   if (!a) {
     throw std::invalid_argument(path + ": missing 'aero'");
   }
+  io::yaml_keys(a,
+                path + ".aero",
+                {"lateral_axes",
+                 "reference_alpha_rad",
+                 "reference_mach",
+                 "lift_ref",
+                 "drag_ref",
+                 "pitching_moment_ref",
+                 "lift_alpha",
+                 "drag_alpha",
+                 "pitching_moment_alpha",
+                 "lift_pitch_rate",
+                 "pitching_moment_pitch_rate",
+                 "lift_alpha_dot",
+                 "drag_alpha_dot",
+                 "pitching_moment_alpha_dot",
+                 "lift_elevator",
+                 "drag_elevator",
+                 "pitching_moment_elevator",
+                 "side_force_beta",
+                 "rolling_moment_beta",
+                 "yawing_moment_beta",
+                 "rolling_moment_roll_rate",
+                 "yawing_moment_roll_rate",
+                 "rolling_moment_yaw_rate",
+                 "yawing_moment_yaw_rate",
+                 "side_force_aileron",
+                 "rolling_moment_aileron",
+                 "yawing_moment_aileron",
+                 "side_force_rudder",
+                 "rolling_moment_rudder",
+                 "yawing_moment_rudder"});
   AeroDerivatives& d = aircraft.aero;
   d.reference_alpha_rad = require_number(a, "reference_alpha_rad", path);
   d.reference_mach = read_number(a, "reference_mach", 0.0);

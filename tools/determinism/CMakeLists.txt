@@ -20,6 +20,8 @@ target_link_libraries(galata_determinism_fingerprint
     galata::model
     galata::trim
     galata::linearize
+    galata::synth
+    galata::simulation
   PRIVATE
     galata::warnings
 )

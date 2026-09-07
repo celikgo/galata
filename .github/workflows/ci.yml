@@ -11,6 +11,17 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Immutable source commit to verify (defaults to the triggering commit).
+        required: false
+        default: ''
+        type: string
+    outputs:
+      source_sha:
+        description: Commit accepted by every required check.
+        value: ${{ jobs.ci-ok.outputs.source_sha }}
   pull_request:
     branches: [main, master]
   push:
@@ -18,7 +29,7 @@ on:
   merge_group:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.source_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -26,13 +37,22 @@ permissions:
 
 env:
   VCPKG_DISABLE_METRICS: "1"
+  EXPECTED_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
 
 jobs:
   format:
     name: Format
     runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
 
       # Pinned to an exact build, from pip rather than apt. clang-format's
       # output changes between major versions, so an unpinned gate flaps
@@ -74,8 +94,16 @@ jobs:
           - { name: linux-clang, os: ubuntu-24.04,  preset: ci-linux-clang }
           - { name: macos,       os: macos-14,      preset: ci-macos }
           - { name: windows,     os: windows-2022,  preset: ci-windows }
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
 
       - uses: ./.github/actions/setup-cpp
         with:
@@ -89,6 +117,10 @@ jobs:
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+      - name: Install and consume the relocated C++ package
+        shell: bash
+        run: python3 scripts/check-install.py "build/${{ matrix.preset }}"
 
       # docs/VERIFICATION.md is generated, not written. Regenerating it here and
       # diffing is what makes its numbers trustworthy: a V&V report that has
@@ -156,8 +188,19 @@ jobs:
   governance:
     name: Charter gates
     runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
+
+      - name: Assurance gates reject invalid evidence
+        run: python3 -m unittest discover -s tests/scripts -v
 
       - name: Rule 3 — one source of version truth
         run: scripts/check-version-consistency.sh
@@ -174,23 +217,85 @@ jobs:
       - name: Rule 4 — every path and test name in every document resolves
         run: scripts/check-doc-references.sh
 
+  sanitizer:
+    name: Address and undefined-behaviour sanitizers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
+      - uses: ./.github/actions/setup-cpp
+        with: { preset: asan }
+      - run: cmake --preset asan
+      - run: cmake --build --preset asan
+      - run: ctest --preset asan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+  static-analysis:
+    name: Clang static analyzer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
+      - uses: ./.github/actions/setup-cpp
+        with: { preset: ci-linux-clang }
+      - run: sudo apt-get install -y --no-install-recommends clang-tidy-18
+      - name: Configure analyzer checks on production sources
+        run: >-
+          cmake --preset ci-linux-clang -B build/ci-static
+          -DGALATA_BUILD_TESTS=OFF
+          '-DCMAKE_CXX_CLANG_TIDY=clang-tidy-18;-checks=-*,clang-analyzer-*;-warnings-as-errors=clang-analyzer-*'
+      - run: cmake --build build/ci-static --parallel 2
+
+  determinism:
+    name: Determinism
+    uses: ./.github/workflows/determinism.yml
+    with:
+      source_sha: ${{ inputs.source_sha || github.sha }}
+
   # The single required status check. Branch protection points here, so adding
   # a job above never means editing branch settings, and a skipped job can
   # never be mistaken for a passing one.
   ci-ok:
     name: CI
+    outputs:
+      source_sha: ${{ steps.evidence.outputs.source_sha }}
     if: always()
-    needs: [format, governance, engine]
+    needs: [format, governance, engine, sanitizer, static-analysis, determinism]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify no required job failed
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - name: Verify immutable source identity
+        id: source
+        shell: bash
+        run: python3 scripts/check-ci-source.py
+      - name: Verify every required job succeeded for this source
+        id: evidence
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          echo "$NEEDS_JSON"
-          bad="$(printf '%s' "$NEEDS_JSON" | python3 -c 'import json,sys; print(" ".join(k for k,v in json.load(sys.stdin).items() if v["result"] not in ("success","skipped")))')"
-          if [ -n "$bad" ]; then
-            echo "::error::failing jobs: $bad"
-            exit 1
-          fi
-          echo "All required jobs passed."
+          CI_EVIDENCE_PATH: ${{ runner.temp }}/ci-evidence.json
+        run: python3 scripts/check-ci-results.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ inputs.source_sha || github.sha }}
+          path: ${{ runner.temp }}/ci-evidence.json
+          if-no-files-found: error

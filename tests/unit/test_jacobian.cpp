@@ -181,4 +181,78 @@ TEST(Jacobian, IsRepeatableToTheBit) {
   }
 }
 
+TEST(Jacobian, RejectsNonFinitePointsAndStepOptions) {
+  const auto identity = [](const Eigen::VectorXd& x) -> Eigen::VectorXd { return x; };
+  for (const double bad :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW((void)central_difference_jacobian(identity, Eigen::VectorXd::Constant(1, bad)),
+                 std::invalid_argument);
+  }
+  for (const double bad :
+       {-1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    JacobianOptions options;
+    options.relative_step = bad;
+    EXPECT_THROW((void)central_difference_jacobian(identity, Eigen::VectorXd::Ones(1), options),
+                 std::invalid_argument);
+    options = {};
+    options.absolute_step = bad;
+    EXPECT_THROW((void)central_difference_jacobian(identity, Eigen::VectorXd::Ones(1), options),
+                 std::invalid_argument);
+    options = {};
+    options.absolute_step_per_component = Eigen::VectorXd::Constant(1, bad);
+    EXPECT_THROW((void)central_difference_jacobian(identity, Eigen::VectorXd::Ones(1), options),
+                 std::invalid_argument);
+  }
+}
+
+TEST(Jacobian, RejectsNonFiniteOutputsAndUnrepresentablePerturbations) {
+  const auto identity = [](const Eigen::VectorXd& x) -> Eigen::VectorXd { return x; };
+  JacobianOptions options;
+  options.relative_step = 2.0;
+  EXPECT_THROW(
+      (void)central_difference_jacobian(
+          identity, Eigen::VectorXd::Constant(1, std::numeric_limits<double>::max()), options),
+      std::runtime_error);
+  for (const double bad :
+       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    const auto invalid = [bad](const Eigen::VectorXd&) -> Eigen::VectorXd {
+      return Eigen::VectorXd::Constant(1, bad);
+    };
+    EXPECT_THROW((void)central_difference_jacobian(invalid, Eigen::VectorXd::Zero(1)),
+                 std::runtime_error);
+  }
+}
+
+TEST(Jacobian, RejectsDimensionChangesAcrossColumnsAndRichardsonEvaluations) {
+  const auto changing_column = [](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Zero(x(0) != 0.0 ? 1 : 2);
+  };
+  EXPECT_THROW((void)central_difference_jacobian(changing_column, Eigen::VectorXd::Zero(2)),
+               std::runtime_error);
+  JacobianOptions options;
+  options.relative_step = 0.0;
+  options.absolute_step = 0.01;
+  const auto changing_step = [](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Zero(std::abs(x(0)) > 0.007 ? 1 : 2);
+  };
+  EXPECT_THROW((void)central_difference_jacobian(changing_step, Eigen::VectorXd::Zero(1), options),
+               std::runtime_error);
+}
+
+TEST(Jacobian, RejectsOverflowingErrorSummariesEvenWhenMatrixEntriesAreFinite) {
+  // Both finite-difference slopes and their absolute discrepancy are finite,
+  // but their ratio is beyond binary64. A finite matrix alone is insufficient
+  // evidence that the complete numerical result can be reported safely.
+  const auto separated_scales = [](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    const double slope = std::abs(x(0)) > 0.5 ? 5e307 : 5e-309;
+    return Eigen::VectorXd::Constant(1, slope * x(0));
+  };
+  JacobianOptions options;
+  options.relative_step = 0.0;
+  options.absolute_step = 1.0;
+  EXPECT_THROW(
+      (void)central_difference_jacobian(separated_scales, Eigen::VectorXd::Zero(1), options),
+      std::runtime_error);
+}
+
 }  // namespace

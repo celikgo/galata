@@ -57,10 +57,11 @@
 //   For M_S that error is optimistic — it makes the loop look more robust than
 //   it is — so the searched band and point count travel with the result.
 //
-// * Nothing here establishes closed-loop stability. M_S is a distance from the
+// * A sampled peak alone does not establish closed-loop stability. M_S is a distance from the
 //   critical point, not a Nyquist encirclement count. An unstable closed loop
 //   has an S with unstable poles, and its peak over a finite grid is a number
-//   that means nothing. Check the closed-loop eigenvalues.
+//   that means nothing. The state-space path requires a numerically resolved
+//   Hurwitz realization. Defective or poorly scaled stable cases may be refused.
 
 #ifndef GALATA_ANALYZE_SENSITIVITY_HPP
 #define GALATA_ANALYZE_SENSITIVITY_HPP
@@ -68,6 +69,7 @@
 #include "galata/analyze/margins.hpp"
 #include "galata/model/linear_system.hpp"
 
+#include <string>
 #include <vector>
 
 namespace galata::analyze {
@@ -161,7 +163,20 @@ struct GuaranteedMargins {
   double phase_margin_from_complementary_rad;  // (2.48)
 };
 
-[[nodiscard]] GuaranteedMargins guaranteed_margins(const SensitivityPeaks& peaks);
+// Explicit caller-supplied evidence: these must bound the FULL frequency-domain
+// norms from above for an internally stable nominal loop. Sampled peaks cannot
+// supply this contract. Record the theorem/reference or numerical upper-bound
+// method in evidence; the type records the assertion, it does not verify it.
+// The gain inequalities concern gain INCREASE and the phase inequalities the
+// magnitude of the phase rotation reaching -1, not a signed phase margin.
+struct SensitivityNormUpperBounds {
+  double sensitivity_upper;    // dimensionless, >= ||S||_inf
+  double complementary_upper;  // dimensionless, >= ||T||_inf
+  bool is_single_loop;
+  std::string evidence;
+};
+
+[[nodiscard]] GuaranteedMargins guaranteed_margins(const SensitivityNormUpperBounds& bounds);
 
 // S and T peaks for an open-loop system closed with negative unit feedback.
 //

@@ -103,6 +103,7 @@ nonetheless serious bugs, and the right place for those is named.
 ## What this project does not claim
 
 Nothing in galata is DO-178C qualified, and this policy does not make it so.
-It must never be used as evidence in a certification package. A clean security
-report says that no one has reported a memory-safety fault; it says nothing
-about airworthiness.
+The project provides no approved certification evidence or tool qualification
+package. Any application-specific assurance use requires its own qualification
+and independent review. A clean security report does not establish numerical
+correctness or airworthiness.

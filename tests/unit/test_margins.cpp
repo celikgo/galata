@@ -242,6 +242,9 @@ TEST(Margins, UnstableClosedLoopReportsANegativePhaseMargin) {
   // And a loop that is already unstable has no delay margin: no amount of
   // delay is what is wrong with it.
   EXPECT_FALSE(margins.has_delay_margin);
+  EXPECT_DOUBLE_EQ(margins.delay_margin_s, 0.0);
+  EXPECT_TRUE(margins.nominal_stability_checked);
+  EXPECT_FALSE(margins.nominal_closed_loop_stable);
 
   // Cross-check against the closed-loop poles: 12/(s(s+1)(s+2)) closed with
   // unit feedback gives s^3 + 3s^2 + 2s + 12, which has right-half-plane roots.
@@ -252,6 +255,106 @@ TEST(Margins, UnstableClosedLoopReportsANegativePhaseMargin) {
     worst = std::max(worst, solver.eigenvalues()(index).real());
   }
   EXPECT_GT(worst, 0.0) << "the cross-check itself is wrong if this loop is stable";
+}
+
+TEST(Margins, StablePositivePhaseLoopHasFiniteDelayDespiteNegativeSignedPhaseMargins) {
+  // L(s)=k(s-z)/(s+1)^2, k=1.995, z=0.1. The closed-loop polynomial is
+  // s^2+(2+k)s+(1-kz), with positive coefficients, hence strictly stable.
+  // Both gain crossovers have POSITIVE arg L. The nearest signed phase
+  // margin is negative, but delay reaches -1 by lagging through pi+arg L.
+  const double gain = 1.995;
+  const double zero = 0.1;
+  LinearSystem loop;
+  loop.a.resize(2, 2);
+  loop.a << 0.0, 1.0, -1.0, -2.0;
+  loop.b.resize(2, 1);
+  loop.b << 0.0, 1.0;
+  loop.c.resize(1, 2);
+  loop.c << -gain * zero, gain;
+  loop.state_names = {"x0", "x1"};
+  loop.input_names = {"u"};
+  const LoopEvaluator evaluator = [gain, zero](double frequency) {
+    const std::complex<double> s(0.0, frequency);
+    return gain * (s - zero) / ((s + 1.0) * (s + 1.0));
+  };
+
+  // |L|=1 gives u^2+(2-k^2)u+1-k^2 z^2=0, u=w^2. Its positive roots
+  // provide an independent closed-form reference for the two crossover times.
+  const double b = 2.0 - gain * gain;
+  const double c = 1.0 - gain * gain * zero * zero;
+  const double discriminant = std::sqrt(b * b - 4.0 * c);
+  const double high_frequency = std::sqrt((-b + discriminant) / 2.0);
+  const double low_frequency = std::sqrt((-b - discriminant) / 2.0);
+  const double high_delay = (kPi + std::arg(evaluator(high_frequency))) / high_frequency;
+  const double low_delay = (kPi + std::arg(evaluator(low_frequency))) / low_frequency;
+  EXPECT_LT(high_delay, low_delay);
+
+  for (const auto& result : {stability_margins(loop, 0, 0), stability_margins(evaluator)}) {
+    ASSERT_EQ(result.gain_crossings.size(), 2U);
+    EXPECT_LT(result.gain_crossings[0].phase_margin_rad, 0.0);
+    EXPECT_LT(result.gain_crossings[1].phase_margin_rad, 0.0);
+    ASSERT_TRUE(result.has_delay_margin);
+    EXPECT_NEAR(result.delay_margin_s, high_delay, 1e-11);
+    EXPECT_NEAR(result.delay_margin_frequency_rad_s, high_frequency, 1e-11);
+    const double frequency = result.delay_margin_frequency_rad_s;
+    const auto delayed = evaluator(frequency)
+                         * std::exp(std::complex<double>(0.0, -frequency * result.delay_margin_s));
+    EXPECT_NEAR(std::abs(1.0 + delayed), 0.0, 1e-12);
+  }
+  const auto checked = stability_margins(loop, 0, 0);
+  EXPECT_TRUE(checked.nominal_stability_checked);
+  EXPECT_TRUE(checked.nominal_closed_loop_stable);
+  EXPECT_FALSE(stability_margins(evaluator).nominal_stability_checked);
+}
+
+TEST(Margins, ALoopAlreadyAtTheCriticalPointHasZeroDelayTolerance) {
+  // 2/(s(s+1)^2) has closed characteristic (s+2)(s^2+1), so the nominal
+  // loop is on the stability boundary at w=1 and its delay tolerance is zero.
+  LinearSystem loop = integrator_chain({1.0, 1.0});
+  loop.c *= 2.0;
+  MarginOptions options;
+  options.frequencies = {0.5, 1.0, 2.0};
+  const LoopEvaluator evaluator = [](double frequency) {
+    const std::complex<double> s(0.0, frequency);
+    return 2.0 / (s * (s + 1.0) * (s + 1.0));
+  };
+  const auto unchecked = stability_margins(evaluator, options);
+  ASSERT_TRUE(unchecked.has_delay_margin);
+  EXPECT_DOUBLE_EQ(unchecked.delay_margin_s, 0.0);
+  EXPECT_DOUBLE_EQ(unchecked.delay_margin_frequency_rad_s, 1.0);
+  EXPECT_DOUBLE_EQ(stability_margins(loop, 0, 0, options).delay_margin_s, 0.0);
+}
+
+TEST(Margins, IllPosedFeedbackAndInvalidChannelIndicesAreRejected) {
+  LinearSystem loop = integrator_chain({1.0});
+  loop.d = Eigen::MatrixXd::Constant(1, 1, -1.0);
+  EXPECT_THROW((void)stability_margins(loop, 0, 0), std::invalid_argument);
+  loop.d(0, 0) = 0.0;
+  EXPECT_THROW((void)stability_margins(loop, -1, 0), std::out_of_range);
+  EXPECT_THROW((void)stability_margins(loop, 0, 1), std::out_of_range);
+}
+
+TEST(Margins, NonfiniteEvaluatorsFailAtSamplesAndRefinementPoints) {
+  for (const double invalid :
+       {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+    for (const auto value : {std::complex<double>(invalid, 0), std::complex<double>(0, invalid)}) {
+      EXPECT_THROW((void)stability_margins([value](double) { return value; }), std::domain_error);
+    }
+  }
+  // The endpoints are valid and bracket a unity crossover. Checking only the
+  // initial samples must not let a failed intermediate solve enter bisection.
+  MarginOptions options;
+  options.frequencies = {1.0, 2.0};
+  const LoopEvaluator bad_between_samples = [](double frequency) {
+    if (frequency == 1.0) {
+      return std::complex<double>(2.0, -1.0);
+    }
+    if (frequency == 2.0) {
+      return std::complex<double>(0.5, -0.5);
+    }
+    return std::complex<double>(std::numeric_limits<double>::quiet_NaN(), 0.0);
+  };
+  EXPECT_THROW((void)stability_margins(bad_between_samples, options), std::domain_error);
 }
 
 TEST(Margins, AbsentCrossoversAreReportedAsAbsentNotAsZero) {
@@ -407,6 +510,18 @@ TEST(Margins, RefusesWhatItCannotSearch) {
       std::invalid_argument);
 
   EXPECT_THROW((void)stability_margins(galata::analyze::LoopEvaluator{}), std::invalid_argument);
+
+  for (const std::vector<double>& grid : {std::vector<double>{0.0, 1.0},
+                                          {1.0, 1.0},
+                                          {2.0, 1.0},
+                                          {1.0, std::numeric_limits<double>::infinity()},
+                                          {1.0, std::numeric_limits<double>::quiet_NaN()}}) {
+    MarginOptions invalid_grid;
+    invalid_grid.frequencies = grid;
+    EXPECT_THROW((void)stability_margins([](double) { return std::complex<double>(0.5, 0.0); },
+                                         invalid_grid),
+                 std::invalid_argument);
+  }
 }
 
 }  // namespace
