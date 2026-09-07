@@ -316,6 +316,26 @@ runtime availability and rendering differences belong in the test matrix;
 Microsoft documents [WebView2 distribution choices](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
 None of these sources selects the stack for Galata.
 
+**Prototype status.** A third candidate now exists and is partly measured: a
+native AppKit/Objective-C++ macOS shell, built under
+[ADR-0012](../adr/0012-project-worker-preview.md) and recorded in the
+[M2 implementation guide](M2_IMPLEMENTATION.md). It runs the workflow this
+packet asks for — open a project, edit a typed block diagram, launch and cancel
+an isolated CLI worker, inspect a failed result, review and restore a saved
+revision, and read the retained evidence — against the same worker headless
+callers use. Keyboard-selectable block and sample tables, diagnostic navigation
+and offline packaging exist and are checked by
+`scripts/check-desktop-package.py`.
+
+This does not answer D11. The packet's decision rests on a *comparison*, and
+the Qt and web-shell candidates have not been built, so there is nothing to
+compare against. Nor is the native candidate itself complete on this packet's
+terms: it has no Developer ID signing or notarization, no clean-target-machine
+installation, no full accessibility acceptance and no Linux GUI story — and a
+macOS-only shell cannot satisfy the macOS-first-then-Linux delivery order on its
+own. The stop/go rule stands unchanged: do not select on a working prototype
+any more than on screenshots.
+
 ### D12 — Campaign storage, compatibility and recovery
 
 - **Question:** What is authoritative when studies, runs, plots, cached arrays
@@ -338,6 +358,21 @@ None of these sources selects the stack for Galata.
 [SQLite documents that WAL mode does not work across network filesystems](https://www.sqlite.org/wal.html).
 A local SQLite index is therefore a candidate to test, not a general shared
 campaign-store answer. Pin and review the actual selected database release.
+
+**Prototype status.** The portable-directory half of this comparison is built.
+[ADR-0012](../adr/0012-project-worker-preview.md) implements content-addressed
+immutable revisions, run-owned artifacts, OS locking and atomic head
+publication; [ADR-0014](../adr/0014-project-revision-recovery.md) adds bounded
+history listing and explicit restore. The three-way ownership split this packet
+asks for is realised as draft, submitted request and terminal record, and
+interrupted work is distinguishable from completed work by a verified terminal
+record rather than by the presence of output — the
+[project-file contract](../PROJECT_FILES.md) states the status meanings.
+
+The indexed-store arm is unbuilt, so the comparison is still open, and the
+preview deliberately claims no migration policy, compatibility window,
+shared-drive editing or power-loss durability. Its recovery evidence is local
+to one filesystem on macOS arm64.
 
 ### D13 — Offline deployment and execution trust boundary
 
