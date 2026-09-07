@@ -63,7 +63,7 @@ Local JUnit/log evidence is in `build/dev/m1-results.xml`,
 `build/asan/m1-ctest.log`. The final affected tests are recorded in each build's
 `m1-portability-results.xml` and `m1-portability-ctest.log`; the deployment
 compile counterexample/correction is in `build/m1-portability`. Supplemental
-check logs use the `m1-` prefix in `build/dev`. GCC commands/results are in `build/gcc-m1/compile-checks.json`.
+check logs use the `m1-` prefix in `build/dev`. GCC commands/results are in `build/gcc-m1`, as compile-checks.json.
 These generated local artifacts are outside distributed source evidence.
 The local macOS archive is a development snapshot, with no hosted CI or release
 publication claim. Packaging reruns the shipped continuous-model and aircraft
