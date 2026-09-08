@@ -51,20 +51,12 @@
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "GALATA_BUILD_TESTS": "ON"
+        "GALATA_BUILD_TESTS": "ON",
+        "GALATA_BUILD_DESKTOP": "ON",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/desktop-triplets"
       },
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
-    },
-    {
-      "name": "ci-windows",
-      "displayName": "CI: Windows x64 + MSVC (RelWithDebInfo)",
-      "inherits": "base",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "GALATA_BUILD_TESTS": "ON"
-      },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
       "name": "asan",
@@ -84,7 +76,6 @@
     { "name": "ci-linux-gcc",   "configurePreset": "ci-linux-gcc",   "jobs": 0 },
     { "name": "ci-linux-clang", "configurePreset": "ci-linux-clang", "jobs": 0 },
     { "name": "ci-macos",       "configurePreset": "ci-macos",       "jobs": 0 },
-    { "name": "ci-windows",     "configurePreset": "ci-windows",     "jobs": 0 },
     { "name": "asan",           "configurePreset": "asan",           "jobs": 0 }
   ],
   "testPresets": [
@@ -98,7 +89,6 @@
     { "name": "ci-linux-gcc",   "configurePreset": "ci-linux-gcc",   "inherits": "default-test" },
     { "name": "ci-linux-clang", "configurePreset": "ci-linux-clang", "inherits": "default-test" },
     { "name": "ci-macos",       "configurePreset": "ci-macos",       "inherits": "default-test" },
-    { "name": "ci-windows",     "configurePreset": "ci-windows",     "inherits": "default-test" },
     { "name": "asan",           "configurePreset": "asan",           "inherits": "default-test" }
   ]
 }

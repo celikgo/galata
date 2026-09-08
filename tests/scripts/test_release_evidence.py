@@ -29,7 +29,7 @@ class ReleaseEvidence(unittest.TestCase):
         evidence = {"schema": "galata.ci-evidence.v1", "source_sha": self.SHA,
                     "jobs": {name: {"result": "success", "outputs": {"source_sha": self.SHA}}
                              for name in REQUIRED_JOBS}}
-        for platform in ("linux-x86_64", "macos-arm64", "windows-x86_64"):
+        for platform in ("linux-x86_64", "macos-arm64"):
             metadata = {"platform": platform, "ci_evidence": evidence, "archive_smoke": "passed",
                         "build_source": {"commit": self.SHA, "status": "clean", "source_tree_sha256": "b" * 64},
                         "packaged_source": {"commit": self.SHA, "status": "clean", "source_files_sha256": "b" * 64}}
@@ -40,7 +40,7 @@ class ReleaseEvidence(unittest.TestCase):
             (directory / (platform + ".package.json")).write_text(json.dumps(metadata), encoding="utf-8")
         return evidence
 
-    def test_all_three_packages_need_matching_evidence_and_archive_bytes(self):
+    def test_every_platform_package_needs_matching_evidence_and_archive_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             evidence = self.fixture(directory)

@@ -11,6 +11,8 @@
 #include "galata/pipeline/registry.hpp"
 #include "galata/version.hpp"
 
+#include "project.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -24,6 +26,11 @@ int print_usage(std::ostream& out) {
          "usage:\n"
          "  galata run <pipeline.yaml> [--output-dir <dir>] [--overwrite]\n"
          "  galata capabilities [--markdown]\n"
+         "  galata project <create|inspect|save|run> <directory> [options]\n"
+         "  galata project import-linear <new-directory> <study.yaml>\n"
+         "  galata project revisions <directory>\n"
+         "  galata project revision <directory> <revision>\n"
+         "  galata project restore <directory> <revision> --expected-revision <current>\n"
          "  galata --version\n"
          "  galata --help\n"
          "\n"
@@ -188,6 +195,9 @@ int main(int argc, char** argv) {
   }
   if (command == "run") {
     return run_pipeline_command(std::vector<std::string>(arguments.begin() + 1, arguments.end()));
+  }
+  if (command == "project") {
+    return project_command(std::vector<std::string>(arguments.begin() + 1, arguments.end()));
   }
 
   std::cerr << "galata: unrecognised command '" << command << "'\n\n";

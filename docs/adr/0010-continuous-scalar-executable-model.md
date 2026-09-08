@@ -165,3 +165,17 @@ permits these additions without making a desktop toolkit part of numerical
 execution. Runtime local allocations favor simple, testable ownership at this
 stage; a future real-time or high-throughput executor needs measured workloads
 and a separate allocation/scheduling contract.
+
+## Subsequent bounded profiles
+
+[ADR-0013](0013-typed-linear-graph-adapter.md) adds the sibling
+`continuous-linear.v1` profile — one ordered `linear_combination` block for
+matrix rows that couple quantities of different dimensions and coordinate
+references, which the deferrals above would otherwise have required erasing
+frame information to express. It was admitted through the route this decision
+names: a new profile with its own predeclared acceptance cases. The
+`continuous-scalar.v1` profile specified here is unchanged; it continues to
+reject the new block kind, and its canonical byte contract and frame-equality
+checks still hold. Graphical editing is likewise still outside this ADR: the
+native preview in [ADR-0012](0012-project-worker-preview.md) edits saved project
+documents and delegates all execution to this compiler and runtime.

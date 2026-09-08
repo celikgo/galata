@@ -144,7 +144,7 @@ TEST(RobustBounds, NonDiagonalMimoChannelsPreserveTheNormUnderOrthogonalCoordina
 
 TEST(RobustBounds, DiskEndpointsInvertTheNormInTheConservativeDirection) {
   const auto loop = first_order(1, 2);
-  for (const auto [skew, exact] :
+  for (const auto& [skew, exact] :
        {std::pair{0.0, 2.0}, std::pair{1.0, 1.0}, std::pair{-1.0, 1.5}}) {
     const auto disk = galata::analyze::disk_margin_bounds(loop, skew);
     EXPECT_TRUE(disk.internally_stable);

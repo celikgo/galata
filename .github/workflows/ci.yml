@@ -68,7 +68,7 @@ jobs:
 
       - name: C++ sources match .clang-format
         run: |
-          files="$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.c')"
+          files="$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.c' '*.mm')"
           if [ -z "$files" ]; then
             echo "::error::no C/C++ sources found — this job would be vacuously green"
             exit 1
@@ -93,7 +93,6 @@ jobs:
           - { name: linux-gcc,   os: ubuntu-24.04,  preset: ci-linux-gcc }
           - { name: linux-clang, os: ubuntu-24.04,  preset: ci-linux-clang }
           - { name: macos,       os: macos-14,      preset: ci-macos }
-          - { name: windows,     os: windows-2022,  preset: ci-windows }
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
@@ -118,6 +117,20 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+      - name: Package and verify the relocated macOS desktop candidate
+        if: matrix.name == 'macos'
+        run: >-
+          python3 scripts/package-desktop.py "build/${{ matrix.preset }}"
+          --output-dir build/desktop-candidate-assets
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.name == 'macos'
+        with:
+          name: desktop-candidate-${{ inputs.source_sha || github.sha }}
+          path: build/desktop-candidate-assets/*
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Install and consume the relocated C++ package
         shell: bash
         run: python3 scripts/check-install.py "build/${{ matrix.preset }}"
@@ -126,8 +139,8 @@ jobs:
       # diffing is what makes its numbers trustworthy: a V&V report that has
       # drifted from the implementation is worse than none, because it still
       # looks like evidence. Run on one platform only — the report is
-      # build-independent by construction, and checking it four times would only
-      # add three chances for a platform-specific formatting difference to break
+      # build-independent by construction, and checking it three times would only
+      # add two chances for a platform-specific formatting difference to break
       # an unrelated job.
       - name: Published V&V report matches what the code produces
         if: matrix.name == 'linux-gcc'
@@ -217,10 +230,18 @@ jobs:
       - name: Rule 4 — every path and test name in every document resolves
         run: scripts/check-doc-references.sh
 
+  # 120 minutes, not the 60 every other job gets. This job is measurably the
+  # most expensive one: a Debug build under ASan and UBSan, and 466 tests run
+  # one at a time. The tests that dominate are the ones exercising the isolated
+  # worker, because an instrumented worker hashes its whole executable and
+  # runtime inventory on every run and the sanitizer binary is 90 MB against the
+  # ordinary build's 29 MB — about 39 s each on this runner. At 60 minutes the
+  # job was cancelled at test 379 of 466 with nothing wrong. The budget is the
+  # cost of the gate, not a tolerance on any result.
   sanitizer:
     name: Address and undefined-behaviour sanitizers
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
@@ -270,9 +291,11 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha || github.sha }}
 
-  # The single required status check. Branch protection points here, so adding
-  # a job above never means editing branch settings, and a skipped job can
-  # never be mistaken for a passing one.
+  # The one context branch protection should require: it fans in every job
+  # above, so adding a job never means editing branch settings, and a skipped
+  # job can never be mistaken for a passing one. That is the intent, not yet
+  # the configuration — `main` carries no branch-protection rule and no
+  # ruleset today, so nothing is required of a pull request mechanically.
   ci-ok:
     name: CI
     outputs:

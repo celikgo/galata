@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Set up the C++ toolchain
 description: >
-  CMake, Ninja, a vcpkg root and (on Windows) the MSVC developer environment.
-  Every workflow that configures the engine goes through here so the four
-  platforms cannot drift apart one workflow at a time.
+  CMake, Ninja and a vcpkg root. Every workflow that configures the engine goes
+  through here so the supported toolchains — GCC and Clang on Linux, AppleClang
+  on macOS — cannot drift apart one workflow at a time.
 
 inputs:
   preset:
@@ -28,13 +28,6 @@ runs:
         sudo apt-get install -y --no-install-recommends clang
         clang --version
 
-    # The Ninja generator needs cl.exe on PATH; the VS shell provides it.
-    - name: MSVC developer environment (Windows)
-      if: runner.os == 'Windows'
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: x64
-
     # GitHub's images preinstall vcpkg and export VCPKG_INSTALLATION_ROOT.
     # CMakePresets.json reads VCPKG_ROOT, so bridge the two here rather than
     # in every workflow.
@@ -58,7 +51,7 @@ runs:
         path: |
           ~/.cache/vcpkg/archives
           ${{ env.LOCALAPPDATA }}/vcpkg/archives
-        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('vcpkg.json') }}
+        key: vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-${{ hashFiles('vcpkg.json', 'cmake/desktop-triplets/*.cmake') }}
         restore-keys: |
           vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ inputs.preset }}-
           vcpkg-${{ runner.os }}-${{ runner.arch }}-

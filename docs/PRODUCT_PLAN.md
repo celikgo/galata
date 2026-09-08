@@ -4,7 +4,7 @@
 
 The proposed end product is an **installable, offline flight-dynamics and control-engineering desktop workbench with Simulink-style visual modeling**, backed by the same C++ numerical engine used by the CLI and automation. A flight-control engineer can import an aircraft model, check its validity, build a controller diagram, run analysis and simulation, compare designs over an operating envelope, and deliver a reproducible review package.
 
-The planning assumption is conventional fixed-wing aircraft first. Product delivery prioritizes macOS, followed by Linux, per user direction; existing Windows engine portability checks remain. Minimum OS/hardware and workload requirements still need discovery. No customer aircraft, procurement authority, team capacity or delivery deadline has been supplied. The scope becomes a release commitment only after discovery establishes those constraints. SITL/HIL and generated controller code have explicit expansion tracks; onboard operation and aircraft approval require their own acceptance programs.
+The planning assumption is conventional fixed-wing aircraft first. Product delivery prioritizes macOS, followed by Linux, per user direction; Windows engine support has since been withdrawn, so Linux and macOS are the only supported platforms for both the engine and the product. Minimum OS/hardware and workload requirements still need discovery. No customer aircraft, procurement authority, team capacity or delivery deadline has been supplied. The scope becomes a release commitment only after discovery establishes those constraints. SITL/HIL and generated controller code have explicit expansion tracks; onboard operation and aircraft approval require their own acceptance programs.
 
 | Plan | Purpose |
 |---|---|
@@ -53,5 +53,12 @@ Implementation is tracked in [M0 implementation status](product/IMPLEMENTATION.m
 The [proposed executable-model architecture](architecture/EXECUTABLE_MODEL.md)
 specifies the separate compiler/runtime needed by the Simulink-style workbench.
 
-The authorized next increment is tracked in [M1 implementation](product/M1_IMPLEMENTATION.md),
-with [current contracts](product/M1_CONTRACTS.md): macOS first, Linux next.
+The [M1 implementation](product/M1_IMPLEMENTATION.md) supplies the bounded
+continuous compiler/runtime under its [current contracts](product/M1_CONTRACTS.md).
+The ongoing increment is tracked in [M2 implementation](product/M2_IMPLEMENTATION.md):
+portable project revisions with explicit review and restore, an isolated worker,
+typed linear-system/LQR graph import and a native macOS feasibility preview with
+keyboard-accessible block/sample tables. It retains the 0.3.0 baseline and macOS-first, Linux-next direction;
+the full aircraft/controller milestone and desktop toolkit selection remain open.
+The experimental [project-file contract](PROJECT_FILES.md) documents its saved
+objects and shared CLI interface.

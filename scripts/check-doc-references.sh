@@ -36,7 +36,7 @@ if [ -z "$docs" ]; then
   exit 1
 fi
 
-sources="$(git ls-files --cached --others --exclude-standard -- 'tests/*.cpp' | LC_ALL=C sort -u)"
+sources="$(git ls-files --cached --others --exclude-standard -- 'tests/*.cpp' 'tests/*.mm' | LC_ALL=C sort -u)"
 if [ -z "$sources" ]; then
   printf '::error::no test sources found — the test-name half of this gate would be vacuously green\n'
   exit 1
@@ -56,7 +56,7 @@ root = pathlib.Path(sys.argv[1])
 # or a trailing slash. That deliberately excludes the compiler flags, equations,
 # YAML keys and C++ type names the documents are full of — `/fp:precise`,
 # `M_cg = M_ref + r_cg_to_ref x F`, `altitude_m`, `std::mt19937_64`.
-EXTENSIONS = ("md", "cpp", "hpp", "h", "c", "cc", "py", "sh", "yml", "yaml",
+EXTENSIONS = ("md", "cpp", "mm", "hpp", "h", "c", "cc", "py", "sh", "yml", "yaml",
               "json", "txt", "cmake", "csv", "in", "html", "svg", "png")
 PATH_SPAN = re.compile(r"[A-Za-z0-9._/-]+$")
 PATH_TAIL = re.compile(r"\.(" + "|".join(EXTENSIONS) + r")$")
@@ -77,7 +77,8 @@ def sources_in_worktree(pattern):
 
 # --- what actually exists -------------------------------------------------
 registered = set()
-for source in sources_in_worktree("tests/*.cpp"):
+for source in sorted(set(sources_in_worktree("tests/*.cpp"))
+                     | set(sources_in_worktree("tests/*.mm"))):
     text = (root / source).read_text(encoding="utf-8")
     for match in TEST_MACRO.finditer(text):
         registered.add(f"{match.group(1)}.{match.group(2)}")

@@ -20,6 +20,24 @@ discovered failure changes the implementation or receives a documented scope
 decision; observed output must not become the reference or justify widening a
 budget. Record actual results in generated test evidence, not in this protocol.
 
+### A second profile now exists
+
+This document specifies `continuous-scalar.v1` only. The explicit
+`continuous-linear.v1` profile adds one ordered `linear_combination` block kind
+and is specified, with its own predeclared acceptance protocol and budgets, in
+[ADR-0013](../adr/0013-typed-linear-graph-adapter.md). That protocol is the
+sibling of this one rather than a revision of it: it builds directly on the
+rounding allowance in B01 and the canonical-identity requirement in B03 below,
+and it leaves every rule in this document effective for the scalar profile.
+
+The scalar profile continues to reject `linear_combination`, and its canonical
+byte contract and frame-equality checks are unchanged by the new profile's
+existence. Anything stated here about the five scalar block kinds should be
+read as scoped to those kinds. The two profiles share one compiler, evaluator
+and RK4 executor, so the execution-conformance meaning established here carries
+across; the numerical budget for a linear-row model does not, because a row's
+allowance depends on its ordered term count.
+
 ## Accepted first profile
 
 The initial profile contains finite binary64 real scalars, explicit SI signal
@@ -231,3 +249,10 @@ validity and engineering acceptance retain separate evidence states under
 Sampled, hybrid, reset, multirate, subsystem and aircraft blocks require their
 own predeclared protocols before admission. The continuous fixtures provide a
 foundation for D07; they do not close its broader event/clock-order decisions.
+
+`linear_combination` was admitted through exactly that route. Its protocol is
+[ADR-0013](../adr/0013-typed-linear-graph-adapter.md), predeclared before the
+implementation and carrying its own positive, refusal and integration-consistency
+cases. Admitting it did not relax this protocol, and reconstructing an aircraft
+plant through typed rows establishes agreement with the existing engine — not
+independent aircraft validation, which remains a separate evidence dimension.

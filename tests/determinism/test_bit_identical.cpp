@@ -236,8 +236,9 @@ TEST(Determinism, TheFingerprintTrajectoryIsNotChaotic) {
 
 TEST(Determinism, NoLongDoubleInTheNumericalCore) {
   // ADR-0004 bans long double: it is 80-bit extended on x86-64 System V,
-  // 64-bit on MSVC and 128-bit quad on AArch64 Linux, so a result touching it
-  // is non-portable by construction. This asserts the property the ban exists
+  // 128-bit quad on AArch64 Linux and plain 64-bit double on Apple silicon —
+  // three widths, all inside the platform set vcpkg.json supports — so a
+  // result touching it is non-portable by construction. This asserts the property the ban exists
   // to protect rather than the ban itself — a grep would be checking the letter
   // of the rule and this checks that doubles behave as doubles.
   static_assert(sizeof(double) == 8, "galata assumes IEEE 754 binary64");

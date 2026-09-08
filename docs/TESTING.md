@@ -5,9 +5,9 @@ failure means.
 
 | Tier | Directory | What it proves | Exists |
 |---|---|---|---|
-| Unit | `tests/unit/` | One algorithm against a closed-form answer | yes |
+| Unit | `tests/unit/`, `tests/desktop/` | One algorithm against a closed-form answer | yes |
 | Property | `tests/property/` | Invariants over many generated inputs, seeded | yes |
-| Integration | `tests/integration/` | One pipeline stage against a frozen capability contract | yes |
+| Integration | `tests/integration/`, `tests/scripts/` | One pipeline stage against a frozen capability contract | yes |
 | Validation | `tests/validation/` | Output against published reference data | yes |
 | Determinism | `tests/determinism/` | Bit-identical repeat runs; cross-platform agreement | yes |
 | Evals | `evals/` | Agent behaviour against checkable outcomes | no |
@@ -15,6 +15,30 @@ failure means.
 The "Exists" column is the honest state of this repository right now. A
 directory appears in `tests/CMakeLists.txt` in the same commit that adds its
 first test, never in advance.
+
+The tier is the label, not the directory. Two directories join a tier they do
+not share a name with, and one of them is conditional on the platform:
+
+- `tests/desktop/` carries the `unit` label. It holds headless presentation
+  geometry for the optional native macOS preview — routing, connection and
+  diagram editing — built only when `APPLE` and the `galata_desktop` target are
+  both present. It links AppKit but opens no window and starts no application.
+- `tests/scripts/` supplies five `integration` tests registered by name rather
+  than by discovery: `ProjectWorkflow`, `ProjectLinearImport`, `ProjectRecovery`,
+  `ProjectRoutes` and `DesktopPackageContract`. The first four drive the
+  experimental project CLI as a child process over its public JSON contract,
+  which is why they are integration tests written against
+  [`docs/PROJECT_FILES.md`](PROJECT_FILES.md) rather than unit tests of
+  `src/cli/project.cpp`. They are registered when the `galata_cli` target is
+  built on a UNIX host, which both supported platforms are, so in practice the
+  target is the condition. They carry a longer timeout because an instrumented
+  worker hashes its whole executable and runtime inventory on every run.
+
+The rest of `tests/scripts/` — the assurance, provenance, release and worktree
+gates — is not registered with ctest at all. CI runs it separately as
+`python3 -m unittest discover -s tests/scripts`, because those tests check the
+Python gates themselves rather than anything the C++ build produces. Running
+only `ctest` therefore leaves that set unexercised.
 
 ## Rules that make the tiers mean something
 
@@ -73,3 +97,6 @@ ctest --preset dev
 ```
 
 `ctest --preset dev -L unit` runs one tier. Labels match the table above.
+The label is authoritative: `-L unit` on macOS also runs the desktop geometry
+tests, and `-L integration` also runs the project CLI tests.
+

@@ -88,8 +88,10 @@ itself turn a clean release source dirty.
 For this milestone, downloadable archives require static Galata libraries.
 Packaging explicitly refuses an enabled BUILD_SHARED_LIBS configuration. CMake
 library consumers may still build/install shared libraries; a future archive
-bundling implementation needs its own loader/relocation verification. Existing
-Windows dependency DLL staging remains part of the supported archive path.
+bundling implementation needs its own loader/relocation verification. The
+Windows dependency DLL staging that was the one existing exception to that is
+gone with Windows support ([ADR-0015](0015-supported-platforms.md)), so no
+supported archive now stages a third-party runtime library.
 
 Run manifests also retain an endpoint inventory of loaded modules. Readable
 module files are hashed before and after execution; OS-managed shared-cache or

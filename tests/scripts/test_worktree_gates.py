@@ -57,6 +57,27 @@ class WorktreeGates(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("NEW.md points at absent.md", result.stdout)
 
+    def test_reference_gate_reads_native_tests_and_native_source_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.fixture(Path(directory), "check-doc-references.sh")
+            (source / "tests/desktop").mkdir(parents=True)
+            native = source / "tests/desktop/new.mm"
+            native.write_text("TEST(NativeSuite, NativeCase) {}\n", encoding="utf-8")
+            document = source / "NEW.md"
+            document.write_text(
+                "Checked by `NativeSuite.NativeCase` in `tests/desktop/new.mm`.\n",
+                encoding="utf-8")
+            result = self.run_gate(source, "check-doc-references.sh")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("1 registered tests", result.stdout)
+            document.write_text(
+                "`NativeSuite.MissingCase` in `tests/desktop/missing.mm`.\n",
+                encoding="utf-8")
+            result = self.run_gate(source, "check-doc-references.sh")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no test registered as NativeSuite.MissingCase", result.stdout)
+            self.assertIn("no such file or directory: tests/desktop/missing.mm", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

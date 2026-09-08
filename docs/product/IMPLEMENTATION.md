@@ -60,7 +60,7 @@ archive artifacts are retained under the build directory, outside distributed
 source evidence. The existing discrepancy locks remain intact.
 
 The M0 changes are implemented and locally verified. Milestone exit still
-requires maintainer review and actual hosted Linux/macOS/Windows CI execution;
+requires maintainer review and actual hosted Linux/macOS CI execution;
 local YAML/gate tests cannot demonstrate that remote workflow graph. No release,
 remote workflow or external repository setting was changed. Existing user work
 was preserved.
@@ -69,8 +69,9 @@ The subsequent authorized increment is tracked in [M1 implementation](M1_IMPLEME
 
 ## Next engineering sequence
 
-1. Review the M0 changes and run the exact source through hosted Linux, macOS
-   and Windows CI. Investigate any platform failure before a release candidate.
+1. Review the M0 changes and run the exact source through hosted Linux and
+   macOS CI; Windows is no longer a supported platform. Investigate any
+   platform failure before a release candidate.
 2. Execute M1 discovery packets and record supported operating envelope,
    numerical budgets, model/data rights, project schema, UI/worker transport and
    model/clock semantics decisions. Owners and exit criteria are in the

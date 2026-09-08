@@ -1,9 +1,8 @@
-# galata C++ style
+# galata C++ and Objective-C++ style
 # Modern C++ — 2-space indent, 100-col, braces on same line as declaration.
 # Run via `clang-format -i` on changed files; CI verifies.
 
 BasedOnStyle: Google
-Language: Cpp
 Standard: c++20
 
 ColumnLimit: 100

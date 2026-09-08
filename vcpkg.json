@@ -4,7 +4,7 @@
   "version-string": "0.3.0",
   "description": "Flight dynamics, control-law design and simulation: trim, linearise, synthesise, analyse, verify.",
   "license": "Apache-2.0",
-  "supports": "(linux | osx | windows) & (x64 | arm64)",
+  "supports": "(linux | osx) & (x64 | arm64)",
   "dependencies": [
     {
       "name": "eigen3",

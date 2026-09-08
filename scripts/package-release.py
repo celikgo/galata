@@ -140,14 +140,13 @@ def package(build, output, release_sha=None, ci_evidence=None):
     if version != config["GALATA_VERSION_STRING"] or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
         raise ValueError("configured and source versions disagree or have an invalid format")
     system = config["GALATA_BUILD_SYSTEM"]
-    systems = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}
+    systems = {"Darwin": "macos", "Linux": "linux"}
     processor = config["GALATA_BUILD_PROCESSOR"].lower()
     processor = {"amd64": "x86_64", "x64": "x86_64", "aarch64": "arm64"}.get(processor, processor)
     if system not in systems or processor not in {"arm64", "x86_64"}:
         raise ValueError(f"unsupported archive platform {system}/{processor}")
     platform_name = systems[system] + "-" + processor
-    suffix = ".exe" if system == "Windows" else ""
-    binary = build / "src/cli" / ("galata" + suffix)
+    binary = build / "src/cli" / "galata"
     binary_version = run([binary, "--version"], capture_output=True, text=True).stdout.strip()
     expected_version = (f"galata {version} ({config['GALATA_BUILD_COMPILER_ID']} "
                         f"{config['GALATA_BUILD_COMPILER_VERSION']}, {config['GALATA_BUILD_TYPE']}, "
@@ -195,13 +194,6 @@ def package(build, output, release_sha=None, ci_evidence=None):
         shutil.copy2(commands_path, stage / "build-evidence" / commands_path.name)
         (stage / "bin").mkdir(exist_ok=True)
         shutil.copy2(binary, stage / "bin" / binary.name)
-        if suffix:
-            installed = Path(cache["VCPKG_INSTALLED_DIR"]) / cache["VCPKG_TARGET_TRIPLET"]
-            dependency_bin = installed / ("debug/bin" if config["GALATA_BUILD_TYPE"] == "Debug" else "bin")
-            dlls = {path.name: path for path in dependency_bin.glob("*.dll")}
-            dlls.update({path.name: path for path in binary.parent.glob("*.dll")})
-            for path in dlls.values():
-                shutil.copy2(path, stage / "bin" / path.name)
         # Keep source-reference notices byte-identical to SOURCE-SNAPSHOT.json.
         # Build-resolved notices live separately and are the binary's inventory.
         run([sys.executable, root / "scripts/collect-dependency-notices.py", build,
@@ -234,10 +226,10 @@ def package(build, output, release_sha=None, ci_evidence=None):
         write_json(stage / "PACKAGE.json", metadata)
         (stage / "RUNNING.txt").write_text(
             f"galata {version} - {platform_name} ({metadata['build_type']})\n\n"
-            f"bin/galata{suffix} --version\n"
-            f"bin/galata{suffix} capabilities\n"
-            f"bin/galata{suffix} run examples/nt33a-control-design/study.yaml --output-dir results\n"
-            f"bin/galata{suffix} run examples/continuous-feedback/study.yaml --output-dir model-results\n\n"
+            "bin/galata --version\n"
+            "bin/galata capabilities\n"
+            "bin/galata run examples/nt33a-control-design/study.yaml --output-dir results\n"
+            "bin/galata run examples/continuous-feedback/study.yaml --output-dir model-results\n\n"
             "Run from this directory; keep examples and models together. Existing reports require --overwrite.\n"
             "PACKAGE.json records this binary, its source snapshot and compiler.\n"
             "SOURCE-SNAPSHOT.json identifies the complete source tree included alongside bin.\n"
@@ -245,7 +237,7 @@ def package(build, output, release_sha=None, ci_evidence=None):
             "See docs/VERIFICATION.md for the checked and unvalidated capability boundaries.\n"
             "This is an engineering workbench, not a qualified certification tool or flight computer.\n"
             "Apache-2.0; see LICENSE, NOTICE and THIRD_PARTY_LICENSES.md.\n", encoding="utf-8")
-        archive = assets / (stage.name + (".zip" if suffix else ".tar.gz"))
+        archive = assets / (stage.name + ".tar.gz")
         archive_tree(stage, archive)
         run([sys.executable, root / "scripts/check-release-archive.py", archive])
         metadata["cli_archive"] = {"file": archive.name, "sha256": digest(archive)}

@@ -251,6 +251,11 @@ RunResult run_pipeline(const Pipeline& pipeline,
                        const std::string& output_directory,
                        const ProgressCallback& progress,
                        const RunOptions& options) {
+  const auto check_cancelled = [&]() {
+    if (options.cancelled && options.cancelled())
+      throw std::runtime_error("pipeline cancelled");
+  };
+  check_cancelled();
   if (pipeline.version != 1 || pipeline.stages.empty()) {
     throw std::runtime_error("pipeline: version 1 and at least one stage are required");
   }
@@ -319,6 +324,13 @@ RunResult run_pipeline(const Pipeline& pipeline,
   });
   const auto read_role =
       [&](const Stage& stage, const std::string& key, const std::optional<std::size_t> limit) {
+        const auto* capability = registry.find(stage.capability);
+        if (!stage.input->get(key)
+            && std::find(capability->optional_input_file_keys.begin(),
+                         capability->optional_input_file_keys.end(),
+                         key)
+                   != capability->optional_input_file_keys.end())
+          return;
         StageContext context;
         context.base_directory = base_directory;
         context.files = files;
@@ -351,6 +363,7 @@ RunResult run_pipeline(const Pipeline& pipeline,
   std::map<std::string, Artifact> produced;
 
   for (const std::string& stage_id : order) {
+    check_cancelled();
     const Stage& stage = *by_id.at(stage_id);
     const Capability* capability = registry.find(stage.capability);
     if (capability == nullptr) {
@@ -368,13 +381,16 @@ RunResult run_pipeline(const Pipeline& pipeline,
     context.base_directory = base_directory;
     context.output_directory = output_directory;
     context.files = files;
+    context.cancelled = options.cancelled;
     for (const std::string& reference : stage.input->referenced_stages()) {
       context.upstream[reference] = produced.at(reference);
     }
 
     Artifact artifact;
     try {
+      check_cancelled();
       artifact = capability->run(context);
+      check_cancelled();
     } catch (const std::exception& error) {
       throw std::runtime_error("stage '" + stage_id + "' (" + stage.capability
                                + ") failed: " + error.what());
@@ -428,6 +444,7 @@ RunResult run_pipeline(const Pipeline& pipeline,
     produced[stage_id] = artifact;
     result.stages.push_back(StageResult{stage_id, stage.capability, std::move(artifact)});
   }
+  check_cancelled();
   if (options.write_manifest) {
     verify_file_unchanged(executable);
     verify_runtime_unchanged(runtime);

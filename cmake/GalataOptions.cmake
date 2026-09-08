@@ -8,6 +8,7 @@ option(GALATA_BUILD_TESTS      "Build unit, integration, validation and determin
 option(GALATA_BUILD_EXAMPLES   "Build the runnable example studies"                        OFF)
 option(GALATA_BUILD_BENCHMARKS "Build the benchmark suite"                                 OFF)
 option(GALATA_BUILD_CLI        "Build the galata CLI executable"                           ON)
+option(GALATA_BUILD_DESKTOP    "Build the experimental macOS project editor"              OFF)
 option(GALATA_BUILD_PYTHON     "Build the pygalata Python bindings"                        OFF)
 
 option(GALATA_ENABLE_ASAN      "AddressSanitizer (debug builds)"        OFF)

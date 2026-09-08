@@ -224,3 +224,20 @@ parameters or checkpointing; introduce numerical optimizations or parallel
 schedules; select project storage; support external model translation; or accept
 a customer requirement for signed models, restricted-data storage or retained
 evidence across a declared compatibility window.
+
+## Subsequent bounded implementation
+
+[ADR-0012](0012-project-worker-preview.md) implements experimental local project
+revisions, a separate presentation document and retained CLI worker requests.
+That preview advances the storage boundary described here without freezing the
+public project format or supplying the broader model-reference/migration scope.
+
+Two further increments build on it.
+[ADR-0013](0013-typed-linear-graph-adapter.md) imports a linear plant and its
+controller as an editable typed graph, and exercises the source/presentation
+separation argued here against real evidence: the imported origin stays
+immutably attached across edits and reports whether the current model still
+matches it, rather than certifying an edited model.
+[ADR-0014](0014-project-revision-recovery.md) makes the retained revisions
+reviewable and restorable, which is what gives immutability a user-visible
+purpose. Neither freezes the public project format either.

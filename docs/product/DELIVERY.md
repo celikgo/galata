@@ -7,7 +7,17 @@
 Current authorized platform order is **macOS first, Linux next**. The bounded
 continuous-model feasibility work and remaining M1 gates are recorded in
 [M1 implementation](M1_IMPLEMENTATION.md) and [M1 contracts](M1_CONTRACTS.md).
-Existing Windows engine CI remains; it does not imply Windows desktop delivery.
+Windows is no longer a supported platform: its engine CI leg, presets and
+release packaging were withdrawn after an installed-package consumer failure
+that was never root-caused. Engine and product now target the same two
+platforms.
+The [M2 preview increment](M2_IMPLEMENTATION.md) adds project revisions, a shared
+CLI worker, typed linear-system/LQR graph import, explicit retained-revision
+restoration and native block/sample tables in the macOS feasibility surface.
+Synthetic and local linear aircraft/controller workflows cover a bounded
+part of M2; toolkit selection, hosted verification, complete accessibility/recovery and
+clean-machine installation acceptance remain open. The
+[project-file contract](../PROJECT_FILES.md) records the implemented boundary.
 
 | Milestone | Deliverable the user can review | Implementation focus | Required exit evidence |
 |---|---|---|---|

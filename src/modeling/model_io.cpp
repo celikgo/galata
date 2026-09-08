@@ -204,7 +204,7 @@ SignalType signal_type(const YAML::Node& node, const std::string& path) {
   return result;
 }
 
-Block block(const YAML::Node& node, const std::string& path) {
+Block block(const YAML::Node& node, const std::string& path, std::string_view profile) {
   if (!node.IsMap()) {
     invalid(path, "expected a block map");
   }
@@ -242,8 +242,29 @@ Block block(const YAML::Node& node, const std::string& path) {
   } else if (kind == "output") {
     io::yaml_keys(node, location, {"id", "kind", "output"});
     result.parameters = Output{};
+  } else if (kind == "linear_combination" && profile == kLinearProfile) {
+    io::yaml_keys(node, location, {"id", "kind", "output", "terms"});
+    const YAML::Node terms = required(node, "terms", location);
+    sequence(terms, location + ".terms", kMaxLinearTerms);
+    LinearCombination combination;
+    combination.terms.reserve(terms.size());
+    for (std::size_t i = 0; i < terms.size(); ++i) {
+      const YAML::Node term = terms[i];
+      const std::string term_path = location + ".terms[" + std::to_string(i) + "]";
+      io::yaml_keys(term, term_path, {"input", "coefficient"});
+      const YAML::Node coefficient = required(term, "coefficient", term_path);
+      const std::string coefficient_path = term_path + ".coefficient";
+      io::yaml_keys(coefficient, coefficient_path, {"value", "dimension"});
+      combination.terms.push_back(
+          {signal_type(required(term, "input", term_path), term_path + ".input"),
+           Gain{number(required(coefficient, "value", coefficient_path),
+                       coefficient_path + ".value"),
+                dimension(required(coefficient, "dimension", coefficient_path),
+                          coefficient_path + ".dimension")}});
+    }
+    result.parameters = std::move(combination);
   } else {
-    invalid(location + ".kind", "unsupported block '" + kind + "' in continuous-scalar.v1");
+    invalid(location + ".kind", "unsupported block '" + kind + "' in " + std::string(profile));
   }
   return result;
 }
@@ -295,6 +316,9 @@ std::string_view block_kind(const Block& value) {
   }
   if (std::holds_alternative<Integrator>(value.parameters)) {
     return "integrator";
+  }
+  if (std::holds_alternative<LinearCombination>(value.parameters)) {
+    return "linear_combination";
   }
   return "output";
 }
@@ -357,14 +381,17 @@ std::string binary64_bits(double value) {
   std::string result(16, '0');
   for (std::size_t i = 0; i < result.size(); ++i) {
     const auto shift = static_cast<unsigned int>(4 * (15 - i));
-    result[i] = digits[static_cast<std::size_t>((bits >> shift) & 0xfU)];
+    // Narrow to the nibble it already is: casting straight to size_t is an
+    // identity where size_t is uint64_t, which -Wuseless-cast rejects.
+    const auto nibble = static_cast<unsigned int>((bits >> shift) & 0xfU);
+    result[i] = digits[nibble];
   }
   return result;
 }
 
 }  // namespace
 
-Model parse_model_yaml(std::string_view source) {
+Model parse_model_draft_yaml(std::string_view source) {
   if (source.size() > kMaxSourceBytes) {
     throw Error(ErrorCode::ResourceLimit, "model: source exceeds the one-MiB byte limit");
   }
@@ -378,7 +405,8 @@ Model parse_model_yaml(std::string_view source) {
     sequence(blocks, "model.blocks", kMaxBlocks);
     result.blocks.reserve(blocks.size());
     for (std::size_t i = 0; i < blocks.size(); ++i) {
-      result.blocks.push_back(block(blocks[i], "model.blocks[" + std::to_string(i) + "]"));
+      result.blocks.push_back(
+          block(blocks[i], "model.blocks[" + std::to_string(i) + "]", result.profile));
     }
     const YAML::Node connections = required(root, "connections", "model");
     sequence(connections, "model.connections", kMaxConnections);
@@ -392,13 +420,19 @@ Model parse_model_yaml(std::string_view source) {
                      scalar(required(node, "target", path), path + ".target"),
                      integer<std::size_t>(required(node, "input", path), path + ".input")});
     }
-    validate_model(result);
+    validate_model_draft(result);
     return result;
   } catch (const Error&) {
     throw;
   } catch (const std::exception& error) {
     throw Error(ErrorCode::InvalidDocument, std::string("model: ") + error.what());
   }
+}
+
+Model parse_model_yaml(std::string_view source) {
+  auto model = parse_model_draft_yaml(source);
+  validate_model(model);
+  return model;
 }
 
 std::string write_model_yaml(const Model& model) {
@@ -422,6 +456,15 @@ std::string write_model_yaml(const Model& model) {
       result += "    signs: " + integer_list(sum->signs) + "\n";
     } else if (const auto* integrator = std::get_if<Integrator>(&value->parameters)) {
       result += "    initial_value: " + number_text(integrator->initial_value) + "\n";
+    } else if (const auto* combination = std::get_if<LinearCombination>(&value->parameters)) {
+      result += "    terms:\n";
+      for (const auto& term : combination->terms) {
+        result += "      - input:\n          dimension: " + integer_list(term.input.dimension);
+        result += "\n          frame: ";
+        result += frame_name(term.input.frame);
+        result += "\n        coefficient:\n          value: " + number_text(term.coefficient.value);
+        result += "\n          dimension: " + integer_list(term.coefficient.dimension) + "\n";
+      }
     }
   }
   const auto connections = ordered_connections(model);
@@ -462,6 +505,14 @@ std::string canonical_model(const Model& model) {
       }
     } else if (const auto* integrator = std::get_if<Integrator>(&value->parameters)) {
       token(result, binary64_bits(integrator->initial_value));
+    } else if (const auto* combination = std::get_if<LinearCombination>(&value->parameters)) {
+      token(result, integer_text(combination->terms.size()));
+      for (const auto& term : combination->terms) {
+        dimension_tokens(result, term.input.dimension);
+        token(result, frame_name(term.input.frame));
+        token(result, binary64_bits(term.coefficient.value));
+        dimension_tokens(result, term.coefficient.dimension);
+      }
     }
   }
   token(result, "connections");

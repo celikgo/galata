@@ -63,7 +63,7 @@ Local JUnit/log evidence is in `build/dev/m1-results.xml`,
 `build/asan/m1-ctest.log`. The final affected tests are recorded in each build's
 `m1-portability-results.xml` and `m1-portability-ctest.log`; the deployment
 compile counterexample/correction is in `build/m1-portability`. Supplemental
-check logs use the `m1-` prefix in `build/dev`. GCC commands/results are in `build/gcc-m1/compile-checks.json`.
+check logs use the `m1-` prefix in `build/dev`. GCC commands/results are in `build/gcc-m1`, as compile-checks.json.
 These generated local artifacts are outside distributed source evidence.
 The local macOS archive is a development snapshot, with no hosted CI or release
 publication claim. Packaging reruns the shipped continuous-model and aircraft
@@ -76,15 +76,33 @@ or approve a consequential engineering decision.
 
 ## Next delivery work
 
-1. Review this profile and run the same source on hosted macOS/Linux and the
-   existing portable engine matrix. Retain failures and source-bound evidence.
+The [M2 project/worker increment](M2_IMPLEMENTATION.md) now builds on this
+foundation with an experimental directory project and native macOS feasibility
+preview. Its [project-file contract](../PROJECT_FILES.md) and
+[ADR-0012](../adr/0012-project-worker-preview.md) record draft editing, immutable
+requests and recovery. The complete external M1 and M2 gates remain open.
+
+1. Review this profile and run the same source on the hosted engine matrix,
+   which covers Linux under GCC and Clang and macOS under AppleClang since
+   Windows support was withdrawn. Retain failures and source-bound evidence.
 2. Complete the macOS desktop feasibility comparison: offline packaging,
    accessibility, graph editing, recovery and a worker cancellation experiment.
-   Use the same C++ compiler/runtime and the synthetic acceptance model.
+   Use the same C++ compiler/runtime and the synthetic acceptance model. The
+   native candidate now covers graph editing, recovery, cancellation and offline
+   packaging on the synthetic model. Signing, notarization, clean-machine
+   installation, full accessibility acceptance and the Qt/web-shell comparison
+   remain undone, so the *comparison* this step names is still open.
 3. Define the smallest aircraft/linear-system block adapter with units, state
    mapping and source evidence, then test against existing aircraft studies.
-4. Select project persistence and migration behavior from ADR-0011's contract;
-   implement the M2 create/open/edit/run/review slice on macOS, then Linux.
+   Delivered as the typed `continuous-linear.v1` profile and the
+   `model.linear_graph` capability under
+   [ADR-0013](../adr/0013-typed-linear-graph-adapter.md), which reconstructs the
+   local NT-33A study and retains its source matrices, channel mappings and
+   linearization diagnostics. That is agreement with the existing engine, not
+   new aircraft validation.
+4. Verify the M2 directory-project and worker contract on the claimed platforms;
+   complete recovery and installation evidence before promising project
+   compatibility or migration support.
 5. Add sampled/hybrid behavior only after its clock/event protocols are reviewed.
 
 Named customer/reviewer, decision-specific model validity and data rights,

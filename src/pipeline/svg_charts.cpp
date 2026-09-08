@@ -88,30 +88,35 @@ std::string render_timeseries_svg(const TimeSeriesChart& chart, std::size_t char
   }
   // Normalize before differencing to avoid overflow even where long double has
   // the same range as double. Constant traces receive a visible axis span.
-  const long double y_scale = std::max({1.0, std::abs(y_min), std::abs(y_max)});
-  long double low = y_min / y_scale;
-  long double high = y_max / y_scale;
+  const long double y_scale =
+      static_cast<long double>(std::max({1.0, std::abs(y_min), std::abs(y_max)}));
+  long double low = static_cast<long double>(y_min) / y_scale;
+  long double high = static_cast<long double>(y_max) / y_scale;
   const auto pad =
       high == low ? std::max(1.0L / y_scale, std::abs(low) * 0.05L) : (high - low) * 0.05L;
   low -= pad;
   high += pad;
-  const long double t_scale =
-      std::max({1.0, std::abs(chart.times_s.front()), std::abs(chart.times_s.back())});
-  long double start = chart.times_s.front() / t_scale;
-  long double end = chart.times_s.back() / t_scale;
+  const long double t_scale = static_cast<long double>(
+      std::max({1.0, std::abs(chart.times_s.front()), std::abs(chart.times_s.back())}));
+  long double start = static_cast<long double>(chart.times_s.front()) / t_scale;
+  long double end = static_cast<long double>(chart.times_s.back()) / t_scale;
   if (start == end) {
     start -= 0.5L;
     end += 0.5L;
   }
   constexpr double left = 78, right = 548, top = 24, bottom = 242;
   const auto x = [&](double time) {
-    return left + static_cast<double>((time / t_scale - start) / (end - start)) * (right - left);
+    return left
+           + static_cast<double>((static_cast<long double>(time) / t_scale - start) / (end - start))
+                 * (right - left);
   };
   const auto y = [&](double value) {
-    return bottom - static_cast<double>((value / y_scale - low) / (high - low)) * (bottom - top);
+    return bottom
+           - static_cast<double>((static_cast<long double>(value) / y_scale - low) / (high - low))
+                 * (bottom - top);
   };
   const auto axis_value = [](long double normalized, long double scale) {
-    const long double limit = std::numeric_limits<double>::max();
+    const long double limit = static_cast<long double>(std::numeric_limits<double>::max());
     return static_cast<double>(std::clamp(normalized, -limit / scale, limit / scale) * scale);
   };
   const auto id = "history-" + std::to_string(chart_index);
@@ -137,9 +142,11 @@ std::string render_timeseries_svg(const TimeSeriesChart& chart, std::size_t char
     const auto yy = bottom - fraction * (bottom - top);
     out << "<path d=\"M" << left << ',' << yy << "H" << right << "\" stroke=\"#dce5ed\"/><text x=\""
         << left - 8 << "\" y=\"" << yy + 4 << "\" text-anchor=\"end\">"
-        << number(axis_value(low + fraction * (high - low), y_scale)) << "</text>\n"
+        << number(axis_value(low + static_cast<long double>(fraction) * (high - low), y_scale))
+        << "</text>\n"
         << "<text x=\"" << xx << "\" y=\"" << bottom + 22 << "\" text-anchor=\"middle\">"
-        << number(axis_value(start + fraction * (end - start), t_scale)) << "</text>\n";
+        << number(axis_value(start + static_cast<long double>(fraction) * (end - start), t_scale))
+        << "</text>\n";
   }
   out << "<text x=\"313\" y=\"286\" text-anchor=\"middle\">Time (s)</text>"
          "<text transform=\"translate(16 133) rotate(-90)\" text-anchor=\"middle\">"

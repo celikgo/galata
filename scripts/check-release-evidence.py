@@ -12,7 +12,7 @@ from provenance_support import digest
 
 def check(directory, evidence, expected):
     check_evidence(evidence, expected)
-    expected_platforms = {"linux-x86_64", "macos-arm64", "windows-x86_64"}
+    expected_platforms = {"linux-x86_64", "macos-arm64"}
     platforms = set()
     metadata_files = list(directory.glob("*.package.json"))
     if len(metadata_files) != len(expected_platforms):

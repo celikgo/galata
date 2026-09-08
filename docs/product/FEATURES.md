@@ -475,7 +475,15 @@ acceptance requirements below are targets, not measurements of current code.
 **Must v1 · M2 · Dependencies: F03, F04, F35**
 
 - **Baseline and gap:** Studies and models live in YAML files with relative
-  paths; there is no managed desktop project or long-term migration contract.
+  paths. An experimental portable project directory now exists under
+  [ADR-0012](../adr/0012-project-worker-preview.md) and
+  [ADR-0014](../adr/0014-project-revision-recovery.md): immutable
+  content-addressed revisions, retained run evidence, bounded history listing
+  and explicit restore, documented in [project files](../PROJECT_FILES.md). It
+  covers model, presentation and simulation settings only — not scenarios,
+  requirements or review annotations — and it deliberately declares no
+  migration policy, compatibility window or long-term format freeze, so the
+  migration half of this feature is untouched.
 - **Proposed work:** Organize model revisions, studies, scenarios, requirements,
   results and review annotations in portable local projects. Provide explicit
   migrations and read-only opening of unsupported versions where feasible.
@@ -488,8 +496,13 @@ acceptance requirements below are targets, not measurements of current code.
 
 **Must v1 · M2 · Dependencies: F01, F13, F27, F32, F39, F42, F46**
 
-- **Baseline and gap:** The CLI/C++ workflow is usable; a desktop shell and
-  interactive study editor do not exist.
+- **Baseline and gap:** The CLI/C++ workflow is usable. A native macOS shell
+  now exists as an unselected feasibility candidate (see D11 in
+  [discovery](DISCOVERY.md) and the [M2 record](M2_IMPLEMENTATION.md)) with a
+  block-diagram editor, run history, trajectory plot and evidence viewer over
+  the same CLI worker. It edits executable signal-flow models — the F39 half —
+  and does not provide a project browser or an interactive editor for the
+  study-stage DAG, which is what this feature asks for.
 - **Proposed work:** Provide a local project browser, form/graph study editor,
   capability discovery, validation messages, run progress, cancellation and
   result navigation. Keep the study-stage DAG distinct from the executable

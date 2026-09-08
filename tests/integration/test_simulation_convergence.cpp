@@ -150,12 +150,12 @@ TEST(SimulationConvergence, SmallDisturbancePipelineApproachesTheAugmentedLinear
     const auto input = std::find(
         full.input_names.begin(), full.input_names.end(), larger.law.plant.input_names[row]);
     ASSERT_NE(input, full.input_names.end());
-    const auto channel = static_cast<Eigen::Index>(input - full.input_names.begin());
+    const auto channel = input - full.input_names.begin();
     for (std::size_t column = 0; column < larger.law.plant.state_names.size(); ++column) {
       const auto state = std::find(
           full.state_names.begin(), full.state_names.end(), larger.law.plant.state_names[column]);
       ASSERT_NE(state, full.state_names.end());
-      const auto state_index = static_cast<Eigen::Index>(state - full.state_names.begin());
+      const auto state_index = state - full.state_names.begin();
       augmented.a(n + channel, state_index) =
           -larger.law.riccati.k(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(column))
           / larger.actuator_lags[static_cast<std::size_t>(channel)];

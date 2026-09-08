@@ -58,8 +58,12 @@ The example's costs and actuator specifications are illustrative. The model
 still describes a single local aerodynamic reference condition.
 
 Earlier roadmap versions assigned v0.3 to a desktop application. That scope is
-deferred: this release has no GUI, 3-D viewport or signed desktop installer.
-It also does not complete the former v1.0 feature list.
+deferred from the release baseline. The subsequent experimental
+[M2 increment](product/M2_IMPLEMENTATION.md) adds a native macOS editor for
+scalar projects and typed linear aircraft/controller study imports, with a Dim
+theme, native block/sample tables and saved-revision review/restore. Source
+matrices and diagnostics remain attached after edits. It has no 3-D viewport or
+signed desktop installer. It does not complete the former v1.0 feature list.
 
 ## Future work — not implemented
 

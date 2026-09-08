@@ -74,6 +74,11 @@ struct RunOptions {
   // never replaced, even when this option is set.
   bool overwrite = false;
   bool write_manifest = true;
+  // Cooperative cancellation before stages and manifest publication. sim.model
+  // also checks between integration steps; other capabilities may finish first.
+  // Cancellation throws, without a successful result or completed run manifest.
+  // Previously published stage output files are not rolled back.
+  std::function<bool()> cancelled = {};
 };
 
 // Called before and after each stage, so the CLI can stream progress.

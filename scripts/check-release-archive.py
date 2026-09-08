@@ -3,7 +3,6 @@
 """Run the downloadable CLI after extraction, including its models and notices."""
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -111,7 +110,7 @@ def check(archive):
             runtime = (stage / item["path"]).resolve()
             if not runtime.is_relative_to(stage / "bin") or digest(runtime) != item["sha256"]:
                 raise ValueError("runtime hash mismatch or invalid binary path")
-        binary = stage / "bin" / ("galata.exe" if os.name == "nt" else "galata")
+        binary = stage / "bin" / "galata"
         subprocess.run([str(binary), "--version"], cwd=stage, check=True)
         studies = {"continuous-feedback": ("response.csv", "evidence.json"),
                    "nt33a-trim-and-linearise": ("trim-and-modes.md",),

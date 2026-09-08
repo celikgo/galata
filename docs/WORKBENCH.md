@@ -276,13 +276,34 @@ version does not promise binary compatibility for these C++ value types.
 
 ## Experimental executable models
 
-The [continuous scalar model format](MODEL_FILES.md) and
+The [executable model format](MODEL_FILES.md) and
 [feedback example](../examples/continuous-feedback/README.md) introduce the shared
-headless block compiler/runtime. This profile has five scalar continuous block
-types with explicit units and frames. It produces CSV and scoped evidence,
-while the existing study manifest retains exact input/build/runtime identity.
-The desktop editor, aircraft block adapter and sampled controllers remain later
-increments; product delivery targets macOS first and Linux next.
+headless block compiler/runtime. It now carries two profiles.
+`continuous-scalar.v1` has five scalar continuous block types with explicit
+units and frames. `continuous-linear.v1` admits those same five and adds one
+ordered `linear_combination` row, so a state-space matrix can be expressed
+without erasing the frame information its entries couple. Both produce CSV and
+scoped evidence, while the existing study manifest retains exact
+input/build/runtime identity.
+
+Two of the increments this section previously listed as later work now exist as
+bounded previews. The `model.linear_graph` capability lowers a linear plant and
+its optional LQR feedback into a typed graph, reconstructing the local NT-33A
+study as an editable model that retains its original matrices, channel mappings
+and linearization diagnostics as immutable source evidence — see the
+[graph design example](../examples/nt33a-graph-design/README.md) and
+[ADR-0013](adr/0013-typed-linear-graph-adapter.md). An optional native macOS
+editor and result viewer runs the same CLI worker as headless callers, over the
+saved-project contract in [project files](PROJECT_FILES.md). Neither is an
+aircraft-validation claim: a reconstructed graph agrees with the existing
+engine, and execution completion still leaves numerical accuracy, model validity
+and engineering acceptance separately unassessed.
+
+Sampled controllers remain a later increment, and the desktop toolkit is still
+unselected — the native shell is a feasibility candidate, not the product's
+chosen stack. Product delivery targets macOS first and Linux next. The bounded
+scope actually implemented, and what it does not close, is recorded in the
+[M2 implementation guide](product/M2_IMPLEMENTATION.md).
 
 The new `galata::modeling` CMake target is installed alongside the existing
 libraries. Model/source/evidence formats are experimental and the resolved IR

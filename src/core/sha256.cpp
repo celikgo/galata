@@ -34,7 +34,11 @@ std::string sha256(std::string_view bytes) {
                                     0x1f83d9abU,
                                     0x5be0cd19U};
   std::vector<std::uint8_t> padded(bytes.begin(), bytes.end());
-  const std::uint64_t bit_length = static_cast<std::uint64_t>(bytes.size()) * 8U;
+  // Widen through an initialisation rather than a cast: where size_t already is
+  // uint64_t the cast is an identity that -Wuseless-cast rejects, and where it is
+  // narrower this still promotes before the multiply.
+  const std::uint64_t byte_count = bytes.size();
+  const std::uint64_t bit_length = byte_count * 8U;
   padded.push_back(0x80U);
   while (padded.size() % 64 != 56) {
     padded.push_back(0);

@@ -22,7 +22,7 @@
 # Eigen/src/Core/SolveTriangular.h, from an ldlt().solve() on a fixed-size 3x3.
 # It is a false positive — GCC loses track of the fixed-size storage through
 # several layers of expression-template inlining — and it appears only on GCC,
-# only at -O2, and only on Linux. Clang, AppleClang and MSVC all build it clean.
+# only at -O2, and only on Linux. Clang and AppleClang both build it clean.
 #
 # The wrong fixes, and why:
 #   * Dropping -Wnull-dereference project-wide: it is a useful warning about

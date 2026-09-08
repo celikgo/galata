@@ -21,8 +21,13 @@ explains the supported workflow and the checks a result still needs.
 An experimental [continuous block-model profile](docs/MODEL_FILES.md) now supports
 headless compilation and simulation of scalar feedback diagrams. The
 [working example](examples/continuous-feedback/README.md) records model identity
-and scoped run evidence. Desktop delivery is planned for macOS first, then Linux;
-see the [M1 implementation record](docs/product/M1_IMPLEMENTATION.md).
+and scoped run evidence. The
+[M2 preview increment](docs/product/M2_IMPLEMENTATION.md) adds immutable project
+revisions, an isolated CLI worker and an optional native macOS editor and result
+viewer with a Dim theme, keyboard-accessible block/sample tables and saved-revision
+review and restore. A typed linear-system/LQR adapter imports the existing NT-33A
+study with its original source evidence. Full M2 acceptance and desktop toolkit selection remain
+open; delivery continues macOS first, then Linux.
 
 C++20 core, strict SI units, deterministic by policy, Apache-2.0.
 
@@ -131,6 +136,10 @@ regression lock holds the gap at its measured size meanwhile.
 
 ## Status: 0.3.0 — bounded offline workbench
 
+For the macOS desktop candidate, see the [packaging and verification
+guide](docs/desktop-packaging.md). The candidate is locally sealed and checked;
+Developer ID signing, notarization and full desktop acceptance remain open.
+
 The trim, linearisation and frequency-analysis workflow now connects to control
 synthesis and time-domain simulation. This is a usable CLI and C++ library
 release with a deliberately limited model and controller scope. It does not
@@ -148,7 +157,10 @@ complete the broader desktop, hardware or v1.0 plans in the
 | Hamiltonian H-infinity, S/T norm and SISO disk-size brackets | implemented; analytic checks, numerical reliability limits, no interval proof |
 | Linear and local nonlinear simulation, with four bounded first-order actuators | implemented; analytic and convergence tests, no flight-test validation |
 | Markdown and self-contained HTML tables, trajectory CSV and run provenance | implemented; integration-tested |
-| Desktop GUI, plugin ABI, hardware interfaces and onboard deployment | not implemented |
+| Continuous scalar/linear project drafts, retained revision review/restore and isolated CLI jobs | experimental M2 preview; local verification record in the implementation guide |
+| Native macOS block editor, block/sample tables, trajectory plot and evidence viewer | optional Dim-themed feasibility preview; full desktop and installation acceptance pending |
+| Typed linear-system/LQR graph adapter and NT-33A study import | experimental; retains original diagnostics, no new aircraft validation |
+| Plugin ABI, hardware interfaces and onboard deployment | not implemented |
 
 The table above is maintained by hand and checked in review. The capability
 table below is not: it is generated from the registry the CLI dispatches
@@ -171,16 +183,17 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
-| `model.compile` | Compile the continuous scalar model profile with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
+| `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
 | `model.control_system` | Extract the closed loop or plant-input return ratio of an LQR design | `linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
+| `model.linear_graph` | Lower a typed linear system or LQR plant and feedback into an executable graph with origin evidence | `executable_model` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `sim.linear` | Integrate a continuous linear model with a constant input and fixed-step RK4 | `linear_trajectory` | implemented, unvalidated |
-| `sim.model` | Run a compiled continuous scalar model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
+| `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
@@ -206,8 +219,9 @@ reference has been compared against.
 - **Continuous control studies.** LQR assumes exact state feedback. PID accepts
   supplied gains; it does not tune them. Sensors, sampled control, estimator
   design and flight-code generation are outside this release.
-- **CLI and library.** There is no desktop application, 3-D view, hardware link
-  or onboard execution support.
+- **Bounded desktop preview.** The optional macOS editor uses the synthetic
+  continuous scalar profile. Aircraft block adaptation, a supported installer,
+  complete accessibility acceptance, 3-D views and hardware links remain open.
 
 The [operating guide](docs/WORKBENCH.md) distinguishes numerical convergence,
 published-reference agreement and aircraft-specific validation.
@@ -250,16 +264,51 @@ See the [example](examples/nt33a-control-design/README.md),
 `galata capabilities` lists what your build can do and how far each capability
 has been checked.
 
-Requires CMake 3.25+, Python 3.9+, Ninja, a C++20 compiler and a vcpkg checkout. Tested on
-Linux (GCC and Clang), macOS (AppleClang) and Windows (MSVC) — see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact matrix.
+To try the experimental saved-project workflow:
+
+```bash
+./build/dev/src/cli/galata project create build/feedback.galata
+./build/dev/src/cli/galata project inspect build/feedback.galata
+./build/dev/src/cli/galata project run build/feedback.galata
+```
+
+Import the existing local linear aircraft/controller study into a new project:
+
+```bash
+./build/dev/src/cli/galata project import-linear build/nt33a.galata examples/nt33a-graph-design/study.yaml
+./build/dev/src/cli/galata project run build/nt33a.galata
+```
+
+The [project guide](docs/PROJECT_FILES.md) documents draft saving and retained
+run states. The [M2 implementation guide](docs/product/M2_IMPLEMENTATION.md)
+explains enabling and opening the optional native macOS app. Its development
+bundle has no signing, notarization or clean-machine installation acceptance;
+hosted verification of this increment remains pending.
+
+Requires CMake 3.25+, Python 3.9+, Ninja, a C++20 compiler and a vcpkg
+checkout. Supported and tested on Linux (GCC and Clang) and macOS
+(AppleClang) — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for
+the exact matrix.
+
+**Windows is not supported.** Support was withdrawn rather than left nominal.
+The installed-package consumer check failed there in a way that was never root
+caused ([issue 12](https://github.com/celikgo/galata/issues/12)), and the
+portability work needed to keep a fourth platform compiling was being paid for
+no user. Nothing here deliberately rejects Windows; there is simply no job that
+builds or tests it, so any statement that it works would be an untested claim,
+which rule 2 below forbids. The `windows-x86_64` archives published under
+v0.1.0 and v0.2.0 stay where they are, because removing them would invalidate
+the `SHA256SUMS.txt` those releases publish for every platform; they are
+historical and unmaintained, and no future release ships one.
 
 ## Further development
 
 The [roadmap](docs/ROADMAP.md) separates this release from future work:
 broader validated aircraft models, sampled controllers and estimators, handling
-qualities, gain scheduling, hardware integration, a desktop application and a
-stable plugin interface. These are plans, not features of the offline workbench.
+qualities, gain scheduling, hardware integration, a supported aircraft-modeling
+desktop and a stable plugin interface. The native M2 preview covers only the
+bounded scalar and imported linear aircraft/controller workflows; the broader
+outcomes remain plans.
 
 ## Engineering rules
 
@@ -325,6 +374,8 @@ no content that is not in the repository.
 - [`docs/TESTING.md`](docs/TESTING.md) — the test tiers and what each proves
 - [`docs/WORKBENCH.md`](docs/WORKBENCH.md) — running, reviewing and embedding an offline design study
 - [`docs/STUDY_FILES.md`](docs/STUDY_FILES.md) — accepted YAML, safe output paths and run-record contents
+- [`docs/PROJECT_FILES.md`](docs/PROJECT_FILES.md) — experimental project revisions, draft saving and worker recovery
+- [M2 implementation](docs/product/M2_IMPLEMENTATION.md) — bounded project/worker increment and native macOS feasibility preview
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
 - [`docs/rfc/`](docs/rfc/README.md) — design records with implementation status;
   [RFC-0001](docs/rfc/0001-control-synthesis.md) covers control synthesis

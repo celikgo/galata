@@ -99,6 +99,11 @@ void Registry::add(Capability capability) {
                                   + "' must be positive and name a declared input file role");
     }
   }
+  for (const auto& key : capability.optional_input_file_keys) {
+    if (std::find(capability.input_file_keys.begin(), capability.input_file_keys.end(), key)
+        == capability.input_file_keys.end())
+      throw std::invalid_argument("optional input file role '" + key + "' must be declared");
+  }
   if (capabilities_.count(capability.id) != 0) {
     throw std::invalid_argument("Registry::add: capability '" + capability.id
                                 + "' is already registered");

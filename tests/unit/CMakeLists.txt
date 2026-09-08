@@ -5,6 +5,7 @@ add_executable(galata_unit_tests
   test_version.cpp
   test_modeling.cpp
   test_model_io.cpp
+  test_linear_graph.cpp
   test_units.cpp
   test_quaternion.cpp
   test_frames.cpp

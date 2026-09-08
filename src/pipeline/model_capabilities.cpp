@@ -5,6 +5,8 @@
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 
+#include "../io/strict_yaml.hpp"
+
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -31,12 +33,22 @@ int integer(const ValuePtr& value, const std::string& key) {
 }
 
 Artifact compile(const StageContext& context) {
+  if (const auto context_path = context.input->get("context_path")) {
+    const auto path = context_path->as_string();
+    const auto origin = io::load_yaml(context.read_input(path, 8 * 1024 * 1024), path);
+    if (!origin.IsMap() || !origin["schema"] || !origin["schema"].IsScalar()
+        || origin["schema"].Scalar() != "galata.project-origin.v1") {
+      throw std::invalid_argument("model.compile context_path: expected galata.project-origin.v1");
+    }
+    // RunFiles retains the exact attachment bytes. This records source context;
+    // it does not qualify edited graph rows as the original linearization.
+  }
   const auto path = required(context, "path")->as_string();
   auto compiled = modeling::compile_model(
       modeling::parse_model_yaml(context.read_input(path, modeling::kMaxSourceBytes)));
   Artifact result;
   result.kind = "executable_model";
-  result.summary = std::string(modeling::kProfile) + "; "
+  result.summary = compiled.source_model().profile + "; "
                    + std::to_string(compiled.state_ids().size()) + " states, "
                    + std::to_string(compiled.output_ids().size()) + " outputs; semantic SHA-256 "
                    + compiled.semantic_sha256();
@@ -83,7 +95,7 @@ std::string evidence(const modeling::CompiledModel& model,
   out.imbue(std::locale::classic());
   out << std::setprecision(std::numeric_limits<double>::max_digits10)
       << "{\n  \"schema\":\"galata.model-run.v1\",\n  \"profile\":"
-      << json_quote(modeling::kProfile)
+      << json_quote(model.source_model().profile)
       << ",\n  \"model_semantic_sha256\":" << json_quote(result.semantic_sha256)
       << ",\n  \"model_source_yaml\":"
       << json_quote(modeling::write_model_yaml(model.source_model()))
@@ -119,11 +131,19 @@ Artifact simulate(const StageContext& context) {
     options.initial_time_s = origin->as_number();
   if (const auto stride = context.input->get("sample_stride"))
     options.sample_stride = integer(stride, "sample_stride");
-  auto trajectory = modeling::simulate(model, options);
+  const auto check_cancelled = [&]() {
+    if (context.cancelled && context.cancelled())
+      throw modeling::Error(modeling::ErrorCode::Cancelled, "simulation cancelled");
+  };
+  check_cancelled();
+  auto trajectory = modeling::simulate(model, options, context.cancelled);
+  check_cancelled();
   const auto csv_bytes = csv(trajectory);
   const auto evidence_bytes = evidence(model, trajectory, csv_path, csv_bytes);
+  check_cancelled();
   context.write_output(csv_path, csv_bytes);
   context.write_output(evidence_path, evidence_bytes);
+  check_cancelled();
   Artifact result;
   result.kind = "model_trajectory";
   result.summary =
@@ -135,19 +155,21 @@ Artifact simulate(const StageContext& context) {
 }  // namespace
 
 void register_model_capabilities(Registry& registry) {
+  register_linear_graph_capability(registry);
   registry.add(Capability{"model.compile",
-                          "Compile the continuous scalar model profile with typed ports and "
+                          "Compile supported continuous model profiles with typed ports and "
                           "explicit feedback semantics",
                           "executable_model",
                           Capability::State::ImplementedUnvalidated,
                           compile,
-                          {"path"},
-                          {"path"},
+                          {"path", "context_path"},
+                          {"path", "context_path"},
                           {},
-                          {{"path", modeling::kMaxSourceBytes}}});
+                          {{"path", modeling::kMaxSourceBytes}, {"context_path", 8 * 1024 * 1024}},
+                          {"context_path"}});
   registry.add(Capability{
       "sim.model",
-      "Run a compiled continuous scalar model with fixed-step RK4 and write CSV plus scoped "
+      "Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped "
       "evidence",
       "model_trajectory",
       Capability::State::ImplementedUnvalidated,
