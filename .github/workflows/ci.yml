@@ -230,10 +230,18 @@ jobs:
       - name: Rule 4 — every path and test name in every document resolves
         run: scripts/check-doc-references.sh
 
+  # 120 minutes, not the 60 every other job gets. This job is measurably the
+  # most expensive one: a Debug build under ASan and UBSan, and 466 tests run
+  # one at a time. The tests that dominate are the ones exercising the isolated
+  # worker, because an instrumented worker hashes its whole executable and
+  # runtime inventory on every run and the sanitizer binary is 90 MB against the
+  # ordinary build's 29 MB — about 39 s each on this runner. At 60 minutes the
+  # job was cancelled at test 379 of 466 with nothing wrong. The budget is the
+  # cost of the gate, not a tolerance on any result.
   sanitizer:
     name: Address and undefined-behaviour sanitizers
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
