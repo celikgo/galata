@@ -55,13 +55,34 @@ int main() {
 ''', encoding="utf-8")
         (consumer / "model.cpp").write_text('''#include <galata/modeling/model.hpp>
 #include <galata/modeling/linear_adapter.hpp>
-int main() {
+// Every invariant is named and every extent is checked before it is indexed.
+// A smoke test that faults instead of reporting which expectation failed cannot
+// be diagnosed from a hosted log, where the only evidence is an exit status.
+#include <cstdio>
+#include <exception>
+int failed(const char* invariant) {
+  std::fprintf(stderr, "installed-consumer check failed: %s\\n", invariant);
+  return 1;
+}
+
+int run() {
   namespace m = galata::modeling;
   m::Model source;
   source.blocks = {{"constant", {}, m::Constant{2.0}}, {"output", {}, m::Output{}}};
   source.connections = {{"constant", "output", 0}};
   const auto compiled = m::compile_model(m::parse_model_yaml(m::write_model_yaml(source)));
   const auto result = m::simulate(compiled, {.step_count = 0});
+  if (!result.state_ids.empty())
+    return failed("a constant-to-output model reported states");
+  if (result.outputs.size() != 1)
+    return failed("a zero-step run did not record exactly one output sample");
+  if (result.outputs.front().size() != 1)
+    return failed("the recorded output sample is not one-dimensional");
+  if (result.outputs.front()(0) != 2.0)
+    return failed("the constant did not reach the output");
+  if (result.semantic_sha256.size() != 64)
+    return failed("the semantic digest is not a 64-character hex string");
+
   galata::model::LinearSystem plant;
   plant.a = Eigen::MatrixXd::Zero(1, 1);
   plant.b = Eigen::MatrixXd::Ones(1, 1);
@@ -71,9 +92,26 @@ int main() {
   const auto graph = m::lower_linear_system(plant, channels,
       {Eigen::VectorXd::Zero(1), Eigen::VectorXd::Ones(1), {}});
   const auto linear = m::compile_model(graph.model);
-  return linear.evaluate(0.0, linear.initial_state()).derivatives(0) != 1.0
-      || !result.state_ids.empty() || result.outputs.size() != 1
-      || result.outputs.front()(0) != 2.0 || result.semantic_sha256.size() != 64;
+  const auto& initial = linear.initial_state();
+  std::fprintf(stderr, "lowered graph: %zu states, initial extent %lld\\n",
+               linear.state_ids().size(), static_cast<long long>(initial.size()));
+  if (linear.state_ids().size() != 1 || initial.size() != 1)
+    return failed("lowering xdot = u did not produce exactly one state");
+  const auto evaluated = linear.evaluate(0.0, initial);
+  if (evaluated.derivatives.size() != 1)
+    return failed("the evaluated derivative vector is not one-dimensional");
+  if (evaluated.derivatives(0) != 1.0)
+    return failed("xdot = u with a unit command did not evaluate to 1");
+  return 0;
+}
+
+int main() {
+  try {
+    return run();
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "installed-consumer check threw: %s\\n", error.what());
+    return 1;
+  }
 }
 ''', encoding="utf-8")
         consumer_build = scratch / "consumer-build"
