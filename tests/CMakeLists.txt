@@ -44,12 +44,15 @@ if(UNIX AND TARGET galata_cli)
   # build on Darwin/arm64, which is what confirms the mechanism rather than a
   # hosted-runner anomaly.
   #
-  # A 1.2 percent margin is not a margin: ordinary hosted-runner variance
-  # exhausted it as soon as RFC-0002's packages linked more code into the CLI,
-  # and the job then failed on a wall clock rather than on anything numerical.
-  # 1500 s is about two and a half times the measured cost, which absorbs both
-  # runner variance and further CLI growth while still catching a genuine hang
-  # inside half an hour.
+  # A 1.2 percent margin is not a margin. Three hosted sanitizer observations of
+  # the same test span 592.91 s, 600.04 s (the timeout that prompted this) and
+  # 740.55 s — a 25 percent spread on a machine nobody here controls, against a
+  # budget it exceeded twice. The job was failing on a wall clock rather than on
+  # anything numerical.
+  #
+  # 1500 s is about twice the widest observation and two and a half times the
+  # narrowest, which absorbs both that variance and further CLI growth while
+  # still catching a genuine hang inside half an hour.
   #
   # This is a wall-clock guard on a hosted machine, NOT an error budget on a
   # computed quantity. The rule against widening a gate to make a number pass is
