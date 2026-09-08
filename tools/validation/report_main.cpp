@@ -868,7 +868,7 @@ extrapolating.
   std::cout << substitute(R"(## Determinism
 
 ADR-0004 defines two tiers, and both are gated by
-`.github/workflows/determinism.yml` on Linux, macOS and Windows.
+`.github/workflows/determinism.yml` on Linux and macOS.
 
 **Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
 emits {det.total} values at `%.17g`, which round-trips a double exactly, so byte-identical

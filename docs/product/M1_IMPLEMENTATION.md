@@ -82,8 +82,9 @@ preview. Its [project-file contract](../PROJECT_FILES.md) and
 [ADR-0012](../adr/0012-project-worker-preview.md) record draft editing, immutable
 requests and recovery. The complete external M1 and M2 gates remain open.
 
-1. Review this profile and run the same source on hosted macOS/Linux and the
-   existing portable engine matrix. Retain failures and source-bound evidence.
+1. Review this profile and run the same source on the hosted engine matrix,
+   which covers Linux under GCC and Clang and macOS under AppleClang since
+   Windows support was withdrawn. Retain failures and source-bound evidence.
 2. Complete the macOS desktop feasibility comparison: offline packaging,
    accessibility, graph editing, recovery and a worker cancellation experiment.
    Use the same C++ compiler/runtime and the synthetic acceptance model. The

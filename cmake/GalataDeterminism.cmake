@@ -33,17 +33,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
   # Passed explicitly rather than merely "not passed" so that a toolchain file
   # or a dependency's usage requirement cannot turn it on behind our back.
   add_compile_options(-fno-fast-math)
-
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-  # /fp:precise is MSVC's value-safe mode: it preserves source-level ordering
-  # and does not reassociate. MSVC does not contract into FMA under /fp:precise
-  # unless /fp:contract is passed, and /fp:contract is not passed here.
-  #
-  # /fp:strict would additionally preserve exception and rounding-mode
-  # semantics. galata does not manipulate the FP environment, so /fp:strict
-  # buys no reproducibility over /fp:precise and costs measurable performance.
-  add_compile_options(/fp:precise)
 endif()
+
+# There is no branch for any other compiler, and that is deliberate. galata is
+# built and tested with GCC and Clang on Linux and with AppleClang on macOS, and
+# a determinism flag for a toolchain no job exercises is a guarantee nothing
+# measures — the opposite of ADR-0004's claim that determinism is a tested
+# property. An MSVC branch setting /fp:precise stood beside these two until
+# Windows support was withdrawn; it went with the platform rather than staying
+# on as an untested promise.
 
 # ---------------------------------------------------------------------------
 # What these flags do NOT buy, stated plainly so nobody reads the determinism
@@ -51,10 +49,10 @@ endif()
 #
 #   * They do not make transcendental functions agree across platforms. sin,
 #     cos, tan, asin, atan2, exp, log and pow are supplied by the platform's
-#     libm — glibc on Linux, Apple's libm on macOS, the UCRT on Windows — and
-#     those implementations are not correctly rounded and do not agree with
-#     each other in the last bits. sqrt is the exception: IEEE 754 requires it
-#     to be correctly rounded, so it is bit-identical everywhere.
+#     libm — glibc on Linux and Apple's libm on macOS — and those
+#     implementations are not correctly rounded and do not agree with each
+#     other in the last bits. sqrt is the exception: IEEE 754 requires it to
+#     be correctly rounded, so it is bit-identical everywhere.
 #
 #   * They therefore do not make cross-platform output bit-identical for any
 #     result whose derivation passes through a transcendental. The
@@ -67,6 +65,7 @@ endif()
 #     with -ffast-math. Nothing can prevent that; it is documented instead.
 #
 # long double is banned in the numerical core for a related reason: it is
-# 80-bit extended on x86-64 System V, 64-bit on MSVC, and 128-bit quad on
-# AArch64 Linux. A result that touches it is not portable by construction.
+# 80-bit extended on x86-64 System V, 128-bit quad on AArch64 Linux, and plain
+# 64-bit double on Apple silicon. A result that touches it is not portable by
+# construction.
 # ---------------------------------------------------------------------------

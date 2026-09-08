@@ -4,7 +4,7 @@
 
 The proposed end product is an **installable, offline flight-dynamics and control-engineering desktop workbench with Simulink-style visual modeling**, backed by the same C++ numerical engine used by the CLI and automation. A flight-control engineer can import an aircraft model, check its validity, build a controller diagram, run analysis and simulation, compare designs over an operating envelope, and deliver a reproducible review package.
 
-The planning assumption is conventional fixed-wing aircraft first. Product delivery prioritizes macOS, followed by Linux, per user direction; existing Windows engine portability checks remain. Minimum OS/hardware and workload requirements still need discovery. No customer aircraft, procurement authority, team capacity or delivery deadline has been supplied. The scope becomes a release commitment only after discovery establishes those constraints. SITL/HIL and generated controller code have explicit expansion tracks; onboard operation and aircraft approval require their own acceptance programs.
+The planning assumption is conventional fixed-wing aircraft first. Product delivery prioritizes macOS, followed by Linux, per user direction; Windows engine support has since been withdrawn, so Linux and macOS are the only supported platforms for both the engine and the product. Minimum OS/hardware and workload requirements still need discovery. No customer aircraft, procurement authority, team capacity or delivery deadline has been supplied. The scope becomes a release commitment only after discovery establishes those constraints. SITL/HIL and generated controller code have explicit expansion tracks; onboard operation and aircraft approval require their own acceptance programs.
 
 | Plan | Purpose |
 |---|---|

@@ -5,7 +5,7 @@
 // No property-testing framework, and no std:: distributions. std::mt19937_64
 // is specified bit-exactly by the C++ standard, but std::uniform_real_distribution
 // and friends are NOT — their outputs are implementation-defined, so the same
-// seed produces different samples on libstdc++ and MSVC. That would make a
+// seed produces different samples on libstdc++ and libc++. That would make a
 // property-test failure unreproducible across platforms, which is the one thing
 // a property test must not be (ADR-0004).
 //

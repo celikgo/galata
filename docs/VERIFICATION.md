@@ -51,7 +51,7 @@ Four checks stand behind it, each a test rather than a convention:
 | Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
 | All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
-| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux, macOS and Windows over 171 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
+| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux and macOS over 171 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
 | Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 52 of the 171 values — because dividing by h amplifies a libm disagreement by 1/h. |
 | Frequency response G(jw) against closed-form transfer functions | Closed-form evaluation of rational transfer functions at s = jw | **validated** — The reference is arithmetic, not a document: for a system whose transfer function can be written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding. |
 | The hand-written Hessenberg solver against a general LU on the unreduced matrix | Laub, *Efficient multivariable frequency response computations*, IEEE TAC 26(2) (1981) | **validated** — Two different eliminations of the same system over a grid reaching a condition number above 1e6. The gate is kappa * eps — the conditioning of the problem — not a chosen tolerance. |
@@ -252,7 +252,7 @@ extrapolating.
 ## Determinism
 
 ADR-0004 defines two tiers, and both are gated by
-`.github/workflows/determinism.yml` on Linux, macOS and Windows.
+`.github/workflows/determinism.yml` on Linux and macOS.
 
 **Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
 emits 171 values at `%.17g`, which round-trips a double exactly, so byte-identical

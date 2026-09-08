@@ -3,7 +3,8 @@
 # Determinism, ADR-0004 tier 1: same binary, same platform, bit-identical.
 #
 # In-process here; the cross-platform tier 2 comparison lives in
-# .github/workflows/determinism.yml, because it needs three machines.
+# .github/workflows/determinism.yml, because it needs two machines — one Linux,
+# one macOS.
 
 add_executable(galata_determinism_tests
   ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp

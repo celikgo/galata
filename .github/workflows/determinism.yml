@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Charter rule 6 / ADR-0004. Determinism is a tested property, in two tiers,
-# and this workflow is where the second tier is measured — it needs three
+# and this workflow is where the second tier is measured — it needs two
 # machines, which a unit test cannot have.
 #
 #   TIER 1  same binary, same platform, twice: BYTE-IDENTICAL.
@@ -54,9 +54,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux,   os: ubuntu-24.04, preset: ci-linux-gcc }
-          - { name: macos,   os: macos-14,     preset: ci-macos }
-          - { name: windows, os: windows-2022, preset: ci-windows }
+          - { name: linux, os: ubuntu-24.04, preset: ci-linux-gcc }
+          - { name: macos, os: macos-14,     preset: ci-macos }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,8 +82,7 @@ jobs:
       # locale item. It SKIPS BY NAME where no such locale exists, and
       # ubuntu-24.04 ships none, so the reference platform would report a skip
       # rather than a pass. Generate one, so the check actually runs where it
-      # matters most. macOS carries de_DE.UTF-8 already; Windows reports the
-      # skip, which is visible in the log rather than silent.
+      # matters most. macOS carries de_DE.UTF-8 already.
       - name: Provide a comma-decimal locale for the check
         if: runner.os == 'Linux'
         run: |
@@ -97,7 +95,6 @@ jobs:
         shell: bash
         run: |
           engine="build/${{ matrix.preset }}/tools/determinism/galata-determinism"
-          [ -x "$engine" ] || engine="$engine.exe"
           scripts/check-determinism.sh "$engine" "fingerprint-${{ matrix.name }}.txt"
 
       - uses: actions/upload-artifact@v4
@@ -131,8 +128,8 @@ jobs:
         run: |
           shopt -s nullglob
           files=(fingerprints/fingerprint-*.txt)
-          if [ "${#files[@]}" -ne 3 ]; then
-            echo "::error::need all three platform fingerprints, found ${#files[@]}"
+          if [ "${#files[@]}" -ne 2 ]; then
+            echo "::error::need both platform fingerprints, found ${#files[@]}"
             exit 1
           fi
 

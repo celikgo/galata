@@ -311,7 +311,7 @@ const std::vector<Case>& validation_cases() {
         E{kDeterminism, "Determinism.SplittingAnIntegrationInTwoGivesTheSameResult"},
         E{kDeterminism, "Determinism.ModalDecompositionIsBitIdenticalAndOrderStable"},
         E{kDeterminism, "Determinism.AtmosphereDoesNotDependOnQueryOrder"}},
-       "Gated on Linux, macOS and Windows over {det.total} fingerprinted values. The strongest of "
+       "Gated on Linux and macOS over {det.total} fingerprinted values. The strongest of "
        "these is splitting: 4000 steps must equal 1500 then 2500, bit for bit."},
 
       {"determinism.tier2",

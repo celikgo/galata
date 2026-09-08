@@ -15,17 +15,21 @@ what is and is not promised.
 ## The guarantee, in two tiers
 
 **Tier 1 — same binary, same platform: bit-identical.** Run the same pipeline twice on the same
-machine and get byte-identical output. Gated on Linux, macOS and Windows.
+machine and get byte-identical output. Gated on Linux and macOS.
 
 **Tier 2 — same source, different platform: agreement to a published bound.** Output from
-Linux, macOS and Windows agrees to **1e-9 relative**, and every pair is compared.
+Linux and macOS agrees to **1e-9 relative**, and every pair is compared.
+
+The supported platforms are Linux (GCC and Clang) and macOS (AppleClang). Windows support was
+withdrawn, so there is no third fingerprint and no MSVC leg to look for; the bound and the
+every-pair comparison are what they always were, and only the platform count changed.
 
 Tier 2 is not bit-identity, and the reason is worth stating rather than hiding. `sqrt` is
 required by IEEE 754 to be correctly rounded, so it produces identical bits everywhere.
 **Nothing else transcendental does.** `sin`, `cos`, `tan`, `asin`, `atan2`, `exp`, `log` and
-`pow` come from the platform's math library — glibc, Apple's libm, the UCRT — and those are not
-correctly rounded, do not agree in the final bits, and change between versions of the same
-library. galata cannot avoid them: angle of attack is an `atan2`, the atmosphere's pressure
+`pow` come from the platform's math library — glibc on Linux, Apple's libm on macOS — and those
+are not correctly rounded, do not agree in the final bits, and change between versions of the
+same library. galata cannot avoid them: angle of attack is an `atan2`, the atmosphere's pressure
 profile is a `pow`, every rotation is a `sin` and a `cos`.
 
 Any claim of cross-platform bit-identity would therefore be either false or would require
@@ -41,12 +45,15 @@ interface target a numerical target links, because **there is no opt-out**. A ne
 forget to link it.
 
 - **GCC / Clang / AppleClang:** exactly two flags, `-ffp-contract=off` and `-fno-fast-math`.
-- **MSVC:** exactly one, `/fp:precise`.
+
+That is the whole list, and that is the only compiler branch in the file. An MSVC branch setting
+`/fp:precise` sat beside it until Windows support was withdrawn; it went with the platform,
+because a determinism flag that no job exercises is a guarantee nothing measures, and ADR-0004's
+claim is that determinism is *tested*. Do not add a branch for a compiler this project does not
+build on.
 
 `-fno-fast-math` is **passed explicitly rather than merely omitted**, so that a toolchain file or
-a dependency's usage requirement cannot turn it on behind the build's back. `/fp:strict` was
-considered and rejected: galata never manipulates the floating-point environment, so it buys
-nothing over `/fp:precise` and costs measurable performance.
+a dependency's usage requirement cannot turn it on behind the build's back.
 
 Contraction matters because fusing `a*b+c` into an FMA skips the rounding of the intermediate
 product. Whether that happens depends on the target ISA, so a contracted expression is both more
@@ -88,8 +95,8 @@ allocator happened to put something.
 
 ### No `long double` in the numerical core
 
-It is 80-bit extended on x86-64 System V, 64-bit on MSVC and 128-bit quad on AArch64 Linux, so a
-result that touches it is non-portable by construction.
+It is 80-bit extended on x86-64 System V, 128-bit quad on AArch64 Linux and plain 64-bit double
+on Apple silicon, so a result that touches it is non-portable by construction.
 
 Be clear-eyed about the enforcement: `Determinism.NoLongDoubleInTheNumericalCore` asserts
 `sizeof(double) == 8` and `is_iec559` — *"the property the ban exists to protect rather than the
@@ -123,10 +130,15 @@ comparison: `|x−y| / max(|x|,|y|)`, gated at 1e-9. It fails on any key-set mis
 comparing a single value, and reports the total compared, how many were bit-identical, and the
 worst deviation with the key it occurred at.
 
-`.github/workflows/determinism.yml` builds a fingerprint on ubuntu-24.04/GCC, macos-14/AppleClang
-and windows-2022/MSVC, then compares **every pair** rather than each against a nominated
-reference. It also runs **nightly at 04:17 UTC**, so a libm update on a runner image shows up as
-a change in the observed cross-platform deviation rather than as a surprise in somebody's PR.
+`.github/workflows/determinism.yml` builds a fingerprint on ubuntu-24.04/GCC and
+macos-14/AppleClang, then compares **every pair** rather than each against a nominated reference.
+With two platforms that is one comparison, linux against macOS; the loop is still written as
+every pair, so a platform added later is compared against both of the others rather than against
+whichever one was nominated. The compare job counts the downloaded fingerprints first and fails
+unless there are exactly two, so a fingerprint job that quietly did not run is an error rather
+than a vacuous pass — with a single fingerprint the every-pair loop compares nothing and exits 0. It also runs **nightly at 04:17 UTC**, so a libm
+update on a runner image shows up as a change in the observed cross-platform deviation rather
+than as a surprise in somebody's PR.
 
 ### What is excluded from tier 2, and why
 
@@ -150,9 +162,9 @@ prefix `"tier1."`, in two places — if you ever rename it, rename both.
 |---|---|
 | `for (auto& [k, v] : some_unordered_map)` where anything downstream reaches output | Iteration order is a function of hashing and insertion history. Use an ordered container. |
 | `while (residual > tol)` | Trip count becomes a function of the last bits. Fix the count and check the residual after. |
-| `-ffast-math`, `-Ofast`, `/fp:fast` in a *downstream* build | Reassociation is not value-preserving. Nothing can prevent a consumer doing this; ADR-0004 documents it instead. |
+| `-ffast-math` or `-Ofast` in a *downstream* build | Reassociation is not value-preserving. Nothing can prevent a consumer doing this; ADR-0004 documents it instead. |
 | FMA contraction, by any spelling | Skips an intermediate rounding, and whether it happens depends on the ISA. |
-| `long double` | Three different widths across the supported platforms. |
+| `long double` | Three different widths across the supported platforms and architectures. |
 | An uninitialised read | Reproducible under one allocator and not another; often invisible until a platform changes. |
 | A parallel reduction with unspecified order | Floating-point addition is not associative. Any parallelism introduced later **must** use a fixed reduction tree, and that requirement is on the reviewer of the commit that introduces it. |
 | `setlocale` / `imbue` | A decimal comma in a result file. Nothing tests for this. |

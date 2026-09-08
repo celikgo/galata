@@ -49,13 +49,22 @@ Two classes account for most of it: `-Wshadow` inside GoogleTest macros, which
 expand to a scope containing names you did not write, and `-Wold-style-cast`
 reaching into third-party headers.
 
-**A header must include what it uses**, and MSVC is the only compiler that will
-tell you when it does not. libstdc++ and libc++ pull `<stdexcept>`,
-`<algorithm>` and friends in transitively through other standard headers;
-MSVC's standard library does not. `std::runtime_error` used in a header that
-only includes `<map>` compiles on Linux and macOS and fails on Windows. Neither
-the local GCC check above nor CI's Linux and macOS jobs catch it — only the
-Windows job does, after you have pushed.
+**A header must include what it uses, and nothing checks this for you.**
+libstdc++ and libc++ pull `<stdexcept>`, `<algorithm>` and friends in
+transitively through other standard headers, so a header that uses
+`std::runtime_error` while including only `<map>` compiles on both supported
+platforms. It is still wrong: its correctness depends on which standard library
+it is compiled against and on what that library happens to include today, so it
+breaks on a toolchain bump rather than on a change to this repository — and a
+reader cannot tell what the header actually needs.
+
+The MSVC job used to catch this, because MSVC's standard library does not carry
+those transitive includes. Windows is no longer a supported platform and that
+job is gone, so no gate catches it now: not the local GCC check above, not the
+Linux and macOS builds, not clang-tidy, which CI runs with the analyzer checks
+only. Include what you use because the header is incomplete without it, and
+check it by reading the file — there is no longer a job that will tell you after
+the fact.
 
 **clang-format is pinned to 20.1.8.** Its output changes between major versions,
 so an unpinned formatter means the gate fails on a change you cannot reproduce.

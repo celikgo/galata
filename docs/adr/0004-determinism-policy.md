@@ -21,9 +21,9 @@ implies more than it delivers is worse than no badge.
 
 **Tier 1 — same binary, same platform: bit-identical.** Running the same
 computation twice with the same inputs on the same machine and binary produces
-identical bits. This is gated two ways, both on Linux, macOS and Windows.
-`tests/determinism/` re-runs each battery in process and compares the resulting
-doubles with `EXPECT_EQ` — an exact comparison, not a tolerance.
+identical bits. This is gated two ways, on both supported platforms — Linux and
+macOS. `tests/determinism/` re-runs each battery in process and compares the
+resulting doubles with `EXPECT_EQ` — an exact comparison, not a tolerance.
 `scripts/check-determinism.sh` runs `tools/determinism` twice and `diff -u`s the
 two files, which is the byte comparison; the tool prints at `%.17g`, which
 round-trips a double exactly, so byte-identical output means bit-identical values
@@ -36,9 +36,22 @@ covers its report bytes through the manifest output hashes; it does not establis
 repeatability for every possible study or concurrent dynamic-loader activity.
 
 **Tier 2 — same source, different platform: agreement to a published bound.**
-Output produced on Linux, macOS and Windows agrees to a documented tolerance —
-1e-9 relative, between every pair of platforms — **with one carve-out, which
-this record failed to state until now.**
+Output produced on Linux and macOS agrees to a documented tolerance — 1e-9
+relative, between every pair of platforms — **with one carve-out, which this
+record failed to state until now.**
+
+The bound and the every-pair comparison are as this record first wrote them; the
+platform count is not. Windows is withdrawn — see
+[ADR-0015](0015-supported-platforms.md) — so two platforms remain and "every
+pair" is exactly one comparison, Linux against macOS. Two libm implementations
+are a weaker cross-check than three were, and that belongs in the text rather
+than left to be inferred from a matrix. The comparison stays written as
+every-pair rather than each-against-a-reference, because a reference platform is
+an arbitrary choice that shows up in the numbers, and because a third platform
+widens the comparison again with no change to
+`scripts/compare-determinism.sh`. The compare job requires both fingerprints and
+fails when either is missing, so a dropped platform leg is a failure rather than
+a quiet reduction in what is compared.
 
 Values downstream of the central-difference Jacobian are excluded from the
 cross-platform comparison altogether: `scripts/compare-determinism.sh` drops
@@ -63,9 +76,9 @@ Tier 2 is not bit-identity, and the reason is worth being blunt about.
 `sqrt` is required by IEEE 754 to be correctly rounded, so it produces identical
 bits everywhere. Nothing else transcendental does. `sin`, `cos`, `tan`, `asin`,
 `atan2`, `exp`, `log` and `pow` come from the platform's math library — glibc on
-Linux, Apple's libm on macOS, the UCRT on Windows — and those implementations
-are not correctly rounded, do not agree with each other in the final bits, and
-change between versions of the same library.
+Linux, Apple's libm on macOS — and those implementations are not correctly
+rounded, do not agree with each other in the final bits, and change between
+versions of the same library.
 
 galata cannot avoid these functions. Angle of attack is an `atan2`. The
 atmosphere's pressure profile is a `pow`. Every rotation is a `sin` and a `cos`.
@@ -78,11 +91,14 @@ linked to the document that defines it.
 
 ### What produces Tier 1
 
-- **`-ffp-contract=off` on GCC and Clang, `/fp:precise` on MSVC.** Contraction
-  fuses `a*b+c` into an FMA, skipping the rounding of the intermediate product.
-  Whether it happens depends on the target ISA, so a contracted expression is
-  both more accurate than the source says and differently accurate on different
-  machines.
+- **`-ffp-contract=off` on GCC, Clang and AppleClang** — every compiler galata
+  is built with. Contraction fuses `a*b+c` into an FMA, skipping the rounding of
+  the intermediate product. Whether it happens depends on the target ISA, so a
+  contracted expression is both more accurate than the source says and
+  differently accurate on different machines.
+  `cmake/GalataDeterminism.cmake` also carried an MSVC branch passing
+  `/fp:precise`; it went with Windows support, because a determinism flag that
+  no gate exercises is a claim this record is not entitled to make.
 - **`-fno-fast-math`, passed explicitly.** Not merely omitted — passed, so that
   a toolchain file or a dependency's usage requirement cannot enable it behind
   our back. Under `-ffast-math` the compiler may reassociate floating-point
@@ -112,9 +128,12 @@ linked to the document that defines it.
 - **Ordered containers in any code path whose iteration order reaches output.**
   No `unordered_map` iteration, no pointer-value sorting, no
   address-of-allocation ordering.
-- **No `long double` anywhere in the numerical core.** It is 80-bit extended on
-  x86-64 System V, 64-bit on MSVC and 128-bit quad on AArch64 Linux. A result
-  that touches it is non-portable by construction.
+- **No `long double` anywhere in the numerical core.** Its width is an ABI
+  choice rather than a language one: 80-bit extended on x86-64 System V, 128-bit
+  quad on AArch64 Linux, and plain 64-bit `double` on Apple's AArch64 ABI. All
+  three occur inside the platform set `vcpkg.json` declares support for, so a
+  result that touches it is non-portable by construction without leaving that
+  set.
 - **Locale-independent formatting, delivered by never changing the locale — and
   now gated.** The CLI does not adopt the environment locale. Run manifests additionally
   use the classic locale explicitly. Other report streams still rely on the
@@ -140,9 +159,9 @@ linked to the document that defines it.
 
 ### What breaks the guarantee, stated so nobody is surprised
 
-- Compiling galata into a build that enables `-ffast-math`, `-Ofast`, or
-  `/fp:fast`. Nothing can prevent a downstream consumer from doing this. It is
-  documented instead.
+- Compiling galata into a build that enables `-ffast-math` or `-Ofast`, under
+  any spelling a consumer's compiler offers. Nothing can prevent a downstream
+  consumer from doing this. It is documented instead.
 - Enabling FMA contraction, by any spelling.
 - Linking a different libm, or the same libm at a different version — this moves
   results within the Tier 2 bound but breaks Tier 1 across the change.
@@ -175,9 +194,13 @@ tolerance into a cliff, so a result sitting near a rounding boundary flaps
 between pass and fail with no physical change. A tolerance with the observed
 deviation published is honest; a hash of rounded values only looks stricter.
 
-**Use `/fp:strict` on MSVC.** It additionally preserves exception semantics and
-rounding-mode changes. galata never manipulates the floating-point environment,
-so it buys nothing over `/fp:precise` and costs measurable performance.
+**Use `/fp:strict` on MSVC.** Decided while MSVC was one of the compilers
+galata built with: `/fp:strict` additionally preserves exception semantics and
+rounding-mode changes, galata never manipulates the floating-point environment,
+so it bought nothing over `/fp:precise` and cost measurable performance. Moot
+now that neither flag is passed by anything — see
+[ADR-0015](0015-supported-platforms.md) — and kept because it is the question to
+re-answer first if MSVC ever returns.
 
 ## Consequences
 
@@ -189,7 +212,8 @@ so it buys nothing over `/fp:precise` and costs measurable performance.
   written; `build_identification()` is the part of it that exists today.
 - The determinism test suite is a first-class tier. `tests/determinism/` holds
   the tier 1 checks, and `.github/workflows/determinism.yml` gates tier 1 on
-  Linux, macOS and Windows and measures tier 2 between every pair of them.
+  Linux and macOS and measures tier 2 between every pair of them — which, with
+  two platforms, is the single Linux-against-macOS comparison.
   `tools/determinism/` emits the fingerprint both tiers compare.
 - Introducing threading into the numerical core requires revisiting the fixed
   reduction order, and any such commit cites this ADR.
@@ -203,3 +227,12 @@ so it buys nothing over `/fp:precise` and costs measurable performance.
 
 A correctly-rounded math library becomes a practical dependency, or the project
 introduces parallelism into any gated numerical path.
+
+Also when Windows would come back, since withdrawing a platform is exactly the
+kind of decision this section exists to reopen. The condition is concrete:
+somebody needs Windows, the installed-package consumer failure that ended its
+support is root-caused rather than worked around, and a Windows fingerprint leg
+returns to `.github/workflows/determinism.yml` so that tier 1 is gated there and
+tier 2 compares three platforms again. A platform whose determinism is asserted
+but not fingerprinted does not come back under this record. The withdrawal
+itself is [ADR-0015](0015-supported-platforms.md).

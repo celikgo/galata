@@ -9,8 +9,14 @@ The first commit that adds source also adds `.github/workflows/ci.yml`. There is
 never a moment where this repository has code and no CI. A commit that adds a
 capability adds the job that gates it in the same commit.
 
-*Enforced by:* review, and by the fact that `ci-ok` is the single required
-status check, so a job that is added is automatically required.
+*Enforced by:* review. `ci-ok` aggregates every job in `ci.yml` and is the one
+context branch protection should require, so that adding a job never means
+editing branch settings and a skipped job can never be mistaken for a passing
+one. That is the intent, not a description of the repository as it stands:
+`main` currently carries no branch-protection rule and no ruleset, so nothing
+yet makes any check required. Until that is configured this rule rests on review
+alone, and writing it the other way round would be exactly the aspirational
+documentation rule 2 forbids.
 
 ### 2. Nothing is documented before it works
 
@@ -76,10 +82,11 @@ iteration counts in root-finders, never tolerance-based early exit. Seeded
 PRNGs, with the seed recorded in the output.
 
 The guarantee holds under this project's own compiler flags and does not survive
-`-ffast-math` or FMA contraction. Across platforms the guarantee is agreement to
-a published bound rather than bit-identity, because platform math libraries do
-not agree on transcendental functions in the last bits. Claiming otherwise would
-be false, and the reasoning is written out in
+`-ffast-math` or FMA contraction. Across platforms — Linux and macOS, the two
+this project supports — the guarantee is agreement to a published bound rather
+than bit-identity, because platform math libraries do not agree on
+transcendental functions in the last bits. Claiming otherwise would be false,
+and the reasoning is written out in
 [ADR-0004](adr/0004-determinism-policy.md).
 
 *Enforced by:* `cmake/GalataDeterminism.cmake` for the flags; by the determinism

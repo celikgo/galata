@@ -125,9 +125,8 @@ int main() {
                                                str(dependency_prefix / "debug/bin"),
                                                str(dependency_prefix / "bin"),
                                                environment.get("PATH", "")])
-        suffix = ".exe" if os.name == "nt" else ""
-        run([consumer_build / ("consumer" + suffix)], env=environment)
-        run([consumer_build / ("model_consumer" + suffix)], env=environment)
+        run([consumer_build / "consumer"], env=environment)
+        run([consumer_build / "model_consumer"], env=environment)
         data = relocated / "share/galata"
         for notice in ("eigen3.txt", "yaml-cpp.txt"):
             if not (data / "third_party/licenses" / notice).read_bytes().strip():
@@ -141,7 +140,7 @@ int main() {
         for study, reports in studies.items():
             output = scratch / study
             output.mkdir()
-            run([relocated / "bin" / ("galata" + suffix), "run",
+            run([relocated / "bin" / "galata", "run",
                  data / "examples" / study / "study.yaml", "--output-dir", output],
                 env=environment)
             for report in reports:

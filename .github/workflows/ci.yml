@@ -93,7 +93,6 @@ jobs:
           - { name: linux-gcc,   os: ubuntu-24.04,  preset: ci-linux-gcc }
           - { name: linux-clang, os: ubuntu-24.04,  preset: ci-linux-clang }
           - { name: macos,       os: macos-14,      preset: ci-macos }
-          - { name: windows,     os: windows-2022,  preset: ci-windows }
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
@@ -140,8 +139,8 @@ jobs:
       # diffing is what makes its numbers trustworthy: a V&V report that has
       # drifted from the implementation is worse than none, because it still
       # looks like evidence. Run on one platform only — the report is
-      # build-independent by construction, and checking it four times would only
-      # add three chances for a platform-specific formatting difference to break
+      # build-independent by construction, and checking it three times would only
+      # add two chances for a platform-specific formatting difference to break
       # an unrelated job.
       - name: Published V&V report matches what the code produces
         if: matrix.name == 'linux-gcc'
@@ -284,9 +283,11 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha || github.sha }}
 
-  # The single required status check. Branch protection points here, so adding
-  # a job above never means editing branch settings, and a skipped job can
-  # never be mistaken for a passing one.
+  # The one context branch protection should require: it fans in every job
+  # above, so adding a job never means editing branch settings, and a skipped
+  # job can never be mistaken for a passing one. That is the intent, not yet
+  # the configuration — `main` carries no branch-protection rule and no
+  # ruleset today, so nothing is required of a pull request mechanically.
   ci-ok:
     name: CI
     outputs:

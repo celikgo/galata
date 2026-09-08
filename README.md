@@ -285,9 +285,21 @@ explains enabling and opening the optional native macOS app. Its development
 bundle has no signing, notarization or clean-machine installation acceptance;
 hosted verification of this increment remains pending.
 
-Requires CMake 3.25+, Python 3.9+, Ninja, a C++20 compiler and a vcpkg checkout. Tested on
-Linux (GCC and Clang), macOS (AppleClang) and Windows (MSVC) — see
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for the exact matrix.
+Requires CMake 3.25+, Python 3.9+, Ninja, a C++20 compiler and a vcpkg
+checkout. Supported and tested on Linux (GCC and Clang) and macOS
+(AppleClang) — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for
+the exact matrix.
+
+**Windows is not supported.** Support was withdrawn rather than left nominal.
+The installed-package consumer check failed there in a way that was never root
+caused ([issue 12](https://github.com/celikgo/galata/issues/12)), and the
+portability work needed to keep a fourth platform compiling was being paid for
+no user. Nothing here deliberately rejects Windows; there is simply no job that
+builds or tests it, so any statement that it works would be an untested claim,
+which rule 2 below forbids. The `windows-x86_64` archives published under
+v0.1.0 and v0.2.0 stay where they are, because removing them would invalidate
+the `SHA256SUMS.txt` those releases publish for every platform; they are
+historical and unmaintained, and no future release ships one.
 
 ## Further development
 

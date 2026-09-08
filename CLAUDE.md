@@ -21,8 +21,9 @@ ctest --preset dev            # the whole suite — this is the one command
 
 One tier at a time by ctest **label**: `ctest --preset dev -L validation`. The labels are
 `unit`, `property`, `integration`, `validation`, `determinism`, and they match the table in
-`docs/TESTING.md`. Presets: `dev` locally; `ci-linux-gcc`, `ci-linux-clang`, `ci-macos`,
-`ci-windows` in CI; `asan` for the sanitiser build.
+`docs/TESTING.md`. Presets: `dev` locally; `ci-linux-gcc`, `ci-linux-clang` and `ci-macos` in
+CI; `asan` for the sanitiser build. Linux (GCC and Clang) and macOS (AppleClang) are the
+supported platforms — Windows was withdrawn, and no job builds or tests it.
 
 ## The five rules that decide most reviews
 
@@ -60,9 +61,10 @@ future fix is loud rather than silent.
 **4. Determinism is a tested property, and it is easy to break by accident.** Same platform,
 same bits. Fixed iteration counts in root-finders, never a tolerance-based early exit. No
 `unordered_map` iteration reaching output. No `long double` in the numerical core. No
-`-ffast-math`, no FMA contraction. Across platforms the promise is agreement to a published
-bound, not bit-identity, because platform math libraries disagree on `sin` in the last bits.
-See ADR-0004 and the `preserving-determinism` skill.
+`-ffast-math`, no FMA contraction. Across platforms — Linux and macOS, the two supported — the
+promise is agreement to a published bound, not bit-identity, because platform math libraries
+disagree on `sin` in the last bits. Tier 2 compares every pair, which with two platforms is one
+comparison; the bound itself is unchanged. See ADR-0004 and the `preserving-determinism` skill.
 
 **5. Nothing is documented before it works, and every physics file cites its source.**
 `scripts/check-doc-references.sh` holds the checkable half of this: every file path and

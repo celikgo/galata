@@ -324,8 +324,11 @@ verified afterward.
 
 Hosted macOS/Linux verification and remote CI remain pending. The project
 worker implements the POSIX boundary for macOS and Linux, but this record does
-not claim a hosted Linux run or a supported Linux desktop. Existing Windows
-engine CI remains separate; project commands refuse unsupported Windows use.
+not claim a hosted Linux run or a supported Linux desktop. Windows is no longer
+a supported platform: its engine CI leg, presets and release packaging were
+withdrawn after the installed-package consumer failure recorded as issue #12
+was never root-caused. The project commands still refuse to run on Windows,
+which now matches the supported platform set rather than narrowing it.
 
 ## Diagram usability follow-up
 

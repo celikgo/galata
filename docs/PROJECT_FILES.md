@@ -10,8 +10,9 @@ freeze a public project API or change the product version from 0.3.0.
 
 The project commands support the macOS/Linux POSIX worker boundary. Current
 verification claims are listed in the implementation record; hosted Linux and
-macOS verification remain pending. The existing study CLI and numerical library
-retain their own platform and evidence scope.
+macOS verification remain pending. Linux and macOS are now the only supported
+platforms for the study CLI and numerical library as well, but each keeps its
+own evidence scope.
 
 ## Commands
 

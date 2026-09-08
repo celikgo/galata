@@ -17,7 +17,7 @@ directory appears in `tests/CMakeLists.txt` in the same commit that adds its
 first test, never in advance.
 
 The tier is the label, not the directory. Two directories join a tier they do
-not share a name with, and both are conditional on the platform:
+not share a name with, and one of them is conditional on the platform:
 
 - `tests/desktop/` carries the `unit` label. It holds headless presentation
   geometry for the optional native macOS preview — routing, connection and
@@ -29,9 +29,10 @@ not share a name with, and both are conditional on the platform:
   experimental project CLI as a child process over its public JSON contract,
   which is why they are integration tests written against
   [`docs/PROJECT_FILES.md`](PROJECT_FILES.md) rather than unit tests of
-  `src/cli/project.cpp`. They need a UNIX host and the `galata_cli` target, and
-  they carry a longer timeout because an instrumented worker hashes its whole
-  executable and runtime inventory on every run.
+  `src/cli/project.cpp`. They are registered when the `galata_cli` target is
+  built on a UNIX host, which both supported platforms are, so in practice the
+  target is the condition. They carry a longer timeout because an instrumented
+  worker hashes its whole executable and runtime inventory on every run.
 
 The rest of `tests/scripts/` — the assurance, provenance, release and worktree
 gates — is not registered with ctest at all. CI runs it separately as
@@ -98,3 +99,4 @@ ctest --preset dev
 `ctest --preset dev -L unit` runs one tier. Labels match the table above.
 The label is authoritative: `-L unit` on macOS also runs the desktop geometry
 tests, and `-L integration` also runs the project CLI tests.
+

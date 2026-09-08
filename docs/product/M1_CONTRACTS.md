@@ -13,7 +13,7 @@ larger product context.
 
 | Item | Current position | Authority and remaining uncertainty |
 |---|---|---|
-| Platform priority | macOS first, Linux next; Windows desktop/product delivery deferred | User direction. Existing Windows engine portability/CI remains in scope; minimum supported OS releases, hardware and installer policy remain undecided |
+| Platform priority | macOS first, Linux next; Windows unsupported | User direction. Windows engine support was withdrawn after an unresolved installed-package consumer failure, so engine CI and release packaging now cover Linux and macOS only; minimum supported OS releases, hardware and installer policy remain undecided |
 | Initial user task | Author an aircraft/controller block diagram, execute it with the shared headless engine and review the results | Working workflow assumption, open to user steering; no customer acceptance authority has approved it |
 | Intended reliance | Offline exploratory analysis and engineering analysis that receives independent review before a consequential decision | M1 scope assumption. No onboard execution, aircraft approval, contractual compliance finding or tool qualification is claimed |
 | Aircraft reference | Existing NT-33A flight-condition-1 material, with its recorded provenance and limitations | Existing repository reference route; neither new flight evidence nor broader data rights are established by this phase |
@@ -195,7 +195,7 @@ the discovery package or acceptance by an external party.
 | D11 — Desktop stack | Defer selection | macOS-first authoring workflow defines the future comparison task | Qt/web stack, accessibility, deployment and licensing measurements absent; no toolkit chosen by this prototype |
 | D12 — Storage/recovery | Proceed on contracts | Separate editable source, disposable IR/indexes and immutable run evidence under ADR-0011 | Database/package format, migration window and crash-durability evidence remain open; shared editing deferred |
 | D13 — Offline trust | Narrow | Public/synthetic inputs, closed supported blocks and existing run I/O controls | Signed/offline updates, hostile-content worker containment and restricted-site policies remain future gates |
-| D14 — Platforms/performance | Proceed narrowly | macOS first, Linux second; preserve Windows engine CI | OS/hardware minima, workload scale and measured response/cancellation budgets absent; no product performance promise |
+| D14 — Platforms/performance | Proceed narrowly | macOS first, Linux second; Windows engine support withdrawn | OS/hardware minima, workload scale and measured response/cancellation budgets absent; no product performance promise |
 | D15 — SITL/HIL | Defer | Keep virtual-time offline execution independent of hardware | No named bench, interface owner or deadline/failure budget; no real-time or onboard inference |
 | D16 — Delivery/sustainment | Narrow | Authorize M1 technical evidence and decision work | Named staffing, funding, independent review, support horizon and procurement facts absent; no invented schedule or funded v1 claim |
 

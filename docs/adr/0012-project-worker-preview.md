@@ -22,8 +22,9 @@ Use a portable local directory with content-bound immutable revisions and
 run-owned artifacts. Keep execution in the existing C++ compiler, simulation
 and study pipeline. A desktop shell launches the same project CLI as a separate
 process and inspects the same saved results as headless callers. The preview
-supports macOS first and Linux next; Windows engine portability remains separate
-from this POSIX worker increment.
+supports macOS first and Linux next, which are now the only platforms the engine
+supports at all ([ADR-0015](0015-supported-platforms.md)); this POSIX worker is
+therefore no longer narrower than the engine it launches.
 
 ### Editable and authoritative documents
 
