@@ -258,9 +258,9 @@ TEST(Interconnection, MatrixChannelOrderAndAlgebraicFeedthroughArePreserved) {
   first.a = Eigen::Matrix2d::Zero();
   first.a.diagonal() << -1, -2;
   first.b = Eigen::Matrix2d::Identity();
-  first.c = Eigen::Matrix2d(2, 2);
+  first.c = Eigen::Matrix2d::Zero();
   first.c << 1, 0.5, -0.3, 2;
-  first.d = Eigen::Matrix2d(2, 2);
+  first.d = Eigen::Matrix2d::Zero();
   first.d << 0.2, 0.3, -0.1, 0.4;
   first.state_names = {"x", "v"};
   first.input_names = {"u1", "u2"};
