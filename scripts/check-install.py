@@ -70,7 +70,17 @@ int run() {
   m::Model source;
   source.blocks = {{"constant", {}, m::Constant{2.0}}, {"output", {}, m::Output{}}};
   source.connections = {{"constant", "output", 0}};
-  const auto compiled = m::compile_model(m::parse_model_yaml(m::write_model_yaml(source)));
+  const auto yaml = m::write_model_yaml(source);
+  std::fprintf(stderr, "round-trip yaml, %zu bytes: ", yaml.size());
+  for (char raw : yaml) {
+    const auto byte = static_cast<unsigned char>(raw);
+    if (byte >= 32 && byte <= 126)
+      std::fputc(static_cast<int>(byte), stderr);
+    else
+      std::fprintf(stderr, "<%02X>", static_cast<unsigned>(byte));
+  }
+  std::fputc(10, stderr);
+  const auto compiled = m::compile_model(m::parse_model_yaml(yaml));
   const auto result = m::simulate(compiled, {.step_count = 0});
   if (!result.state_ids.empty())
     return failed("a constant-to-output model reported states");
