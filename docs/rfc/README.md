@@ -17,3 +17,4 @@ README's Status table is the authority on what exists.
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-control-synthesis.md) | Control synthesis, and how it will be verified before it is written | accepted for bounded offline implementation; original proposal retained |
+| [0002](0002-quadrotor-programme.md) | Quadrotor programme support: native plant, hover trim, generic linearisation, measured-data import, identification, sampled control | proposed by the Souxmar programme, 2026-09-08; nothing implemented |
