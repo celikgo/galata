@@ -454,11 +454,21 @@ cause was isolated by a one-step comparison. The header's `WHAT THIS IS NOT` blo
 the limitation, and case 6 re-bases explicitly at the one wind step in its fixture. Gusts and
 turbulence stay out of scope until a wind model owns that derivative term.
 
-*The source publishes two different rotor speed ceilings.* A nominal maximum among the
-vehicle parameters and a higher operative battery-limited ceiling in the sidecar's validity
-block, which is the one its published hover margin is computed against. The model file
-carries the operative one and `models/souxmar-quad/PROVENANCE.md` records the discrepancy. No
-shipped case distinguishes them, because the fixture's largest command is far below both.
+*The source appeared to publish two different rotor speed ceilings.* Raised as a finding,
+and since resolved by the source programme: the ceiling is load-dependent, the nominal figure
+being the speed at the pack's nominal voltage and the actual ceiling scaling by terminal
+voltage over nominal, which separates the unloaded value from the one in force under hover
+draw. `models/souxmar-quad/PROVENANCE.md` now records the mechanism and both figures, and
+notes that the model's own battery block cannot reproduce the sag because it models no
+current draw. No shipped case distinguishes them; the fixture's largest command is far below
+all of them.
+
+**Follow-ups after acceptance.** Case 6's rotor gate was nearly three orders above the
+scheme bound while its note claimed one order; the note was right and the gate was wrong, so
+the gate was tightened to one order above the bound the requesting programme published. It is
+deliberately not set just above the measured agreement, which is far tighter: a budget drawn
+from an observed value is a regression lock, and charter rule 8 requires a lock to be labelled
+as one.
 
 **The correction the acceptance section committed WP1 to making.**
 `include/galata/core/state.hpp` claimed the thirteen-component order was "the row and column

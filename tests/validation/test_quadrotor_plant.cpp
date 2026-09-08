@@ -349,13 +349,20 @@ TEST(QuadrotorStepRefinement, HalvingTheStepConvergesAtFourthOrderOverAManoeuvre
 // first-order rotor lag sampled at the RK stages, galata carries the rotor
 // speed as an ODE state through classical RK4. At the fixture's dt of 0.004 s
 // and tau of 0.035 s the two amplification factors differ by 1.79e-7 relative
-// per step, and the requesting programme measured the resulting envelope
+// per step, and the requesting programme bounded the resulting envelope
 // difference over one three-per-cent rotor transient at no more than 5.8e-7 of
-// the commanded fraction — about 3.6e-4 rad/s on a 626 rad/s rotor. That
-// scheme term is the floor for the rotor channel and it is attributed, not
-// absorbed. The remaining budgets are set an order above the motion that term
-// can induce over 8 s. A disagreement beyond them is a finding to be reported,
-// never a tolerance to widen.
+// the commanded fraction. On a hover rotor that is 5.8e-7 * 626.31 = 3.63e-4
+// rad/s, and the rotor gate sits one order above it at 4e-3 rad/s. That is the
+// whole derivation: the number comes from the mechanism, not from what galata
+// produced.
+//
+// The gate is deliberately NOT set just above the measured agreement, which is
+// far tighter than this bound — the case records it as `worst_rotor_rad_s`. A
+// budget drawn from the observed value would be a regression lock wearing a
+// validation's name, and charter rule 8 requires a lock to be labelled as one.
+// The remaining budgets are set an order above the motion that scheme term can
+// induce over 8 s. A disagreement beyond any of them is a finding to be
+// reported, never a tolerance to widen.
 namespace {
 
 struct FixtureTable {
@@ -627,7 +634,7 @@ TEST(QuadrotorCrossImplementation, ReproducesTheSouxmarOpenLoopTrajectory) {
   RecordProperty("worst_rotor_rad_s", measured(worst_rotor_rad_s));
 
   // The rotor channel carries the scheme term derived in this case's banner.
-  EXPECT_LT(worst_rotor_rad_s, 1e-2) << "rotor speeds disagree beyond the integration-scheme term";
+  EXPECT_LT(worst_rotor_rad_s, 4e-3) << "rotor speeds disagree beyond the integration-scheme term";
   EXPECT_LT(worst_attitude, 1e-6) << "attitude disagrees beyond the stated budget";
   EXPECT_LT(worst_rate_rad_s, 1e-5) << "body rates disagree beyond the stated budget";
   EXPECT_LT(worst_position_m, 1e-3) << "position disagrees beyond the stated budget";

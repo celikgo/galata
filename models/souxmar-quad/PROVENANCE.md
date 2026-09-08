@@ -103,13 +103,27 @@ front-left and rear-right spin one way, rear-left and front-right the other. The
 publishes the configuration but not the sign convention, and the two possible assignments
 differ by an inverted yaw axis.
 
-**The rotor speed ceiling is the operative one, not the nominal one.** The source publishes
-two different ceilings — `max_rotor_speed_rad_s: 1000.0` among the vehicle parameters, and
-an operative battery-limited ceiling of 1102.4200493562662 rad/s in the sidecar's validity
-block, which is also the number its published hover margin is computed against. The plant
-enforces the operative one, so this file carries it. **No shipped case distinguishes the
-two:** the fixture's largest command is hover plus three per cent, far below either. This
-discrepancy is raised with the source programme rather than resolved here.
+**The rotor speed ceiling is the one that applies under hover load.** The source publishes
+two numbers that look like contradictory ceilings — `max_rotor_speed_rad_s: 1000.0` among the
+vehicle parameters, and 1102.4200493562662 rad/s in the sidecar's validity block, which is
+also what its published hover margin is computed against. They are not in conflict, and the
+source programme resolved it: **the ceiling is load-dependent.** The 1000 rad/s figure is the
+speed at the pack's 22.2 V nominal voltage, and the actual ceiling scales by terminal voltage
+over nominal. That gives 1133.99 rad/s unloaded and 1102.42 rad/s under hover load, the
+terminal voltage falling with the current the hover draw pulls through the internal
+resistance.
+
+This file carries the hover-load figure, because that is the ceiling in force over the
+fixture the cross-implementation case replays. **No shipped case distinguishes any of the
+three:** the fixture's largest command is hover plus three per cent, far below all of them.
+
+The model's own battery block computes a ceiling differently, and the difference is recorded
+here rather than hidden. `Quadrotor::speed_ceiling_rad_s` scales `speed_at_full_voltage_rad_s`
+by open-circuit voltage over FULL voltage, and it does not model the current draw, so it
+cannot reproduce the load-dependent sag that separates 1133.99 from 1102.42. The header says
+so in its envelope: the internal resistance enters only through `terminal_voltage_v`, which
+the derivative does not call. A plant that needs the sag needs a current model, and that is
+not in this package.
 
 **The battery block is omitted.** The source's export freezes state of charge at 1.0 and
 the fixture never approaches a speed limit, so nothing in the shipped cases would exercise
