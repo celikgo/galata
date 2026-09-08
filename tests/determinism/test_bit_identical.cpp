@@ -17,9 +17,12 @@
 #include "galata/core/constants.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
+#include "galata/linearize/extended.hpp"
+#include "galata/model/linear_system.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/sim/rigid_body.hpp"
+#include "galata/trim/hover.hpp"
 
 #include "fingerprint.hpp"
 #include <gtest/gtest.h>
@@ -288,4 +291,96 @@ TEST(Determinism, QuadrotorTrajectoryIsBitIdenticalAcrossRuns) {
     EXPECT_EQ(first.states.back()(i), second.states.back()(i))
         << "extended-state component " << i << " differs after 10,000 steps";
   }
+}
+
+// The trim and the linearisation taken about it are both new places for
+// determinism to break, and they break differently from an integration. The
+// trim runs a FIXED iteration count with a line search that evaluates every
+// trial fraction and takes the best; a tolerance-based early exit, or a search
+// that stopped at the first improvement, would make the answer depend on where
+// the iteration happened to be. The linearisation then sizes a perturbation per
+// coordinate and assembles four matrices from difference quotients; a step
+// derived from anything but the operating point, or an unordered traversal of
+// the appended states, would show up here and nowhere else.
+TEST(Determinism, HoverTrimAndItsLinearisationAreBitIdenticalAcrossRuns) {
+  const galata::model::Quadrotor model = galata::model::load_quadrotor(
+      std::string(GALATA_MODELS_DIR) + "/souxmar-quad/souxmar-quad.yaml");
+
+  galata::trim::HoverTrimRequest request;
+  request.altitude_m = 60.0;
+  request.wind_ned_m_s = Eigen::Vector3d(2.5, -1.0, 0.0);
+  request.ground_velocity_ned_m_s = Eigen::Vector3d(1.0, 0.5, 0.0);
+  request.heading_rad = 0.7;
+
+  const int rotors = model.rotor_count();
+  galata::linearize::ExtendedLinearisationOptions options;
+  options.appended_state_names = {"rotor_0", "rotor_1", "rotor_2", "rotor_3"};
+  options.input_names = {"c0", "c1", "c2", "c3", "wn", "we", "wd"};
+  options.wind_input_offset = rotors;
+  options.outputs = {galata::linearize::OutputKind::BodySpecificForce,
+                     galata::linearize::OutputKind::BodyRates,
+                     galata::linearize::OutputKind::PositionNed,
+                     galata::linearize::OutputKind::Altitude,
+                     galata::linearize::OutputKind::GroundVelocityNed};
+
+  const auto run = [&]() {
+    const galata::trim::HoverTrim trim = galata::trim::trim_hover(model, request);
+    Eigen::VectorXd input = Eigen::VectorXd::Zero(rotors + 3);
+    input.head(rotors) = trim.command_rad_s;
+    input.segment<3>(rotors) = trim.wind_ned_m_s;
+    const galata::linearize::ExtendedLinearisation linearisation =
+        galata::linearize::linearize_extended(
+            [&](const Eigen::VectorXd& x, const Eigen::VectorXd& u) {
+              return model.derivative(x, u.head(rotors), Eigen::Vector3d(u.segment<3>(rotors)));
+            },
+            trim.extended_state,
+            input,
+            options);
+    return std::make_pair(trim, linearisation);
+  };
+
+  const auto first = run();
+  const auto second = run();
+
+  for (Eigen::Index i = 0; i < first.first.extended_state.size(); ++i) {
+    EXPECT_EQ(first.first.extended_state(i), second.first.extended_state(i))
+        << "trim state component " << i;
+  }
+  EXPECT_EQ(first.first.residual_norm, second.first.residual_norm);
+  EXPECT_EQ(first.first.jacobian_condition_number, second.first.jacobian_condition_number);
+  ASSERT_EQ(first.first.residual_history.size(), second.first.residual_history.size());
+  for (std::size_t i = 0; i < first.first.residual_history.size(); ++i) {
+    EXPECT_EQ(first.first.residual_history[i], second.first.residual_history[i])
+        << "residual history entry " << i
+        << "; a line search that took the first improving "
+           "fraction rather than the best of a fixed set would differ here";
+  }
+
+  const auto& a = first.second;
+  const auto& b = second.second;
+  ASSERT_EQ(a.a.size(), b.a.size());
+  const auto same_matrix =
+      [](const char* name, const Eigen::MatrixXd& left, const Eigen::MatrixXd& right) {
+        ASSERT_EQ(left.rows(), right.rows()) << name;
+        ASSERT_EQ(left.cols(), right.cols()) << name;
+        for (Eigen::Index row = 0; row < left.rows(); ++row) {
+          for (Eigen::Index column = 0; column < left.cols(); ++column) {
+            EXPECT_EQ(left(row, column), right(row, column))
+                << name << " entry (" << row << ", " << column << ")";
+          }
+        }
+      };
+  same_matrix("A", a.a, b.a);
+  same_matrix("B", a.b, b.b);
+  same_matrix("C", a.c, b.c);
+  same_matrix("D", a.d, b.d);
+
+  for (Eigen::Index i = 0; i < a.state_steps.size(); ++i) {
+    EXPECT_EQ(a.state_steps(i), b.state_steps(i)) << "perturbation step " << i;
+  }
+
+  // The exported bytes are the artefact a user actually diffs, so identical
+  // matrices are not enough: the text of them must be identical too.
+  EXPECT_EQ(galata::model::serialize_linear_system(a.to_linear_system("d", "c")),
+            galata::model::serialize_linear_system(b.to_linear_system("d", "c")));
 }

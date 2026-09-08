@@ -8,7 +8,19 @@
 
 namespace galata::modeling {
 
-inline constexpr std::size_t kMaxLinearChannels = 16;
+// Thirty-two, and the figure is derived rather than chosen. A state row of the
+// lowered graph carries one term per state and one per input, so its width is
+// n + m, and `kMaxLinearTerms` caps a row at 64. Setting this cap to half that
+// makes every admissible channel combination produce a row the executor
+// accepts, with no combination left to discover at run time.
+//
+// It was 16, which is where ADR-0013 first set it. Sixteen is exactly the width
+// of the fixed-voltage quadrotor's hover linearisation — twelve chart
+// coordinates and four rotor states — so that model sat on the cap and the
+// seventeen-state battery variant sat one over it, losing the typed
+// linear-graph path for one state. RFC-0002 raised that as a question rather
+// than absorbing it; ADR-0013 answers it here.
+inline constexpr std::size_t kMaxLinearChannels = 32;
 
 // Explicit types in the source matrix order. Units are canonical SI, with no
 // inference from LinearSystem's free-text names or units description.
@@ -38,7 +50,7 @@ struct LinearGraph {
 
 // Lowers x_dot = A x + B u, y = C x + D u and optional u = command - K x
 // (Astrom & Murray, Feedback Systems, 2nd ed., state-space/feedback equations).
-// Each channel count must be in [1,16]; initial state, constant command and
+// Each channel count must be in [1,32]; initial state, constant command and
 // channel metadata must have exact sizes. C/D retain LinearSystem defaults.
 // Channel names are nonempty and unique within each list, with a combined
 // one-MiB byte limit. Matrix axes, including empty matrix axes, are bounded.

@@ -108,6 +108,25 @@ struct LinearSystem {
 [[nodiscard]] LinearSystem parse_linear_system(const std::string& bytes,
                                                const std::string& source_name = "model");
 
+// Writes the system as the YAML `parse_linear_system` reads, so that a system
+// galata computed and a system galata was given are the same kind of object and
+// the round trip is a testable property rather than a claim.
+//
+// Every matrix entry is written at `max_digits10`, which is the shortest
+// precision at which a binary64 survives a text round trip exactly, in the
+// classic locale so a comma-decimal machine cannot emit a file only it can read
+// (ADR-0004). Empty `c` and `d` are written as the file's defaults — omitted —
+// rather than materialised, because `C = I` spelled out is noise the reader
+// would have to check.
+//
+// WHAT THIS IS NOT: not a provenance record. It carries `description`,
+// `citation` and `units` because the file format has them, and nothing about
+// the run that produced the numbers. The operating point, the perturbation
+// steps and the truncation estimates belong in the evidence the pipeline writes
+// beside it; a reader who has only this file knows what the model is and not
+// how far to trust it.
+[[nodiscard]] std::string serialize_linear_system(const LinearSystem& system);
+
 }  // namespace galata::model
 
 #endif  // GALATA_MODEL_LINEAR_SYSTEM_HPP

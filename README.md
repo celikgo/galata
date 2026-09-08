@@ -180,12 +180,14 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.robust_bounds` | Bound S/T norms and SISO disk size for an internally stable feedback loop | `robust_bounds` | implemented, unvalidated |
 | `analyze.sensitivity` | Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with negative unit feedback, and the frequencies at which they occur | `sensitivity_peaks` | implemented and validated |
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
+| `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
 | `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
 | `model.control_system` | Extract the closed loop or plant-input return ratio of an LQR design | `linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
+| `model.linear.export` | Write a linear model as the named-matrix YAML that model.linear.statespace reads | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
 | `model.linear_graph` | Lower a typed linear system or LQR plant and feedback into an executable graph with origin evidence | `executable_model` | implemented, unvalidated |
 | `model.quadrotor` | Load a nonlinear multirotor plant — rotors with first-order speed lag, per-axis drag and an optional battery | `quadrotor` | implemented, unvalidated |
@@ -199,6 +201,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
 | `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
+| `trim.hover` | Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a relative equilibrium — for attitude and rotor speeds, reporting each rotor's margin | `hover_trim` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->
 

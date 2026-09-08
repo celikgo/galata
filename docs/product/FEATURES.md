@@ -176,7 +176,14 @@ acceptance requirements below are targets, not measurements of current code.
 **Must v1 · M3 · Dependencies: F02, F03, F06**
 
 - **Baseline and gap:** Straight-line, wings-level trim checks six dynamic
-  residuals. Turning, climbing and asymmetric equilibrium are unsupported.
+  residuals. `trim.hover` adds multirotor equilibrium for one vehicle class —
+  still-air hover, hover in a crosswind, and cruise as a relative equilibrium
+  with a nonzero position rate — reporting the residual, the fixed iteration
+  count and each rotor's margin to its speed limit, and refusing an infeasible
+  trim rather than returning a best effort. It solves the square four-rotor
+  problem only; an over-actuated vehicle is an allocation problem with a null
+  space and is refused. Turning, climbing and asymmetric equilibrium remain
+  unsupported for the fixed-wing path, and this row stays open.
 - **Proposed work:** Add explicitly formulated level, climb/descent and steady
   coordinated-turn problems, with selectable free variables and constraints.
   Support asymmetric trim only for declared aircraft/configuration models.
@@ -206,6 +213,13 @@ acceptance requirements below are targets, not measurements of current code.
 
 - **Baseline and gap:** Central differences and Richardson estimates exist
   about the supported trim, with named Euler perturbation coordinates.
+  `linearize.extended` adds a model-generic path beside that one, on a local
+  attitude-error chart that is regular at every attitude, carrying a model's
+  appended states, with named wind disturbance columns in B and D and a declared
+  observation model rather than `C = I, D = 0`. Richardson estimates are
+  retained for all four matrices. It does not replace `linearize.finitediff`,
+  whose NT-33A export is unchanged; scaling, model reduction and explicit state
+  removal remain unaddressed, and this row stays open.
 - **Proposed work:** Extend linearisation to the accepted equilibrium types
   and augmented actuator/sensor states. Preserve scaling, coordinate transforms
   and operating-point identity; qualify derivative discontinuities. Make any

@@ -2,7 +2,11 @@
 
 # RFC-0002: Quadrotor programme support — native plant, hover trim, generic linearisation, measured-data import, identification, sampled control
 
-- **Status:** proposed. Nothing below is implemented; the README's Status table remains the authority.
+- **Status:** partly delivered. WP1 and WP2 are implemented and their delivery records are
+  at the foot of this document; WP3, WP4 and WP5 are not started. The line this replaced said
+  "nothing below is implemented", which WP1 left standing and which stopped being true when it
+  landed. The README's Status table, generated from the capability registry, remains the
+  authority on what exists; nothing here is a release commitment.
 - **Date:** 2026-09-08
 - **Requested by:** the Souxmar forest-ISR quadrotor programme (GitLab `souxmar`, a Python repository; not the CAE project of the same name that ADR-0001 cites)
 - **Affects:** `src/model/`, `src/trim/`, `src/linearize/`, `src/sim/`, `src/pipeline/capabilities.cpp`, `docs/product/FEATURES.md`, `docs/ROADMAP.md`, `docs/VERIFICATION.md`, ADR-0002, ADR-0006
@@ -474,3 +478,150 @@ as one.
 `include/galata/core/state.hpp` claimed the thirteen-component order was "the row and column
 order of every A and B matrix galata produces". ADR-0002 says it is not, and ADR-0002 is
 right. The header now agrees with the record it is governed by.
+
+### WP2 — `trim.hover` and `linearize.extended`, 2026-09-08
+
+Delivered in the closure order the request set: contracts, trim, linearisation,
+pipeline, acceptance, compatibility. WP3 to WP5 are not started and the status
+line at the top of this document is unchanged.
+
+**Three contracts were closed before any implementation was finished**, because
+each decides what the code can be rather than how it is written.
+
+*Wind perturbations are taken at fixed GROUND velocity.* ADR-0002's velocity is
+air-relative and the plant's drag acts on it directly, so perturbing the wind
+while holding the state fixed moves nothing: the wind columns of B reduce to the
+position rows and D is exactly zero. That is self-consistent and it is a
+linearisation of a vehicle nothing blows on, and it cannot produce the
+wind-to-specific-force drag feedthrough this RFC asks D to carry. The physical
+perturbation is the other one — no force acts at the instant the air mass
+changes speed, so the ground velocity is continuous and the air-relative
+velocity jumps by minus the wind change, which is the same re-basing WP1's first
+finding identified and case 6 already performs. Read the chart's velocity
+coordinate as the body-axis ground-velocity perturbation and the two halves add
+up exactly: at fixed wind the two readings coincide, so A is untouched, and the
+wind column contributes precisely the drag term A cannot see. A caller who
+wants the other convention declines the wind offset and gets a zero D.
+
+*Frozen state of charge is declared, not discovered.* A powered battery is
+always discharging, so a point that is a perfect equilibrium in all six dynamic
+coordinates still fails an equilibrium test that reads the battery row.
+Excluding it silently would leave a constant term in that row which A cannot
+represent and which nothing would report. `frozen_appended_states` names such
+coordinates: the state is KEPT in the chart, its own derivative is declared zero
+rather than measured — which makes the linearisation exact rather than
+approximate, since a frozen state's rate is zero by construction — and the rate
+that was declared away is reported so the reader can divide it into the state's
+range and see the horizon over which the freeze is defensible. The trim makes
+the same choice for the same reason.
+
+*ADR-0013's channel cap is resolved, at 32.* The open question this RFC raised
+was real: the fixed-voltage quadrotor's hover linearisation is exactly sixteen
+states, so it sat on the cap, and the seventeen-state battery variant sat one
+over and lost the typed linear-graph path for one state. The new figure is
+derived rather than chosen — a lowered state row carries `n + m` terms and
+`kMaxLinearTerms` caps a row at 64, so half of 64 is the largest cap under which
+every admissible channel combination still produces a row the executor accepts.
+Nothing else in ADR-0013 moves. The record carries the amendment, and the
+boundary test now exercises 32 admitted and 33 refused; it also asserts the
+constant against the record's own figure, so raising the cap without amending
+the decision fails rather than passing quietly.
+
+**What exists now.** `include/galata/trim/hover.hpp` and `src/trim/hover.cpp`
+solve the multirotor equilibrium over roll, pitch and four rotor speeds against
+the six dynamic accelerations, with yaw declared rather than solved because a
+multirotor in still air is in equilibrium at every heading. The position rate is
+not required to vanish, which is what admits cruise as a relative equilibrium.
+`include/galata/linearize/extended.hpp` and `src/linearize/extended.cpp`
+linearise any `f(x_ext, u)` on a multiplicative attitude-error chart, landing
+BESIDE `include/galata/linearize/finite_difference.hpp` rather than replacing it: that routine is
+untouched and every NT-33A generated artefact passes its `--check` mode
+unchanged. `trim.hover`, `linearize.extended` and `model.linear.export` register
+in the pipeline as implemented-unvalidated, for the reason `model.quadrotor`
+carries, and the README's capability table is regenerated.
+`model::serialize_linear_system` writes the same named-matrix YAML
+`model.linear.statespace` reads, at `max_digits10` in the classic locale, so a
+system galata computed and a system galata was given are the same kind of
+object.
+
+Every figure below is one a generated document or a test's own recorded property
+carries. None is typed here.
+
+**Acceptance, by test name, all in the `validation` tier unless marked.** Each
+budget is stated in the test before the number it gates.
+
+1. `QuadrotorHoverTrim.StillAirCrosswindCruiseAndUnequalRotorsSolveToTheirDeclaredBudget`
+2. `QuadrotorHoverLinearisation.PoleStructureIsSixIntegratorsThreeDragPairsAndFourRotorLags`
+3. `QuadrotorHoverLinearisation.CollectiveVerticalGainMatchesTheClosedFormAndActsUpward`
+4. `QuadrotorHoverLinearisation.WindColumnsCarryTheDragFeedthroughAtFixedGroundVelocity`
+5. `QuadrotorHoverLinearisation.LinearAndNonlinearAgreeWithinTheSecondOrderBoundOverOneSecond`
+
+Case 2 finds the six integrators the request asked for — three because nothing
+reads position, three because nothing reads attitude at a level hover — beside
+three translational and three rotational drag rates and four rotor lags at
+`-1/tau`. Case 3 gates the collective vertical gain on its SIGN as well as its
+magnitude `8 k_T omega_h / m`, because a model with the sign inverted hovers,
+trims and produces a plausible pole map while climbing when commanded to
+descend; it also asserts the gain is NOT in B, since the command reaches the
+airframe only through the rotor lag, and that the accelerometer row of C agrees
+with the state row of A about the same slope. Case 5 declares its perturbations,
+its horizon and its budget before it compares anything, and reports the
+agreement separately rather than folding it into the gate.
+
+The contracts are held in the `unit` tier by `HoverTrim.*` and
+`ExtendedLinearize.*`, which cover the refusals — an over-actuated vehicle, an
+infeasible trim, a non-equilibrium point, a malformed name list, a frozen index
+nobody has — the five declared observations, and the one claim the chart exists
+to make, that it is regular at ninety degrees of pitch where the Euler chart is
+not. `QuadrotorWorkflow.*` in the `integration` tier runs the chain end to end,
+reads the export back through the existing loader and finds the same matrices
+bit for bit, lowers the seventeen-state battery variant through the typed graph
+adapter, and confirms every state-space file already in the tree still loads and
+still round-trips. `Determinism.HoverTrimAndItsLinearisationAreBitIdenticalAcrossRuns`
+holds ADR-0004 tier 1 over both new routines and over the exported bytes.
+
+**Three findings, raised rather than absorbed.**
+
+*The hover translational entries carry a FIRST-order finite-difference error,
+not a second-order one, and the Richardson estimate cannot see it.* The
+quadratic drag term `c_q v |v|` is continuous and once differentiable at zero
+airspeed and not twice, so at hover the central difference straddles a kink.
+Working the quotient out by hand gives `-c_l - c_q h` exactly, so the relative
+error is `h / (drag_linear / drag_quadratic)` — the step divided by the very
+quadratic-drag airspeed the model publishes. The pole gate is derived from that
+mechanism rather than from the truncation estimate, which looks healthy. This is
+the case `include/galata/numerics/jacobian.hpp` warns about in the abstract, met in the
+concrete.
+
+*The chart destroyed the shared Jacobian's relative-step rule, and it cost eight
+digits.* Every chart coordinate is zero at the nominal by construction, so
+`max(relative_step * |x_i|, absolute_step)` collapses to the one absolute floor
+for every column. That floor is sized for a component of order one; a rotor
+speed is several hundred radians per second, and perturbing it by six parts in a
+million and subtracting leaves about half the mantissa. The rotor-lag entries
+were wrong in the eighth figure until the floors were derived from the magnitude
+of the state each coordinate perturbs. It was a pole gate that caught this, not
+the truncation estimate, and the fix improved the collective-gain agreement by
+two orders as well.
+
+*The first attempt at case 5 named only the quadratic drag and gated on it, and
+the vertical channel failed at 42 percent — correctly.* Quadratic drag is not
+the largest thing a hover linearisation drops: the gravity and thrust projection
+are exact in the attitude while the linearisation keeps only the first-order
+tilt, and the Coriolis term is a product of two perturbed quantities and
+therefore entirely second order. The budget now sums all three, doubled once and
+for a stated reason. The case also normalises each channel by its coordinate
+group's perturbation scale rather than by its own peak excursion, because a
+channel whose response is small — vertical velocity at hover is driven only by
+drag decay — would otherwise be held to a bound thousands of times tighter than
+the mechanism that limits it.
+
+**What WP2 deliberately did not do.** `linearize.finitediff` is unchanged and
+the NT-33A export is unchanged; the two charts coexist, which is the condition
+this RFC's acceptance section set. The fixed-wing mode labels are not applied to
+a multirotor — the integration study runs `analyze.modes` with `classify: false`
+— and `analyze.modes` correctly continues to decline participation factors at
+hover, because the double-integrator chains are defective. `model.channels` can
+select or drop the wind columns because they are named, but no case here
+exercises that path. Gusts and turbulence stay out of scope until a wind model
+owns the `-R^T dw/dt` term, exactly as WP1 left them.

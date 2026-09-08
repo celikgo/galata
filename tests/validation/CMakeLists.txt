@@ -33,6 +33,7 @@ add_executable(galata_validation_tests
   test_case_registry.cpp
   test_care_slicot.cpp
   test_quadrotor_plant.cpp
+  test_quadrotor_hover_linearisation.cpp
 )
 
 target_include_directories(galata_validation_tests

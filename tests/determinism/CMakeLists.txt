@@ -18,6 +18,8 @@ target_link_libraries(galata_determinism_tests
     galata::numerics
     galata::sim
     galata::model
+    galata::trim
+    galata::linearize
     galata::analyze
     galata::warnings
     GTest::gtest_main

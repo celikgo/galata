@@ -227,6 +227,61 @@ const std::vector<Case>& validation_cases() {
        "velocity state and not in the fixture's ground-velocity one, so the case re-bases "
        "across it; a caller that does not is silently wrong by the whole wind increment."},
 
+      {"quadrotor.hover_trim",
+       "Multirotor equilibrium — still air, crosswind, cruise, and unequal rotor speeds",
+       {"trim.hover"},
+       "Exact conditions of equilibrium for the multirotor equations",
+       Status::Validated,
+       {E{kValidation,
+          "QuadrotorHoverTrim.StillAirCrosswindCruiseAndUnequalRotorsSolveToTheirDeclaredBudget"},
+        E{kUnit, "HoverTrim.ATrimNeedingMoreRotorThanTheVehicleHasIsRefusedNotReturned"},
+        E{kUnit, "HoverTrim.AnOverActuatedVehicleIsRefusedRatherThanAllocatedArbitrarily"}},
+       "Validated against mathematics rather than a document, as the invariants case above "
+       "is. The four conditions solve to their declared residual budget and the rotor speeds "
+       "sit on the closed-form hover speed; the crosswind and cruise cases are the same "
+       "air-relative condition with the tilt reversed, which is the sign a transposed "
+       "rotation would pass every other check and fail here. Two REFUSALS carry as much "
+       "weight as the answers: an over-actuated vehicle is refused because six equations and "
+       "eight unknowns leave a null space a Newton solve would resolve arbitrarily, and an "
+       "infeasible trim is refused rather than returned with a note, because a best effort "
+       "reported as a trim gets linearised. State of charge is frozen and excluded from the "
+       "residual: a powered battery has no zero-energy-derivative equilibrium, so requiring "
+       "one would make every trim infeasible for a reason that has nothing to do with "
+       "flight."},
+
+      {"quadrotor.hover_linearisation",
+       "Hover linearisation on a local attitude-error chart — pole structure, control gain, "
+       "disturbance feedthrough, and agreement with the nonlinear plant",
+       {"linearize.extended"},
+       "Closed forms derived from the model's own parameters",
+       Status::Validated,
+       {E{kValidation,
+          "QuadrotorHoverLinearisation."
+          "PoleStructureIsSixIntegratorsThreeDragPairsAndFourRotorLags"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation.CollectiveVerticalGainMatchesTheClosedFormAndActsUpward"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation.WindColumnsCarryTheDragFeedthroughAtFixedGroundVelocity"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation."
+          "LinearAndNonlinearAgreeWithinTheSecondOrderBoundOverOneSecond"},
+        E{kUnit,
+          "ExtendedLinearize.TheChartIsRegularAtNinetyDegreesOfPitchWhereTheEulerChartIsNot"}},
+       "Every gate is a closed form in the model's parameters — a drag coefficient over a "
+       "mass, a reciprocal time constant, a thrust slope — compared against a "
+       "finite-difference Jacobian that was not told the answer. The pole structure is six "
+       "integrators from position and attitude, three translational and three rotational "
+       "drag rates, and four rotor lags at -1/tau; the collective vertical gain is "
+       "8 k_T omega_h / m and is gated on its SIGN as well as its magnitude, because a model "
+       "with it inverted hovers, trims and produces a plausible pole map while climbing when "
+       "commanded to descend. Two findings, recorded rather than absorbed. The translational "
+       "entries carry a FIRST-order finite-difference error, not a second-order one, because "
+       "the quadratic drag term is once differentiable and not twice at zero airspeed; the "
+       "budget is derived from that kink and the Richardson estimate cannot see it. And the "
+       "chart's coordinates are all zero at the nominal, which defeats the shared Jacobian's "
+       "relative-step rule and cost the rotor-lag entries eight digits to cancellation until "
+       "the step floors were derived from the state each coordinate perturbs."},
+
       {"rigid_body.aerodynamic_forces",
        "Six-degree-of-freedom equations with aerodynamic forces",
        {},

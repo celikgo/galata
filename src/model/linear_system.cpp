@@ -5,6 +5,10 @@
 #include "../io/strict_yaml.hpp"
 
 #include <fstream>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <ostream>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -231,6 +235,90 @@ LinearSystem parse_linear_system(const std::string& bytes, const std::string& pa
 
   system.validate();
   return system;
+}
+
+namespace {
+
+// Quoted single-line YAML scalar. Only the two characters that can end a
+// double-quoted scalar early are escaped; a control character is refused rather
+// than encoded, because a model description containing one is a sign the caller
+// has handed us bytes from somewhere it should not have.
+std::string quote(const std::string& text) {
+  std::string out = "\"";
+  for (const char character : text) {
+    if (static_cast<unsigned char>(character) < 0x20) {
+      throw std::invalid_argument(
+          "serialize_linear_system: a control character in a description, citation or name "
+          "cannot be written to this file format");
+    }
+    if (character == '"' || character == '\\') {
+      out.push_back('\\');
+    }
+    out.push_back(character);
+  }
+  out.push_back('"');
+  return out;
+}
+
+void write_matrix(std::ostream& out, const std::string& key, const Eigen::MatrixXd& matrix) {
+  if (matrix.size() == 0) {
+    return;
+  }
+  out << key << ":\n";
+  for (Eigen::Index row = 0; row < matrix.rows(); ++row) {
+    out << "  - [";
+    for (Eigen::Index column = 0; column < matrix.cols(); ++column) {
+      if (column > 0) {
+        out << ", ";
+      }
+      out << matrix(row, column);
+    }
+    out << "]\n";
+  }
+}
+
+void write_names(std::ostream& out, const std::string& key, const std::vector<std::string>& names) {
+  if (names.empty()) {
+    return;
+  }
+  out << key << ": [";
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    if (i > 0) {
+      out << ", ";
+    }
+    out << quote(names[i]);
+  }
+  out << "]\n";
+}
+
+}  // namespace
+
+std::string serialize_linear_system(const LinearSystem& system) {
+  // Refuse to write something the reader would refuse, so a malformed system is
+  // a failure here rather than a file that only fails when somebody loads it.
+  system.validate();
+
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10);
+
+  if (!system.description.empty()) {
+    out << "description: " << quote(system.description) << "\n";
+  }
+  if (!system.citation.empty()) {
+    out << "citation: " << quote(system.citation) << "\n";
+  }
+  if (!system.units.empty()) {
+    out << "units: " << quote(system.units) << "\n";
+  }
+  write_names(out, "states", system.state_names);
+  write_names(out, "inputs", system.input_names);
+  write_names(out, "outputs", system.output_names);
+  write_matrix(out, "a", system.a);
+  write_matrix(out, "b", system.b);
+  write_matrix(out, "c", system.c);
+  write_matrix(out, "d", system.d);
+  return out.str();
 }
 
 }  // namespace galata::model

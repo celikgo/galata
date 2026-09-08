@@ -6,6 +6,7 @@ galata_find_eigen()
 
 add_library(galata_trim
   level.cpp
+  hover.cpp
 )
 add_library(galata::trim ALIAS galata_trim)
 

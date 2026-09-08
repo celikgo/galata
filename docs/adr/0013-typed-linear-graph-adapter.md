@@ -51,7 +51,7 @@ Existing source, graph, simulation, cancellation and resource bounds apply.
 
 The public adapter accepts a validated `LinearSystem`, explicit ordered state,
 input and output `SignalType` arrays, and options containing initial state,
-command and optional feedback matrix K. Each channel count is 1 through 16;
+command and optional feedback matrix K. Each channel count is 1 through 32;
 all arrays and matrices must have exactly the declared shape and finite
 values. An empty K means no state feedback; otherwise K is m by n. There are
 no default channel types inferred from names or free-text units.
@@ -171,6 +171,36 @@ bounded-fixture integration-consistency budget is not an arbitrary-model
 accuracy certificate. Nonfinite budget terms or gamma outside its small-error
 domain invalidate the comparison rather than widening the budget after a
 failure.
+
+## Amendment, 2026-09-08: the channel cap is 32, not 16
+
+The cap was 16 when this record was first written, and no case had reached it.
+RFC-0002's acceptance section then found one and raised it rather than absorbing
+it: the fixed-voltage quadrotor's hover linearisation is exactly sixteen states
+— twelve chart coordinates and four rotor-speed states — so it sits on the cap,
+and the seventeen-state battery variant sits one over. `model.linear.statespace`
+imposes no state-count limit, so `analyze.*` and `sim.linear` read the
+seventeen-state model unchanged; what the battery variant lost was the typed
+linear-graph path, for one state.
+
+**The cap is now 32, and the figure is derived rather than chosen.** A lowered
+state row carries one term per state and one per input, so its width is `n + m`,
+and `kMaxLinearTerms` caps a row at 64. Half of 64 is the largest cap for which
+every admissible channel combination still produces a row the executor accepts,
+which leaves no combination to discover at run time. Nothing else in the
+contract moves: the 64-term row limit, the one-MiB name budget, the dimension
+exponent range and every type rule are unchanged, and a 33-channel axis is still
+refused with the same `ResourceLimit` error.
+
+The generated block identifiers keep their three-digit field, which was already
+wide enough. Their padding is now computed with a `max` rather than a
+subtraction on `std::size_t`, so a future cap above the field width truncates
+the padding instead of wrapping it into a request for a string of about eighteen
+quintillion zeroes.
+
+Acceptance protocol item 2's "practical channel boundary cases are admitted"
+is read against the new cap, and the boundary is exercised at 32 admitted and 33
+refused rather than at 16 and 17.
 
 ## Consequences and deferred work
 
