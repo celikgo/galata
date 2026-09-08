@@ -79,8 +79,14 @@ void keys(const ValuePtr& value, const std::vector<std::string>& allowed, const 
   }
 }
 
+// A string literal default materialises a temporary at every call site, and GCC's
+// -Wdangling-reference cannot then prove the returned reference points into the
+// upstream artifact rather than into that temporary. Naming the default removes
+// the temporary, which settles the question rather than suppressing it.
+const std::string kDefaultSystemKey = "system";
+
 const model::LinearSystem& system_at(const StageContext& context,
-                                     const std::string& key = "system") {
+                                     const std::string& key = kDefaultSystemKey) {
   return context.upstream_at(key).payload_as<model::LinearSystem>("linear_system");
 }
 
