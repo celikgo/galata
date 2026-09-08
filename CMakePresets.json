@@ -83,7 +83,7 @@
       "name": "default-test",
       "hidden": true,
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error", "stopOnFailure": false, "jobs": 0 }
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
     },
     { "name": "dev",            "configurePreset": "dev",            "inherits": "default-test" },
     { "name": "ci-linux-gcc",   "configurePreset": "ci-linux-gcc",   "inherits": "default-test" },

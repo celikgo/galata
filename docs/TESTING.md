@@ -100,8 +100,3 @@ ctest --preset dev
 The label is authoritative: `-L unit` on macOS also runs the desktop geometry
 tests, and `-L integration` also runs the project CLI tests.
 
-Every test preset runs ctest with one job per available core. Tests must
-therefore be independent of one another: no test that depends on another having
-run first, no assumption about the order they are picked up in, and no fixed
-scratch path two of them could both be writing at once. A test that needs a
-directory of its own builds a unique name for it.
