@@ -384,3 +384,83 @@ in a way no tolerance should be widened to accommodate.
 translational ones, with the same rejection rules.** This is recorded as a correction to
 the RFC rather than absorbed silently into the implementation, because it changes the model
 the packages were requested against.
+
+## Delivery record
+
+### WP1 — `model.quadrotor`, 2026-09-08
+
+Delivered in the order the request set: header, loader, model directory, pipeline
+registration, validation cases. Nothing in WP2 to WP5 is started, and the status line above
+is unchanged.
+
+**What exists now.** `include/galata/model/quadrotor.hpp` and `src/model/quadrotor.cpp` carry
+a nonlinear multirotor plant — rigid body through the existing
+`include/galata/sim/rigid_body.hpp` kernel with no second six-degree-of-freedom
+implementation, rotors with first-order speed lag, per-axis linear, quadratic and angular
+drag, and an optional battery. The extended state is the thirteen ADR-0002 components
+followed by one state per rotor and, when present, one for state of charge. `model.quadrotor`
+is registered in `src/pipeline/capabilities.cpp` as implemented-unvalidated, and the README's
+capability table now carries its row, regenerated through `scripts/gen-status-table.sh`.
+
+The model file is `models/souxmar-quad/souxmar-quad.yaml` with its
+`models/souxmar-quad/PROVENANCE.md`. The loader refuses unknown keys at every level of the
+document, which `load_aircraft` does not, and the rejection list the request named is
+enforced and tested.
+
+**Verification.** Two cases are registered in `tools/validation/case_registry.cpp` and render
+in `docs/VERIFICATION.md`, which was regenerated through `scripts/gen-verification.sh`:
+`quadrotor.invariants` at validated, whose reference is mathematics rather than a document,
+and `quadrotor.cross_implementation` at self-consistent. Every figure below is the one those
+generated documents and the tests' own recorded properties carry; none is typed here.
+
+The six cases the request asked for, by test name, all in the `validation` tier:
+
+1. `QuadrotorHover.EqualSpeedsCarryTheWeightAndProduceNoMoment`
+2. `QuadrotorFreeFall.ZeroRotorSpeedGivesZeroSpecificForceAndOneGeeDown`
+3. `QuadrotorTorqueSigns.DifferentialThrustDrivesTheExpectedAxisAndOnlyThatAxis`
+4. `QuadrotorTorqueFree.RotorsOffAndDragOffConservesEnergyAndAngularMomentum`
+5. `QuadrotorStepRefinement.HalvingTheStepConvergesAtFourthOrderOverAManoeuvre`
+6. `QuadrotorCrossImplementation.ReproducesTheSouxmarOpenLoopTrajectory`
+
+Case 4 is held to the kernel's own existing bound rather than a new one, so it proves the
+quadrotor adds no dissipation of its own. Case 5 states its budget as a convergence ORDER
+rather than a magnitude, because the order is a property of the scheme and a magnitude is a
+number somebody chose; it reports its absolute agreement alongside as
+`position_difference_m_at_1ms` and `attitude_difference_at_1ms`. Case 6 records
+`worst_position_m`, `worst_attitude`, `worst_body_rate_rad_s` and `worst_rotor_rad_s`, and
+its rotor channel carries the integration-scheme floor the requesting programme quantified,
+attributed in the case note rather than absorbed into the budget. Both trajectories are
+retained side by side under the run outputs, at the path the case records as
+`retained_trajectories`, so a reader can see where the two diverge rather than only how far —
+in the build tree, because they are the output of a run and not committed data.
+
+The loader's contract is held separately in the `unit` tier by `QuadrotorFile.*`,
+`QuadrotorBattery.*` and
+`QuadrotorModel.WrongLengthStateOrCommandIsRefusedRatherThanReinterpreted`. The battery block
+is exercised there, with parameters that are the test's own, because the shipped model file
+omits it.
+
+**Two findings, raised rather than absorbed.**
+
+*The wind step is a discontinuity in this repository's state and not in the fixture's.*
+ADR-0002's velocity is air-relative; the requesting programme's is ground velocity. When the
+wind changes, the ground velocity is continuous — no force acts at the instant the air mass
+changes speed — so the air-relative velocity must jump by exactly minus the wind change.
+`Quadrotor::derivative` takes the wind as steady and carries no `-R^T dw/dt` term, so a
+caller that steps the wind without re-basing injects the entire wind increment as a
+ground-velocity error, permanently and silently. This was found by case 6 failing, and the
+first hypothesis — a different quadratic-drag law — was tested and refuted before the real
+cause was isolated by a one-step comparison. The header's `WHAT THIS IS NOT` block now names
+the limitation, and case 6 re-bases explicitly at the one wind step in its fixture. Gusts and
+turbulence stay out of scope until a wind model owns that derivative term.
+
+*The source publishes two different rotor speed ceilings.* A nominal maximum among the
+vehicle parameters and a higher operative battery-limited ceiling in the sidecar's validity
+block, which is the one its published hover margin is computed against. The model file
+carries the operative one and `models/souxmar-quad/PROVENANCE.md` records the discrepancy. No
+shipped case distinguishes them, because the fixture's largest command is far below both.
+
+**The correction the acceptance section committed WP1 to making.**
+`include/galata/core/state.hpp` claimed the thirteen-component order was "the row and column
+order of every A and B matrix galata produces". ADR-0002 says it is not, and ADR-0002 is
+right. The header now agrees with the record it is governed by.

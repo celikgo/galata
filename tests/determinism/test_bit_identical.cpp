@@ -14,8 +14,10 @@
 
 #include "galata/analyze/modes.hpp"
 #include "galata/core/atmosphere.hpp"
+#include "galata/core/constants.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
+#include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/sim/rigid_body.hpp"
 
@@ -249,3 +251,41 @@ TEST(Determinism, NoLongDoubleInTheNumericalCore) {
 }
 
 }  // namespace
+
+// The quadrotor is a second integrable model, and it appends states to the
+// ADR-0002 thirteen. Both facts are new places for determinism to break: a
+// std::clamp whose bounds are computed differently between runs, or a rotor
+// loop whose order is not fixed, would show up here and nowhere else.
+TEST(Determinism, QuadrotorTrajectoryIsBitIdenticalAcrossRuns) {
+  const galata::model::Quadrotor model = galata::model::load_quadrotor(
+      std::string(GALATA_MODELS_DIR) + "/souxmar-quad/souxmar-quad.yaml");
+  const double hover = model.hover_speed_rad_s(galata::core::kStandardGravity);
+
+  Eigen::VectorXd command = Eigen::VectorXd::Constant(model.rotor_count(), hover);
+  command(0) += 12.0;
+  command(3) -= 9.0;
+  const Eigen::Vector3d wind(3.0, -1.5, 0.5);
+
+  Eigen::VectorXd start = Eigen::VectorXd::Zero(model.extended_state_size());
+  start(galata::core::kQuaternionW) = 1.0;
+  start.segment(model.rotor_state_offset(), model.rotor_count()).setConstant(hover);
+
+  const auto run = [&]() {
+    return galata::numerics::integrate_fixed_step(
+        [&](double, const Eigen::VectorXd& x) { return model.derivative(x, command, wind); },
+        start,
+        0.0,
+        0.002,
+        10000,
+        10000,
+        [&](Eigen::VectorXd& x) { model.project(x); });
+  };
+
+  const auto first = run();
+  const auto second = run();
+  ASSERT_EQ(first.states.back().size(), second.states.back().size());
+  for (int i = 0; i < model.extended_state_size(); ++i) {
+    EXPECT_EQ(first.states.back()(i), second.states.back()(i))
+        << "extended-state component " << i << " differs after 10,000 steps";
+  }
+}

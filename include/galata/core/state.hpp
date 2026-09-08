@@ -9,9 +9,19 @@
 //         q_w q_x q_y q_z  attitude,  body -> NED,  dimensionless
 //         p   q   r ]   angular rate, body axes,    rad/s
 //
-// Thirteen components, in that order. This is the row and column order of every
-// A and B matrix galata produces, so it is a compatibility surface: changing it
-// changes the meaning of every exported state-space model.
+// Thirteen components, in that order. This is the order in which the components
+// are stored, integrated, fingerprinted and serialised, so it is a
+// compatibility surface: changing it changes the meaning of every exported
+// state-space model.
+//
+// It is NOT the row and column order of the A and B matrices galata produces,
+// and this comment said for a long time that it was. `linearize.finitediff`
+// works in twelve Euler coordinates rather than thirteen quaternion ones, and
+// reports a reduced set of those; a model carrying appended states linearises
+// to a width that is neither twelve nor thirteen. Every produced LinearSystem
+// carries its own state_names, and those are what the analysis layer reads.
+// ADR-0002 has always said this; the header disagreed with it, and no gate
+// catches a false claim about behaviour.
 //
 // The velocity is AIR-RELATIVE — the aircraft's velocity with respect to the
 // local air mass, not with respect to the ground. In still air the two are

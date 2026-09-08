@@ -190,6 +190,43 @@ const std::vector<Case>& validation_cases() {
        "magnitude. A transposed direction-cosine matrix conserves the magnitude and fails "
        "this. Drift measured below."},
 
+      {"quadrotor.invariants",
+       "Multirotor plant against the exact invariants of its own equations",
+       {},
+       "Exact invariants of the multirotor equations of motion",
+       Status::Validated,
+       {E{kValidation, "QuadrotorHover.EqualSpeedsCarryTheWeightAndProduceNoMoment"},
+        E{kValidation, "QuadrotorFreeFall.ZeroRotorSpeedGivesZeroSpecificForceAndOneGeeDown"},
+        E{kValidation,
+          "QuadrotorTorqueSigns.DifferentialThrustDrivesTheExpectedAxisAndOnlyThatAxis"},
+        E{kValidation, "QuadrotorTorqueFree.RotorsOffAndDragOffConservesEnergyAndAngularMomentum"},
+        E{kValidation,
+          "QuadrotorStepRefinement.HalvingTheStepConvergesAtFourthOrderOverAManoeuvre"}},
+       "Validated against mathematics rather than a document, as the torque-free case above "
+       "is. These bound the equations, not the parameter set: no published source anchors "
+       "the coefficients, so `model.quadrotor` is registered implemented-unvalidated and a "
+       "completed run of it is evidence about the equations and never about an aircraft. The "
+       "torque-signs case earns its keep on the axes that must stay SILENT — a transposed "
+       "cross product leaves the driven axis looking healthy."},
+
+      {"quadrotor.cross_implementation",
+       "Multirotor plant against an independent implementation, open loop with wind",
+       {"model.quadrotor"},
+       "Souxmar forest-ISR programme, independent nonlinear quadrotor plant; not a published "
+       "source",
+       Status::SelfConsistent,
+       {E{kValidation, "QuadrotorCrossImplementation.ReproducesTheSouxmarOpenLoopTrajectory"}},
+       "Agreement between two implementations of the same equations, which is not validation "
+       "and is recorded as self-consistent for that reason. The fixture is not committed: it "
+       "is a dataset whose rights position is unestablished, so ADR-0007 routes it to a "
+       "loader plus fetch instructions and the case states why it did not run when the path "
+       "is absent. Its rotor channel carries an integration-scheme floor — the fixture "
+       "samples an exact first-order lag at the RK stages where galata carries the lag as an "
+       "ODE state — and that floor is attributed in the case rather than absorbed into the "
+       "budget. Finding, recorded: the wind step is a discontinuity in an air-relative "
+       "velocity state and not in the fixture's ground-velocity one, so the case re-bases "
+       "across it; a caller that does not is silently wrong by the whole wind increment."},
+
       {"rigid_body.aerodynamic_forces",
        "Six-degree-of-freedom equations with aerodynamic forces",
        {},

@@ -4,4 +4,12 @@
 #define GALATA_VALIDATION_CONFIG_HPP
 #define GALATA_VALIDATION_REFERENCE_DIR "@CMAKE_CURRENT_SOURCE_DIR@/reference"
 #define GALATA_MODELS_DIR "@CMAKE_SOURCE_DIR@/models"
+// Directory holding the Souxmar cross-implementation fixture. Empty by
+// default: the fixture is a dataset with an unestablished rights position and
+// is deliberately not committed (ADR-0007, RFC-0002). Set
+// -DGALATA_SOUXMAR_FIXTURE_DIR=<dir> to run the cross-implementation case.
+#define GALATA_SOUXMAR_FIXTURE_DIR "@GALATA_SOUXMAR_FIXTURE_DIR@"
+// Where a case writes the run artefacts it is required to retain. The build
+// tree, not the source tree: these are outputs of a run, not committed data.
+#define GALATA_VALIDATION_OUTPUT_DIR "@CMAKE_CURRENT_BINARY_DIR@"
 #endif

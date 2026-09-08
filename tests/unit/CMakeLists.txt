@@ -25,6 +25,7 @@ add_executable(galata_unit_tests
   test_hinfinity.cpp
   test_nonlinear.cpp
   test_linear_simulation.cpp
+  test_quadrotor_model.cpp
 )
 
 target_link_libraries(galata_unit_tests
