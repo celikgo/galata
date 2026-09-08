@@ -231,3 +231,156 @@ package that needs one of these stops and raises it here rather than absorbing i
    cited.
 3. Whether WP5's discrete-time work is scoped to this vehicle or lands as the general F14/F17
    delivery; the request accepts either as long as the quadrotor case is the acceptance test.
+
+## Acceptance
+
+Answered 2026-09-08, before any package started, by reading the tree rather than the
+RFC's summary of it. The status above is unchanged: these are answers to the three
+questions, not an acceptance of the packages. Nothing here is implemented.
+
+### 1. The appended state does not need a successor to ADR-0002
+
+**Decision: no successor ADR. The four rotor-speed states and the optional battery
+state live as a model-owned extension vector appended after index 12 of the
+thirteen-component rigid-body state, as the request prefers. WP1 proceeds without a
+stop.**
+
+Four reasons, in the order they carry weight.
+
+*ADR-0002's normative text does not reach the question.* What it fixes is the identity
+and order of thirteen components — "the order in which the components are stored,
+integrated, fingerprinted and serialised" — and the consequence it protects is that
+changing that order "changes the meaning of every exported A, B, C, D matrix and is a
+major-version event". Appending after index 12 permutes nothing and changes the meaning
+of no matrix already exported. The record's "Revisit when: Never" guards the ordering as
+a compatibility surface, and an appended vector does not touch it.
+
+*The decision has already been taken, in the header ADR-0002 governs.*
+`include/galata/core/state.hpp` names this exact case: the rigid-body state "carries no
+structural modes, no fuel slosh, no rotor or propeller dynamics, and no engine state. A
+model needing those carries them alongside, not inside." The quadrotor is the anticipated
+case, not one argued by analogy. A successor ADR would restate a rule already written.
+
+*The ADR index's own test excludes it.* `docs/adr/README.md` admits "a decision that a
+stranger would have made differently, or that costs something real to reverse"; a
+decision that follows from a rule already recorded does not get a record.
+
+*There is a precedent for exactly this shape.* RFC-0001 names ADR-0004 in its Affects
+line, resolves its open questions in an acceptance block written into the RFC, and merged
+`src/synth/` without amending ADR-0004.
+
+Three things the question did not ask, found while answering it. They are recorded here
+because each falls due inside a package below.
+
+**(a) `include/galata/core/state.hpp` contradicts ADR-0002 and must be corrected in WP1.**
+The header says of the thirteen components: "This is the row and column order of every A
+and B matrix galata produces". ADR-0002 says it is "**not** the row and column order of
+the A and B matrices galata produces", because `linearize.finitediff` exports twelve Euler
+coordinates and a reduced set of those. ADR-0002 is right and the header is wrong. No gate
+catches it — `scripts/check-doc-references.sh` resolves names, not claims — and WP1 makes
+the false sentence worse by adding a model whose exported width is neither thirteen nor
+twelve. The one-line correction ships in WP1's first commit, not as a separate concern.
+
+**(b) ADR-0013's channel cap, not ADR-0002, is what the battery variant runs into.**
+`include/galata/modeling/linear_adapter.hpp` sets `kMaxLinearChannels = 16` and
+`src/modeling/linear_adapter.cpp` refuses more: "linear graph supports at most 16 states,
+inputs and outputs". Souxmar's already-working export declares exactly sixteen states, so
+the fixed-voltage quadrotor sits precisely at the cap and one battery state puts it one
+over. `model.linear.statespace` is unaffected — `src/model/linear_system.cpp` imposes no
+state-count limit of any kind, only squareness, name-count agreement, shape agreement and
+finiteness — so `analyze.*` and `sim.linear` read a seventeen-state model unchanged. What
+the battery variant loses is the typed linear-graph path. That is an ADR-0013 question,
+it falls due in WP2 and not in WP1, and it is raised here rather than absorbed.
+
+**(c) WP2's attitude-error chart is an addition, not a replacement.** It needs no ADR on
+the condition that it lands beside the existing twelve-coordinate Euler path rather than
+changing what `linearize.finitediff` exports for the NT-33A. If implementation finds that
+the two cannot coexist, that is a contract change and it stops for a record.
+
+### 2. No published quadrotor reference anchors WP1
+
+**Decision: none. Cases 1 to 5 are anchored to closed-form invariants, and case 6 is a
+cross-implementation agreement, not a validation. `model.quadrotor` registers as
+implemented-unvalidated, and the case registry carries case 6 as self-consistent.**
+
+This is not a gap left open for want of looking. Charter rule 8 says plainly that where no
+published value can be found, the V&V report marks the case unvalidated, and that "an
+honest 'unvalidated' is worth more than a fabricated match". The repository already holds
+the precedent for the honest form: `rigid_body.conservation` is a validated case whose
+reference is exact mathematics rather than a document, and `analyze.freqresp` records that
+"the reference is arithmetic, not a document". Hover balance, free fall, torque signs,
+torque-free conservation and step refinement are all invariants of the equations, checkable
+to round-off without an author. That is what cases 1 to 5 rest on, and it is a stronger
+anchor than a transcribed table would be.
+
+What none of them anchors is the *parameter set* — no published source is being claimed for
+a 650 mm quadrotor's k_T, k_Q or drag. That is why `model.quadrotor` enters the registry
+unvalidated rather than validated, and why the model's `WHAT THIS IS NOT` block must say
+that a completed run of it is not evidence about any real aircraft.
+
+Two consequences for how case 6 is built, both found by reading the fixture.
+
+**The trajectory is not committed as data.** ADR-0007 draws its line between quoting a
+scalar RESULT and shipping a DATASET, and keeps datasets to US Government primary sources,
+routing everything else to "a loader plus fetch instructions, never as data". Souxmar's
+sampled trajectory is a dataset by that test, and its rights position is not merely
+unfavourable but unestablished — the source tree carries no licence file at all. So case 6
+reads the fixture from its declared path, states in its own skip message why it did not run
+when the path is absent, and the RFC's published regeneration command is the fetch
+instruction. Both trajectories are retained under the run outputs, which are build
+artefacts, not committed reference data. A decimated copy in `tests/` would be the same
+dataset in a directory whose loader happens not to ask for a citation header, and that is
+using a gate's boundary to escape a policy.
+
+**Case 6's tolerance has a floor that is not model error, and it must be named before the
+first number is read.** The two implementations differ in integration scheme, not only in
+model: Souxmar's rotor lag is exact and sampled at the stages, galata's is an ODE state
+carried through fixed-step RK4. The fixture's own retained gate results already show the
+signature — a rotor-channel relative error near 6e-7 while attitude and body-rate errors
+sit at round-off. The budget is stated as that floor plus the step-refinement bound, and it
+is attributed to the scheme in the case note. It is not widened afterwards to fit a result.
+
+### 3. WP5 lands under vehicle-neutral capability names, with the quadrotor as its acceptance test
+
+**Decision: general. The discrete-time work registers under vehicle-neutral ids, and the
+quadrotor is the case that must pass before any of them is called done.**
+
+The registry is organised by verb, not by vehicle: every registered id carries a verb
+prefix — `model`, `analyze`, `synth`, `sim`, `report`, `trim`, `linearize` — and none
+names a programme. A `sim.quadrotor.discrete` would be the first, and the cost of undoing a
+capability name is a compatibility break for every study file that dispatches through it,
+whereas the cost of a general name that later needs narrowing is nothing. Where the tree
+does admit a class segment is under `model.`: `model.aircraft.derivatives` is a registered
+id today, which is the precedent `model.quadrotor` follows. The rule this fixes: a
+model-class segment is allowed under `model.`, and is not used under `sim.`, `synth.`,
+`analyze.`, `trim.` or `linearize.`.
+
+One correction to how this must be written up. WP5 implements the proposed work of F14 and
+part of F17; it does not deliver either row. `docs/product/FEATURES.md` states that an epic
+"cannot pass acceptance while a required dependency is unresolved", and both rows carry
+unresolved dependencies that no package here scopes. Saying WP5 "delivers F14" would be the
+present tense charter rule 2 forbids. The F-rows stay open, and the roadmap and V&V notes
+that currently record sampled execution as an open gap are amended through the generators
+rather than left to drift.
+
+### A correction to WP1's model, without which WP2 cannot pass its own criterion
+
+WP1's model paragraph gives drag on the air-relative body velocity with linear and
+quadratic coefficients per axis, and lists "per-axis linear and quadratic drag" among the
+YAML keys. There is no angular drag term anywhere in it. WP2's verification then requires
+the hover linearisation to show "drag-only decay rates on the translational **and
+rotational** axes". Those two cannot both hold: with no angular drag the body-rate axes
+have no decay, the hover A matrix has nine zero eigenvalues rather than six, and WP2's
+stated acceptance criterion is unsatisfiable by WP1's stated model.
+
+The fixture settles which side is wrong. Souxmar's plant carries an explicit per-axis
+angular drag parameter, its exported hover A matrix carries the corresponding body-rate
+diagonal terms, and its retained eigenvalues show six zeros and three separate rotational
+decay rates — not nine zeros. Case 6 compares an open-loop trajectory against that plant,
+so a WP1 model without angular drag would also disagree with the fixture by construction,
+in a way no tolerance should be widened to accommodate.
+
+**WP1's schema therefore carries a per-axis angular drag coefficient alongside the
+translational ones, with the same rejection rules.** This is recorded as a correction to
+the RFC rather than absorbed silently into the implementation, because it changes the model
+the packages were requested against.
