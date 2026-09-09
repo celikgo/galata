@@ -667,31 +667,114 @@ CONFIGURED LOCAL RUN and by nothing else. The consequence for the two locks
 below is concrete: a future change on either side of the altitude convention
 will not turn any CI job red. Someone must run with the fixture configured.
 
-The run that establishes them, recorded so it can be repeated and contradicted:
+The run that establishes them, recorded so it can be repeated and contradicted.
+**The revision actually tested is `7dd36f7`** — the branch head, not the merge
+commit — and the record says so rather than quietly attributing the run to a
+commit that did not exist when it was made:
 
 ```text
-commit    7d424ab80123bef2d91c6a147c02b91fb019e0fb
+revision  7dd36f7e1650af58551838e69e460730a2de0f71   (branch head; the tested tree)
 platform  Darwin arm64, AppleClang 21.0.0.21000099, CMAKE_BUILD_TYPE=Debug
 fixture   /Users/celikgo/souxmar/outputs/galata_bridge
           quad_hover_ned_frd.yaml
             sha256 ff99b38542b4308c6448c7b7cc3986f8eab0b1bc17c9ee5c4461c4b5563e2f4d
           reference_trajectory.csv
             sha256 b0329175e8ff1330ca7334827beff5f1225a3830a05f7cd60804d2fe72b75e85
-evidence  build/dev/souxmar-cross-check/cross-check.xml   (gtest XML, retained
-          in the build tree — it is the output of a run, not committed data)
+result    both cases passed
+evidence  build/dev/souxmar-cross-check/cross-check-7dd36f7.xml
+            sha256 a21a0a6baa34dbb7d2be6f03bac2d09424abb915b6b177e047e07f91d2ae10dc
+          gtest XML, retained in the build tree and NOT committed — it is the
+          output of a run, and ADR-0007's reasoning about the fixture applies to
+          it too. The digest is what makes it citable: the file is named after
+          the revision it tested, and the digest says which bytes carry that name.
 
 cmake -S . -B build/dev -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
 cmake --build build/dev --target galata_validation_tests
 ./build/dev/tests/validation/galata_validation_tests \
   --gtest_filter='*Souxmar*' \
-  --gtest_output=xml:build/dev/souxmar-cross-check/cross-check.xml
+  --gtest_output=xml:build/dev/souxmar-cross-check/cross-check-7dd36f7.xml
 ```
+
+**The merge commit is recorded separately, and its equivalence to the tested
+revision is verified rather than asserted:**
+
+```text
+merge     https://github.com/celikgo/galata/commit/7ad9ff6d095046881775254e0066d3ed3544dabb
+tree      identical — `git diff --quiet 7ad9ff6 7dd36f7` is empty; both trees hash to 3dadaffde956c5e48f9d50df2c77af30d4916359
+```
+
+A squash merge rewrites the commit but need not rewrite the tree, and "need not"
+is not "does not": a maintainer can amend during merge, and a conflict
+resolution changes content while preserving the appearance of a fast-forward.
+The tested revision is therefore stated first and on its own, and the merge
+commit inherits its evidence only for as long as the diff above stays empty. If
+it is ever non-empty, the merge commit is untested by this record and the run
+must be repeated against it.
+
+**An earlier draft of this block cited `7d424ab`, and that citation could not
+have been sound.** `7d424ab` is an ancestor of `7dd36f7`, but six commits
+followed it, and two of them changed what the retained XML would contain.
+`cc18b0c` introduced `fixture_sha256` itself — so a run at `7d424ab` emitted no
+such property, and this paragraph's own claim that the XML identifies its bytes
+was describing an artefact that did not exist. `0586fc1` rewrote the
+`altitude_row_disagreement` property string, so that run's XML would carry
+superseded wording for the one entry the altitude lock exists to hold. The
+digests were right and the fixture bytes never moved; the revision that consumed
+them was stale, which is a different defect and a quieter one.
+
+Nothing numerical moved between the two revisions, and that was checked rather
+than assumed: the only change after `7d424ab` reaching the compared path is
+`a631737`'s `trim.battery_state_of_charge_frozen = model.has_battery()`, a
+metadata field assigned after the solve that enters no residual, no matrix and
+no compared entry. The rest was prose, a failure message and a recorded-property
+string. So the re-run confirms rather than revises. **It was still necessary**,
+because an evidence record whose cited artefact cannot carry the properties the
+prose quotes is not evidence, however right its numbers turn out to be — which
+is the same argument, turned on this record, that `cc18b0c` made about paths.
 
 Both digests are recorded by the cases themselves as `fixture_sha256`, so the
 XML identifies the bytes it read rather than only the path it read them from —
 an uncommitted fixture at a stable path is not an identification, and two runs
 citing that path can have consumed different files. Every measured figure quoted
 by name above is read from that XML.
+
+**Hosted CI, and what it does and does not cover.** The branch merged green:
+
+```text
+run      https://github.com/celikgo/galata/actions/runs/34307091050
+head     7dd36f7e1650af58551838e69e460730a2de0f71   (the revision CI tested)
+merge    https://github.com/celikgo/galata/commit/7ad9ff6d095046881775254e0066d3ed3544dabb                        (tree equality verified above)
+result   success — 11 checks, 0 failed
+         Charter gates · Format · Engine (linux-gcc, linux-clang, macos)
+         Determinism (Fingerprint linux, Fingerprint macos, Tier 2)
+         Clang static analyzer · ASan/UBSan
+tests    512/512 passed on linux-gcc and on linux-clang, 544/544 on macos
+         (macos is higher only because ConnectionEditing, DiagramEditing and
+         DiagramRouting build there and nowhere else)
+```
+
+CI and the fixture run tested the SAME revision, `7dd36f7`, by different means
+and over disjoint sets of cases. That is what makes the two records comparable;
+it is not what makes either cover the other.
+
+**The green run does not cover the two cross-checks above, and the count says
+so.** `512 passed` is `512 of 512 that RAN`; both Souxmar cases report `Skipped`
+on every hosted job, for the reason recorded above, and a skip is not a pass.
+The two bodies of evidence are disjoint: hosted CI establishes everything except
+the two cases that carry the coordinate contract and the altitude lock, and the
+configured local run at `7dd36f7` establishes exactly those two and nothing
+else. Neither substitutes for the other. A reader who takes the green badge as
+covering WP2 in full has read it wrong, and the concrete consequence is the one
+already stated: a future change on either side of the altitude convention turns
+no CI job red.
+
+Five generated artefacts are regenerated and diffed by that run, all on
+`Engine (linux-gcc)`, which is why they read `skipped` on the other two legs —
+a matrix condition, not an absent check: `docs/VERIFICATION.md`, the README
+capability table, `docs/assets/modal-map.json`, `docs/assets/nt33a-fc1-run.json`
+and `docs/reports/nt33a-fc1.html`. A sixth committed generated artefact,
+`docs/assets/social-preview.svg`/`.png`, is gated by nothing; that gap predates
+this work and is tracked at issue #14.
 
 The contracts are held in the `unit` tier by `HoverTrim.*` and
 `ExtendedLinearize.*`, which cover the refusals — an over-actuated vehicle, an
