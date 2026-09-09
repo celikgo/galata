@@ -166,6 +166,9 @@ HoverTrim trim_hover(const model::Quadrotor& model, const HoverTrimRequest& requ
   trim.air_relative_velocity_body_m_s = trim.extended_state.segment<3>(core::kVelocityU);
   trim.airspeed_m_s = trim.air_relative_velocity_body_m_s.norm();
   trim.battery_state_of_charge = request.battery_state_of_charge;
+  // Held, not solved — and the residual above never saw that row. Recorded so
+  // the exported evidence can say so outright.
+  trim.battery_state_of_charge_frozen = model.has_battery();
   trim.residual_norm = solved.residual_norm;
   trim.residual_tolerance = request.residual_tolerance;
   trim.newton_iterations = request.iterations;

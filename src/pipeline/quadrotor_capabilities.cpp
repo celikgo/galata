@@ -180,6 +180,18 @@ std::string evidence_for(const trim::HoverTrim& point,
   out << "  airspeed_m_s: " << point.airspeed_m_s << "\n";
   out << "  battery_state_of_charge: " << point.battery_state_of_charge << "\n";
   out << "  residual_norm: " << point.residual_norm << "\n";
+  // Which coordinates this residual DOES NOT COVER. A trim that is an
+  // equilibrium in six coordinates and a held value in a seventh must say so
+  // here, or a reader takes the residual as covering every row of the state.
+  out << "  frozen_states:\n";
+  if (!point.battery_state_of_charge_frozen) {
+    out << "    []\n";
+  } else {
+    out << "    - name: \"battery_soc\"\n";
+    out << "      held_at: " << point.battery_state_of_charge << "\n";
+    out << "      excluded_from_residual: true\n";
+    out << "      reason: \"a powered battery has no zero-energy-derivative equilibrium\"\n";
+  }
   out << "  residual_tolerance: " << point.residual_tolerance << "\n";
   out << "  newton_iterations: " << point.newton_iterations << "\n";
   out << "  jacobian_condition_number: " << point.jacobian_condition_number << "\n";

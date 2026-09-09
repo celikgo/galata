@@ -165,6 +165,13 @@ TEST_F(QuadrotorWorkflow, TheOperatingPointTravelsWithTheMatricesAsItsOwnEvidenc
   EXPECT_GT(node["trim"]["smallest_rotor_margin_fraction"].as<double>(), 0.0);
   EXPECT_EQ(node["trim"]["extended_state"].size(), 17u);
 
+  // The shipped model carries no battery, so nothing was frozen and the
+  // residual covers every coordinate it did not deliberately exclude. The key
+  // is present and empty rather than absent: a reader must be able to tell
+  // "nothing was frozen" from "this writer does not report freezing".
+  ASSERT_TRUE(node["trim"]["frozen_states"]);
+  EXPECT_EQ(node["trim"]["frozen_states"].size(), 0u);
+
   ASSERT_TRUE(node["linearisation"]);
   EXPECT_LE(node["linearisation"]["equilibrium_residual_norm"].as<double>(),
             node["linearisation"]["equilibrium_tolerance"].as<double>());
@@ -240,6 +247,17 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   // audited rather than merely trusted.
   EXPECT_LT(system.a.row(16).cwiseAbs().maxCoeff(), 1e-12);
   const YAML::Node node = YAML::Load(read_file_bytes((output / "operating-point.yaml").string()));
+
+  // BOTH stages freeze it, and both say so. The trim held the state of charge
+  // and excluded its row from the residual; without this marker the exported
+  // trim reads as an equilibrium in a coordinate the solver never balanced.
+  const YAML::Node trim_frozen = node["trim"]["frozen_states"];
+  ASSERT_EQ(trim_frozen.size(), 1u);
+  EXPECT_EQ(trim_frozen[0]["name"].as<std::string>(), "battery_soc");
+  EXPECT_TRUE(trim_frozen[0]["excluded_from_residual"].as<bool>());
+  EXPECT_DOUBLE_EQ(trim_frozen[0]["held_at"].as<double>(),
+                   node["trim"]["battery_state_of_charge"].as<double>());
+
   const YAML::Node frozen = node["linearisation"]["frozen_states"];
   ASSERT_EQ(frozen.size(), 1u);
   EXPECT_EQ(frozen[0]["name"].as<std::string>(), "battery_soc");

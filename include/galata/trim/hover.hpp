@@ -133,6 +133,17 @@ struct HoverTrim {
   double airspeed_m_s = 0.0;                                                 // m/s
   double battery_state_of_charge = 1.0;
 
+  // TRUE when the model carries a battery, and therefore when the state of
+  // charge above is a real extended-state coordinate that was HELD at its
+  // declared value rather than solved for. The trim residual excludes that row
+  // — a powered pack has no zero-energy-derivative equilibrium — so this point
+  // is an equilibrium in the six dynamic coordinates and is NOT one in the
+  // battery coordinate. A reader who does not know the row was excluded would
+  // read this as an equilibrium in a coordinate the solver never balanced,
+  // which is why the freeze is recorded here and exported rather than left to
+  // be inferred from the presence of a battery block in the model file.
+  bool battery_state_of_charge_frozen = false;
+
   // Charter rule 9: the evidence travels with the number.
   double residual_norm = 0.0;
   double residual_tolerance = 1e-10;
