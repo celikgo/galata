@@ -91,13 +91,18 @@ class QuadrotorWorkflow : public ::testing::Test {
              "{system: {from: linear}, path: quad-hover.yaml}\n";
   }
 
-  // The consuming study: the existing loader, then the existing analysis.
+  // The consuming study: the existing loader, then the existing analysis and the
+  // existing simulation, both unchanged. RFC-0002 requires that `analyze.*` and
+  // `sim.linear` consume the quadrotor without modification, so the point of
+  // this chain is that nothing in it was written for a multirotor.
   static std::string reload_chain() {
     return "version: 1\nstages:\n"
            "  - id: reloaded\n    capability: model.linear.statespace\n    input: "
            "{path: output/quad-hover.yaml}\n"
            "  - id: modes\n    capability: analyze.modes\n    input: "
-           "{system: {from: reloaded}, classify: false}\n";
+           "{system: {from: reloaded}, classify: false}\n"
+           "  - id: response\n    capability: sim.linear\n    input: "
+           "{system: {from: reloaded}, step_s: 0.002, steps: 500, sample_stride: 25}\n";
   }
 };
 
@@ -134,10 +139,13 @@ TEST_F(QuadrotorWorkflow, TheChainRunsAndTheExportIsReadBackByTheExistingLoader)
   EXPECT_EQ(read_back.input_names, computed.input_names);
   EXPECT_EQ(read_back.output_names, computed.output_names);
 
-  // Downstream analysis consumes it unchanged. `classify: false` because these
-  // are not the fixed-wing modes and RFC-0002 says the labels must not be
-  // applied to a multirotor.
+  // Downstream analysis and simulation consume it unchanged. `classify: false`
+  // because these are not the fixed-wing modes and RFC-0002 says the labels must
+  // not be applied to a multirotor.
   EXPECT_NE(consumed.find("modes"), nullptr);
+  const Artifact* response = consumed.find("response");
+  ASSERT_NE(response, nullptr) << "sim.linear must integrate a multirotor model unchanged";
+  EXPECT_EQ(response->kind, "linear_trajectory");
 }
 
 TEST_F(QuadrotorWorkflow, TheOperatingPointTravelsWithTheMatricesAsItsOwnEvidenceFile) {
