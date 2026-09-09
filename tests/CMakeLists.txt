@@ -44,15 +44,29 @@ if(UNIX AND TARGET galata_cli)
   # build on Darwin/arm64, which is what confirms the mechanism rather than a
   # hosted-runner anomaly.
   #
-  # A 1.2 percent margin is not a margin. Three hosted sanitizer observations of
-  # the same test span 592.91 s, 600.04 s (the timeout that prompted this) and
-  # 740.55 s — a 25 percent spread on a machine nobody here controls, against a
-  # budget it exceeded twice. The job was failing on a wall clock rather than on
-  # anything numerical.
+  # A 1.2 percent margin is not a margin. Six hosted sanitizer observations of
+  # this one test are known, and they are recorded here in full rather than as
+  # the subset that makes the margin look tidiest:
   #
-  # 1500 s is about twice the widest observation and two and a half times the
-  # narrowest, which absorbs both that variance and further CLI growth while
-  # still catching a genuine hang inside half an hour.
+  #   517.44 s  passed   run 34294391692
+  #   532.09 s  passed   run 34290270469
+  #   592.91 s  passed   `main` at f19c562, under the old 600 s limit
+  #   600.04 s  TIMEOUT  run 34275003315 — the only failure of the six
+  #   632.66 s  passed   run 34295580969, under this 1500 s limit
+  #   740.55 s  passed   run 34283329227, under this 1500 s limit
+  #
+  # ELAPSED TIME IS NOT A FAILURE, and the two must not be counted together.
+  # THREE of the six exceed 600 s, but exactly ONE of them was a timeout: the
+  # 600.04 s run, which is the observation that prompted this change. The 632.66
+  # and 740.55 s runs are elapsed-time observations from jobs that PASSED under
+  # the raised limit — evidence about cost, not about correctness, and neither
+  # is a gate that let anything through. A reader who counts three exceedances
+  # as three failures is reading a variance record as a defect record.
+  #
+  # The spread is 517.44 to 740.55 s — 43 percent on a machine nobody here
+  # controls. 1500 s is about twice the widest observation and nearly three
+  # times the narrowest, which absorbs that variance and further CLI growth
+  # while still catching a genuine hang inside half an hour.
   #
   # This is a wall-clock guard on a hosted machine, NOT an error budget on a
   # computed quantity. The rule against widening a gate to make a number pass is
