@@ -6,6 +6,7 @@ galata_find_eigen()
 
 add_library(galata_linearize
   finite_difference.cpp
+  extended.cpp
 )
 add_library(galata::linearize ALIAS galata_linearize)
 

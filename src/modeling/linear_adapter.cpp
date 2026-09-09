@@ -48,7 +48,7 @@ void check_matrix_bounds(const Eigen::MatrixXd& matrix) {
   if (matrix.rows() > static_cast<Eigen::Index>(kMaxLinearChannels)
       || matrix.cols() > static_cast<Eigen::Index>(kMaxLinearChannels)) {
     throw Error(ErrorCode::ResourceLimit,
-                "linear graph supports at most 16 channels per matrix axis");
+                "linear graph supports at most 32 channels per matrix axis");
   }
 }
 
@@ -71,10 +71,15 @@ void check_names(const std::vector<std::string>& names, std::size_t& remaining_b
 }
 
 std::string channel_id(std::string_view prefix, Eigen::Index index) {
-  // Validated channels are in [0,15]; fixed width also preserves source order
-  // under the compiler's lexical ID sorting.
-  auto digits = std::to_string(index);
-  return std::string(prefix) + std::string(3 - digits.size(), '0') + digits;
+  // Validated channels are within kMaxLinearChannels, so at most two digits;
+  // fixed width also preserves source order under the compiler's lexical ID
+  // sorting. The pad is computed with max() rather than by subtraction because
+  // the subtraction is on std::size_t: a wider index than the field would wrap
+  // it and ask for a string of about eighteen quintillion zeroes.
+  const auto digits = std::to_string(index);
+  const std::size_t width = 3;
+  const std::size_t pad = width > digits.size() ? width - digits.size() : 0;
+  return std::string(prefix) + std::string(pad, '0') + digits;
 }
 
 }  // namespace
@@ -97,7 +102,7 @@ LinearGraph lower_linear_system(const model::LinearSystem& system,
       || options.initial_state.size() > static_cast<Eigen::Index>(kMaxLinearChannels)
       || options.command.size() > static_cast<Eigen::Index>(kMaxLinearChannels)) {
     throw Error(ErrorCode::ResourceLimit,
-                "linear graph supports at most 16 states, inputs and outputs");
+                "linear graph supports at most 32 states, inputs and outputs");
   }
   const auto n = system.state_count();
   const auto m = system.input_count();

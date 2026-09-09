@@ -317,7 +317,17 @@ TEST(LinearGraph, AdapterRejectsWrongShapesMissingTypesAndNonfiniteParameters) {
 }
 
 TEST(LinearGraph, AdapterChannelBoundaryIsCheckedBeforeGraphExpansion) {
-  for (const int count : {16, 17}) {
+  // ADR-0013's cap, and the record's own figure rather than whatever the
+  // constant happens to say. The two are asserted equal so that raising the cap
+  // without amending the decision fails here rather than passing quietly.
+  //
+  // It was 16, which the fixed-voltage quadrotor's hover linearisation sat
+  // exactly on; the seventeen-state battery variant sat one over and lost the
+  // typed graph path for one state. The amendment of 2026-09-08 raised it to
+  // 32, derived as half of `kMaxLinearTerms`, because a lowered state row
+  // carries n + m terms.
+  EXPECT_EQ(galata::modeling::kMaxLinearChannels, 32u);
+  for (const int count : {32, 33}) {
     galata::model::LinearSystem system;
     system.a = Eigen::MatrixXd::Zero(count, count);
     system.b = Eigen::MatrixXd::Zero(count, 1);
@@ -332,7 +342,7 @@ TEST(LinearGraph, AdapterChannelBoundaryIsCheckedBeforeGraphExpansion) {
     LinearGraphOptions options;
     options.initial_state = Eigen::VectorXd::Zero(count);
     options.command = Eigen::VectorXd::Zero(1);
-    if (count == 16) {
+    if (count == 32) {
       EXPECT_NO_THROW((void)compile_model(lower_linear_system(system, channels, options).model));
     } else {
       EXPECT_THROW((void)lower_linear_system(system, channels, options), std::exception);

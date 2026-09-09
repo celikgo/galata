@@ -27,12 +27,24 @@ there it stopped. It is filed as
 [issue 12](https://github.com/celikgo/galata/issues/12) and was never root
 caused.
 
-The price of the fourth platform is visible in this branch's history. Six of
-its nine commits — 5dcf158, ef638a8, 5b023af, b8ba5a1, 9d03aaa and 6066f2f —
-are hosted-matrix portability and diagnosis work rather than the increment they
-were meant to deliver, and the last two of those are a debug probe for the
+The price of the fourth platform is visible in the branch this record was
+written on, merged as [pull request
+11](https://github.com/celikgo/galata/pull/11). Seven of its thirteen commits —
+[5dcf158](https://github.com/celikgo/galata/commit/5dcf158f55cf29098e753407645c15b841feb693),
+[ef638a8](https://github.com/celikgo/galata/commit/ef638a8b41b9fa665806a0441ffa0c7d4a2dc727),
+[5b023af](https://github.com/celikgo/galata/commit/5b023afafff9d74dd6802cc5d93f552109a92cde),
+[b8ba5a1](https://github.com/celikgo/galata/commit/b8ba5a1297027e44e96c436175100ad16afb147e),
+[750add8](https://github.com/celikgo/galata/commit/750add82e4f79c42a291f0a91c04615eea9048f6),
+[9d03aaa](https://github.com/celikgo/galata/commit/9d03aaa09484b2c5f7d9b18aefa675fb1a26ecf5)
+and
+[6066f2f](https://github.com/celikgo/galata/commit/6066f2f2fefa82cd16af6ff45f3fb1c47ffb33af)
+— are hosted-matrix portability and diagnosis work rather than the increment
+they were meant to deliver, and the last two of those are a debug probe for the
 Windows failure and its revert. Each attempt is a round trip through a runner
-nobody here can attach a debugger to.
+nobody here can attach a debugger to. That branch was squash-merged as
+`f19c562` and then deleted, so none of those seven commits is reachable from
+main; they survive on the pull request, and `git fetch origin refs/pull/11/head`
+brings them into a clone.
 
 Meanwhile [the product plan](../PRODUCT_PLAN.md) already records that delivery
 prioritises macOS, then Linux, per user direction. Nobody uses galata on
@@ -101,9 +113,11 @@ stranger would pick, and it has the better argument on the merits: a fault that
 appears only in a relocated installed package is the shape of a real defect —
 a mismatched runtime, two yaml-cpp copies resolved at load time, an ODR
 violation — and such a defect can be latent on every platform while visible on
-one. This branch has already been the beneficiary of exactly that effect twice,
-in 5b023af and b8ba5a1, where a compiler galata does not develop on found a
-dangling reference and an uninitialised read that the local toolchain did not.
+one. That branch has already been the beneficiary of exactly that effect twice,
+in [5b023af](https://github.com/celikgo/galata/commit/5b023afafff9d74dd6802cc5d93f552109a92cde)
+and [b8ba5a1](https://github.com/celikgo/galata/commit/b8ba5a1297027e44e96c436175100ad16afb147e),
+where a compiler galata does not develop on found a dangling reference and an
+uninitialised read that the local toolchain did not.
 Against that: the failure reproduces only on a hosted runner, and two commits
 were spent merely obtaining a legible symptom, which established what the
 defect is *not* and left the question of which yaml-cpp the installed consumer
@@ -172,8 +186,8 @@ suffix, dependency-DLL staging and zip selection in
 `scripts/check-install.py` and `scripts/check-release-archive.py`; the expected
 platform set in `scripts/check-release-evidence.py`; the supports expression in
 `vcpkg.json`; and the Platform entry in the bug-report template. None of that
-is difficult, and all of it is recoverable from this branch's diff. What is not
-recoverable that way is the reason the leg was red: restoring Windows means
+is difficult, and all of it is recoverable from the diff of `f19c562`. What is
+not recoverable that way is the reason the leg was red: restoring Windows means
 starting from issue 12, not from a green build.
 
 ## Revisit when

@@ -190,6 +190,124 @@ const std::vector<Case>& validation_cases() {
        "magnitude. A transposed direction-cosine matrix conserves the magnitude and fails "
        "this. Drift measured below."},
 
+      {"quadrotor.invariants",
+       "Multirotor plant against the exact invariants of its own equations",
+       {},
+       "Exact invariants of the multirotor equations of motion",
+       Status::Validated,
+       {E{kValidation, "QuadrotorHover.EqualSpeedsCarryTheWeightAndProduceNoMoment"},
+        E{kValidation, "QuadrotorFreeFall.ZeroRotorSpeedGivesZeroSpecificForceAndOneGeeDown"},
+        E{kValidation,
+          "QuadrotorTorqueSigns.DifferentialThrustDrivesTheExpectedAxisAndOnlyThatAxis"},
+        E{kValidation, "QuadrotorTorqueFree.RotorsOffAndDragOffConservesEnergyAndAngularMomentum"},
+        E{kValidation,
+          "QuadrotorStepRefinement.HalvingTheStepConvergesAtFourthOrderOverAManoeuvre"}},
+       "Validated against mathematics rather than a document, as the torque-free case above "
+       "is. These bound the equations, not the parameter set: no published source anchors "
+       "the coefficients, so `model.quadrotor` is registered implemented-unvalidated and a "
+       "completed run of it is evidence about the equations and never about an aircraft. The "
+       "torque-signs case earns its keep on the axes that must stay SILENT — a transposed "
+       "cross product leaves the driven axis looking healthy."},
+
+      {"quadrotor.cross_implementation",
+       "Multirotor plant against an independent implementation, open loop with wind",
+       {"model.quadrotor"},
+       "Souxmar forest-ISR programme, independent nonlinear quadrotor plant; not a published "
+       "source",
+       Status::SelfConsistent,
+       {E{kValidation, "QuadrotorCrossImplementation.ReproducesTheSouxmarOpenLoopTrajectory"}},
+       "Agreement between two implementations of the same equations, which is not validation "
+       "and is recorded as self-consistent for that reason. The fixture is not committed: it "
+       "is a dataset whose rights position is unestablished, so ADR-0007 routes it to a "
+       "loader plus fetch instructions and the case states why it did not run when the path "
+       "is absent. Its rotor channel carries an integration-scheme floor — the fixture "
+       "samples an exact first-order lag at the RK stages where galata carries the lag as an "
+       "ODE state — and that floor is attributed in the case rather than absorbed into the "
+       "budget. Finding, recorded: the wind step is a discontinuity in an air-relative "
+       "velocity state and not in the fixture's ground-velocity one, so the case re-bases "
+       "across it; a caller that does not is silently wrong by the whole wind increment."},
+
+      {"quadrotor.hover_trim",
+       "Multirotor equilibrium — still air, crosswind, cruise, and unequal rotor speeds",
+       {"trim.hover"},
+       "Exact conditions of equilibrium for the multirotor equations",
+       Status::Validated,
+       {E{kValidation,
+          "QuadrotorHoverTrim.StillAirCrosswindCruiseAndUnequalRotorsSolveToTheirDeclaredBudget"},
+        E{kUnit, "HoverTrim.ATrimNeedingMoreRotorThanTheVehicleHasIsRefusedNotReturned"},
+        E{kUnit, "HoverTrim.AnOverActuatedVehicleIsRefusedRatherThanAllocatedArbitrarily"}},
+       "Validated against mathematics rather than a document, as the invariants case above "
+       "is. The four conditions solve to their declared residual budget and the rotor speeds "
+       "sit on the closed-form hover speed; the crosswind and cruise cases are the same "
+       "air-relative condition with the tilt reversed, which is the sign a transposed "
+       "rotation would pass every other check and fail here. Two REFUSALS carry as much "
+       "weight as the answers: an over-actuated vehicle is refused because six equations and "
+       "eight unknowns leave a null space a Newton solve would resolve arbitrarily, and an "
+       "infeasible trim is refused rather than returned with a note, because a best effort "
+       "reported as a trim gets linearised. State of charge is frozen and excluded from the "
+       "residual: a powered battery has no zero-energy-derivative equilibrium, so requiring "
+       "one would make every trim infeasible for a reason that has nothing to do with "
+       "flight."},
+
+      {"quadrotor.hover_linearisation",
+       "Hover linearisation on a local attitude-error chart — pole structure, control gain, "
+       "disturbance feedthrough, and agreement with the nonlinear plant",
+       {"linearize.extended"},
+       "Closed forms derived from the model's own parameters",
+       Status::Validated,
+       {E{kValidation,
+          "QuadrotorHoverLinearisation."
+          "PoleStructureIsSixIntegratorsThreeDragPairsAndFourRotorLags"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation.CollectiveVerticalGainMatchesTheClosedFormAndActsUpward"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation.WindColumnsCarryTheDragFeedthroughAtFixedGroundVelocity"},
+        E{kValidation,
+          "QuadrotorHoverLinearisation."
+          "LinearAndNonlinearAgreeWithinTheSecondOrderBoundOverOneSecond"},
+        E{kUnit,
+          "ExtendedLinearize.TheChartIsRegularAtNinetyDegreesOfPitchWhereTheEulerChartIsNot"}},
+       "Every gate is a closed form in the model's parameters — a drag coefficient over a "
+       "mass, a reciprocal time constant, a thrust slope — compared against a "
+       "finite-difference Jacobian that was not told the answer. The pole structure is six "
+       "integrators from position and attitude, three translational and three rotational "
+       "drag rates, and four rotor lags at -1/tau; the collective vertical gain is "
+       "8 k_T omega_h / m and is gated on its SIGN as well as its magnitude, because a model "
+       "with it inverted hovers, trims and produces a plausible pole map while climbing when "
+       "commanded to descend. Two findings, recorded rather than absorbed. The translational "
+       "entries carry a FIRST-order finite-difference error, not a second-order one, because "
+       "the quadratic drag term is once differentiable and not twice at zero airspeed; the "
+       "budget is derived from that kink and the Richardson estimate cannot see it. And the "
+       "chart's coordinates are all zero at the nominal, which defeats the shared Jacobian's "
+       "relative-step rule and cost the rotor-lag entries eight digits to cancellation until "
+       "the step floors were derived from the state each coordinate perturbs."},
+
+      {"quadrotor.hover_linearisation_cross_implementation",
+       "Hover linearisation against an independent implementation's exported A, B, C and D",
+       {"linearize.extended", "model.linear.statespace"},
+       "Souxmar forest-ISR programme, independent quadrotor linearisation exported as a named "
+       "state-space file; not a published source",
+       Status::SelfConsistent,
+       {E{kValidation, "QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport"}},
+       "Agreement between two implementations, which is not validation and is recorded as "
+       "self-consistent for that reason. It is the only case here that could catch a shared "
+       "mistake in galata's own reasoning about the chart, because the other implementation "
+       "trims and linearises in ENU/FLU with its own code and reaches these conventions by an "
+       "explicit similarity. It is also the check on the COORDINATE CONTRACT: the other "
+       "programme names its velocity states ground-relative and reports the wind-to-specific-force "
+       "drag feedthrough in D with a zero D block against its own ground-velocity outputs and "
+       "zero wind columns in its position rows. Had galata taken the wind at fixed air-relative "
+       "velocity, three of those blocks would be zero where this one is not and one would be "
+       "nonzero where this one is zero. The budget is derived from both implementations' "
+       "finite-difference error before comparing, never from their agreement, and the fixture is "
+       "not committed: ADR-0007 routes it to a path plus regeneration instructions and the case "
+       "states why it did not run when the path is absent. Finding, localised and published "
+       "rather than absorbed: the reference's tenth output is named `altitude_down_m` and selects "
+       "+1 on the NED down state, so it reports the down coordinate where galata's `Altitude` "
+       "reports altitude positive up. galata does not change — absorbing a factor of -1 into a "
+       "numerical budget would be absorbing a sign error — and the row is held by a two-sided "
+       "check that fails if the disagreement disappears as well as if it grows."},
+
       {"rigid_body.aerodynamic_forces",
        "Six-degree-of-freedom equations with aerodynamic forces",
        {},

@@ -16,6 +16,7 @@
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
+#include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/registry.hpp"
 #include "galata/trim/level.hpp"
@@ -128,6 +129,29 @@ Artifact load_aircraft_model(const StageContext& context) {
   artifact.kind = "aircraft";
   artifact.summary = summary.str();
   artifact.payload = aircraft;
+  return artifact;
+}
+
+// --- model.quadrotor -------------------------------------------------------
+
+Artifact load_quadrotor_model(const StageContext& context) {
+  const std::string path = context.resolve_input_path(context.input->string_at("path"));
+  const model::Quadrotor quadrotor =
+      model::parse_quadrotor(context.read_input(context.input->string_at("path")), path);
+
+  std::ostringstream summary;
+  summary << quadrotor.rotor_count() << " rotors, " << quadrotor.extended_state_size() << " states";
+  if (!quadrotor.has_battery()) {
+    summary << ", fixed voltage";
+  }
+  if (!quadrotor.description.empty()) {
+    summary << " — " << quadrotor.description;
+  }
+
+  Artifact artifact;
+  artifact.kind = "quadrotor";
+  artifact.summary = summary.str();
+  artifact.payload = quadrotor;
   return artifact;
 }
 
@@ -945,6 +969,19 @@ Registry build_registry() {
                  {"path"},
                  {"path"}});
 
+  // ImplementedUnvalidated, deliberately. The validation cases behind this model
+  // are exact invariants of its own equations and a cross-check against an
+  // independent implementation; neither is a published reference, and RFC-0002's
+  // acceptance section records why none anchors it.
+  registry.add(Capability{"model.quadrotor",
+                          "Load a nonlinear multirotor plant — rotors with first-order speed lag, "
+                          "per-axis drag and an optional battery",
+                          "quadrotor",
+                          Capability::State::ImplementedUnvalidated,
+                          load_quadrotor_model,
+                          {"path"},
+                          {"path"}});
+
   registry.add(Capability{
       "trim.level",
       "Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator "
@@ -1035,6 +1072,7 @@ Registry build_registry() {
 
   register_design_capabilities(registry);
   register_model_capabilities(registry);
+  register_quadrotor_capabilities(registry);
   return registry;
 }
 

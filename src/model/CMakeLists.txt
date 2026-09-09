@@ -9,6 +9,7 @@ find_package(yaml-cpp CONFIG REQUIRED)
 add_library(galata_model
   linear_system.cpp
   aircraft.cpp
+  quadrotor.cpp
 )
 add_library(galata::model ALIAS galata_model)
 

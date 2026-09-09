@@ -13,6 +13,9 @@
 # The reference data is read at run time rather than compiled in, so that a
 # reviewer can diff the transcription against the source document without
 # recompiling, and so the citation header travels with the numbers.
+set(GALATA_SOUXMAR_FIXTURE_DIR "" CACHE PATH
+    "Directory holding the Souxmar cross-implementation fixture; empty disables that case")
+
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/validation_config.hpp.in"
   "${CMAKE_CURRENT_BINARY_DIR}/validation_config.hpp"
@@ -29,6 +32,8 @@ add_executable(galata_validation_tests
   test_sensitivity_bounds.cpp
   test_case_registry.cpp
   test_care_slicot.cpp
+  test_quadrotor_plant.cpp
+  test_quadrotor_hover_linearisation.cpp
 )
 
 target_include_directories(galata_validation_tests
@@ -45,6 +50,7 @@ target_link_libraries(galata_validation_tests
     galata::analyze
     galata::trim
     galata::linearize
+    galata::model
     galata::synth
     galata::validation_reference
     galata::pipeline
