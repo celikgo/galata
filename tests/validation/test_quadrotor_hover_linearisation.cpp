@@ -907,13 +907,28 @@ TEST(QuadrotorHoverLinearisation, MatricesAgreeWithTheIndependentSouxmarExport) 
   // consistent; they are different quantities under similar names, and the other
   // programme's name has `down` in it.
   //
-  // galata does not change. Altitude positive up is the ordinary meaning of the
+  // NEITHER SIDE CHANGES, and that is a decision rather than an omission.
+  //
+  // galata does not change: altitude positive up is the ordinary meaning of the
   // word, the observation model's header states it, and ADR-0002's down axis
   // points down. Absorbing a factor of -1 into a numerical budget would be
-  // absorbing a SIGN ERROR, which is the one thing a budget must never hide, so
-  // charter rule 3 applies: the deviation is localised, published, and held by a
-  // two-sided check that fails if the disagreement disappears as well as if it
-  // grows. A change on either side is then loud rather than silent.
+  // absorbing a SIGN ERROR, which is the one thing a budget must never hide.
+  //
+  // The reference does not change either. Flipping the sign of its row would
+  // leave the file loading exactly as before — same schema, same shape, same
+  // channel name — while silently reversing what that channel MEANS for every
+  // consumer already reading it. That is a semantic compatibility break wearing
+  // the appearance of a fix, and it is the more dangerous kind precisely because
+  // no loader, schema check or round-trip test would notice. If the two
+  // programmes ever want one convention, it is a coordinated migration with a
+  // renamed channel, not a sign edit.
+  //
+  // So the mapping is DOCUMENTED rather than reconciled: the reference's tenth
+  // output is Souxmar down-position, galata's tenth output is positive-up
+  // altitude, and the two are exact negatives of each other. Charter rule 3
+  // applies — the deviation is localised, published, and held by a two-sided
+  // check that fails if the disagreement disappears as well as if it grows, so
+  // a change on either side is loud rather than silent.
   const Eigen::Index excluded_output_row = 9;
 
   double worst_relative = 0.0;
@@ -971,16 +986,24 @@ TEST(QuadrotorHoverLinearisation, MatricesAgreeWithTheIndependentSouxmarExport) 
            "coordinate, so the two rows must be exact negatives. They are not, so the "
            "disagreement is no longer only a sign and this exclusion is no longer justified.";
   }
-  // The other side of the lock: if the reference is ever corrected to report
-  // altitude positive up, its entry becomes -1, the negation above stops holding
-  // and this fails. A future fix is loud.
+  // The other side of the lock. The reference's row is EXPECTED TO STAY at +1;
+  // this is not a defect of theirs awaiting repair, it is the convention their
+  // channel name declares. If it ever becomes -1, the export has changed meaning
+  // without changing shape, and every consumer of that channel — this case
+  // included — is now reading a different quantity under the same name.
   EXPECT_DOUBLE_EQ(their_c(excluded_output_row, 2), 1.0)
-      << "the reference's altitude channel no longer selects +1 on the down state. If it now "
-         "reports altitude positive up, delete this exclusion and compare the row in bulk.";
+      << "the reference's `altitude_down_m` channel no longer selects +1 on the down state, so "
+         "it no longer reports the down coordinate its name declares. Do NOT delete this "
+         "exclusion and fold the row into the bulk comparison: a sign change here is a SEMANTIC "
+         "COMPATIBILITY BREAK that leaves the file loading unchanged, and it must be resolved "
+         "with the other programme as a coordinated migration — a renamed channel — rather than "
+         "absorbed here.";
 
   RecordProperty("fixture", path);
   RecordProperty("fixture_sha256", fixture_digest(path));
-  RecordProperty("altitude_row_disagreement", "sign only; localised, not absorbed");
+  RecordProperty("altitude_row_disagreement",
+                 "sign only; Souxmar down-position vs galata positive-up altitude; localised, "
+                 "not absorbed, and not reconciled on either side");
   RecordProperty("compared_entries", std::to_string(compared_entries));
   RecordProperty("worst_relative_disagreement", measured(worst_relative));
   RecordProperty("worst_absolute_disagreement_on_structural_zeros", measured(worst_absolute));
