@@ -568,6 +568,30 @@ with the state row of A about the same slope. Case 5 declares its perturbations,
 its horizon and its budget before it compares anything, and reports the
 agreement separately rather than folding it into the gate.
 
+**The strongest evidence is the sixth case, and it is a cross-check rather than a
+validation.** `QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport`
+reads the requesting programme's own exported model — the one this document's
+opening section says `model.linear.statespace` consumes unchanged — through the
+shipped loader, and compares it entry by entry against what `linearize.extended`
+computes. **644 entries of A, B, C and D agree to 4.2e-7 relative** against a 1e-5
+budget derived, before any comparison, from the two implementations' independent
+finite-difference errors. Agreement between two implementations is not validation
+and the registry records it as self-consistent, but this is the only case here
+that could catch a shared mistake in galata's own reasoning about the chart,
+because the other implementation trims and linearises in ENU/FLU with its own
+code and reaches these conventions by an explicit similarity.
+
+It is also the independent check on the coordinate contract, which is why it
+matters more than its status suggests. The other programme names its velocity
+states `ground_v_*` and its export carries the wind-to-specific-force
+feedthrough in D, a zero D block against its own ground-velocity outputs, and
+zero wind columns in its position rows — the same four blocks this document's
+first contract predicts. Had galata taken the wind at fixed air-relative
+velocity, three of them would be zero where the reference is not and one would
+be nonzero where the reference is zero. The fixture is not committed: ADR-0007
+routes it to a path plus regeneration instructions, and the case states why it
+did not run when the path is absent.
+
 The contracts are held in the `unit` tier by `HoverTrim.*` and
 `ExtendedLinearize.*`, which cover the refusals — an over-actuated vehicle, an
 infeasible trim, a non-equilibrium point, a malformed name list, a frozen index
@@ -580,7 +604,7 @@ adapter, and confirms every state-space file already in the tree still loads and
 still round-trips. `Determinism.HoverTrimAndItsLinearisationAreBitIdenticalAcrossRuns`
 holds ADR-0004 tier 1 over both new routines and over the exported bytes.
 
-**Three findings, raised rather than absorbed.**
+**Four findings, raised rather than absorbed.**
 
 *The hover translational entries carry a FIRST-order finite-difference error,
 not a second-order one, and the Richardson estimate cannot see it.* The
@@ -615,6 +639,20 @@ group's perturbation scale rather than by its own peak excursion, because a
 channel whose response is small — vertical velocity at hover is driven only by
 drag decay — would otherwise be held to a bound thousands of times tighter than
 the mechanism that limits it.
+
+*The reference's altitude channel reports the down coordinate, not altitude.*
+Its tenth output is named `altitude_down_m` and its C row selects `+1` on the NED
+down state; galata's `OutputKind::Altitude` is documented as positive up, which
+is `-1`. Both are internally consistent — they are different quantities under
+similar names, and the other programme's name has `down` in it. **galata does not
+change.** Altitude positive up is the ordinary meaning of the word, the
+observation model's header states it, and ADR-0002's down axis points down.
+Absorbing a factor of minus one into a numerical budget would be absorbing a sign
+error, which is the one thing a budget must never hide, so charter rule 3 applies
+and the row is excluded from the bulk comparison and held by a two-sided check
+instead: it fails if the two rows stop being exact negatives, and it fails if the
+reference's entry stops being `+1`. A correction on either side is loud rather
+than silent. This is the one entry of 667 that disagrees.
 
 **What WP2 deliberately did not do.** `linearize.finitediff` is unchanged and
 the NT-33A export is unchanged; the two charts coexist, which is the condition

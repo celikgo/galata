@@ -282,6 +282,32 @@ const std::vector<Case>& validation_cases() {
        "relative-step rule and cost the rotor-lag entries eight digits to cancellation until "
        "the step floors were derived from the state each coordinate perturbs."},
 
+      {"quadrotor.hover_linearisation_cross_implementation",
+       "Hover linearisation against an independent implementation's exported A, B, C and D",
+       {"linearize.extended", "model.linear.statespace"},
+       "Souxmar forest-ISR programme, independent quadrotor linearisation exported as a named "
+       "state-space file; not a published source",
+       Status::SelfConsistent,
+       {E{kValidation, "QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport"}},
+       "Agreement between two implementations, which is not validation and is recorded as "
+       "self-consistent for that reason. It is the only case here that could catch a shared "
+       "mistake in galata's own reasoning about the chart, because the other implementation "
+       "trims and linearises in ENU/FLU with its own code and reaches these conventions by an "
+       "explicit similarity. It is also the check on the COORDINATE CONTRACT: the other "
+       "programme names its velocity states ground-relative and reports the wind-to-specific-force "
+       "drag feedthrough in D with a zero D block against its own ground-velocity outputs and "
+       "zero wind columns in its position rows. Had galata taken the wind at fixed air-relative "
+       "velocity, three of those blocks would be zero where this one is not and one would be "
+       "nonzero where this one is zero. The budget is derived from both implementations' "
+       "finite-difference error before comparing, never from their agreement, and the fixture is "
+       "not committed: ADR-0007 routes it to a path plus regeneration instructions and the case "
+       "states why it did not run when the path is absent. Finding, localised and published "
+       "rather than absorbed: the reference's tenth output is named `altitude_down_m` and selects "
+       "+1 on the NED down state, so it reports the down coordinate where galata's `Altitude` "
+       "reports altitude positive up. galata does not change — absorbing a factor of -1 into a "
+       "numerical budget would be absorbing a sign error — and the row is held by a two-sided "
+       "check that fails if the disagreement disappears as well as if it grows."},
+
       {"rigid_body.aerodynamic_forces",
        "Six-degree-of-freedom equations with aerodynamic forces",
        {},

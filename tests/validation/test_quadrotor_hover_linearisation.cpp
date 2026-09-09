@@ -26,6 +26,7 @@
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
 #include "galata/linearize/extended.hpp"
+#include "galata/model/linear_system.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/trim/hover.hpp"
@@ -38,6 +39,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -793,4 +795,175 @@ TEST(QuadrotorHoverLinearisation, LinearAndNonlinearAgreeWithinTheSecondOrderBou
   RecordProperty("quadratic_drag_limit_z_m_s", measured(quadratic_limit_z_m_s));
   RecordProperty("budget_fraction", measured(budget_fraction));
   RecordProperty("worst_disagreement_fraction", measured(worst_fraction));
+}
+
+// --- Cross-implementation against the Souxmar export -----------------------
+//
+// THIS IS A CROSS-CHECK, NOT A VALIDATION, for the reason
+// `QuadrotorCrossImplementation.ReproducesTheSouxmarOpenLoopTrajectory` states:
+// agreement between two implementations of the same equations says nothing about
+// an aircraft. The case registry records it as self-consistent. What makes it
+// worth having anyway is that the other implementation is INDEPENDENT — a
+// separate Python plant, trimmed and linearised by its own code in ENU/FLU and
+// transformed into this repository's NED/FRD conventions by an explicit
+// similarity — so it is the only check here that could catch a shared mistake in
+// galata's own reasoning about the chart.
+//
+// IT IS ALSO THE CHECK ON THE COORDINATE CONTRACT. RFC-0002's WP2 acceptance
+// section requires D to carry a wind-to-specific-force drag feedthrough, which
+// is only possible if the wind perturbation holds the GROUND velocity fixed.
+// The other implementation names its velocity states `ground_v_*` and reports
+// exactly that feedthrough, with a zero D block against its own ground-velocity
+// outputs and zero wind columns in its position rows. If galata had taken the
+// wind at fixed air-relative velocity instead, every one of those blocks would
+// disagree — three of them by being zero where this is not, and one by being
+// nonzero where this is zero.
+//
+// The fixture is not committed: its rights position is unestablished, so ADR-0007
+// routes it to a path plus regeneration instructions and this case states why it
+// did not run when the path is absent.
+//
+// THE BUDGET, derived before the comparison and from both implementations'
+// finite-difference error rather than from their agreement. Each takes its own
+// central differences at its own step, and at hover each therefore carries the
+// first-order kink error the case above derives — the quadratic drag term is not
+// twice differentiable at zero airspeed. The other implementation's own
+// translational entry is 0.075000015625 against an exact 0.075, so its relative
+// error is 2.1e-7; galata's is 6.3e-7. Their sum bounds a disagreement that is
+// entirely method, and 1e-5 relative is an order above it: tight enough that a
+// transposed rotation, a sign error or a wrong wind convention cannot pass, loose
+// enough that two independent step choices need not match.
+//
+// Entries whose reference magnitude is below 1e-6 are compared ABSOLUTELY at
+// 1e-6, because a relative test on a structural zero measures nothing. The
+// smallest genuinely nonzero entry in the reference is 5.1e-3, so that floor sits
+// three orders below any real coupling and cannot hide one.
+TEST(QuadrotorHoverLinearisation, MatricesAgreeWithTheIndependentSouxmarExport) {
+  const std::string directory = GALATA_SOUXMAR_FIXTURE_DIR;
+  if (directory.empty()) {
+    GTEST_SKIP() << "no cross-implementation fixture configured: this case compares against an "
+                    "external programme's exported state-space model, which is not committed "
+                    "because its rights position is unestablished (ADR-0007, RFC-0002). "
+                    "Configure with -DGALATA_SOUXMAR_FIXTURE_DIR=<dir containing "
+                    "quad_hover_ned_frd.yaml>.";
+  }
+  const std::string path = directory + "/quad_hover_ned_frd.yaml";
+  if (!std::filesystem::exists(path)) {
+    GTEST_SKIP() << "cross-implementation model unavailable at " << path
+                 << ". Regenerate it with `python -m apps.galata_bridge --output "
+                    "outputs/galata_bridge --galata <galata-cli>`.";
+  }
+
+  // Read through the SHIPPED loader, unchanged. That the other programme's file
+  // is valid input to `model.linear.statespace` is half of what this case
+  // checks; RFC-0002 requires that contract to hold.
+  const galata::model::LinearSystem reference = galata::model::load_linear_system(path);
+
+  const HoverSetup setup = hover_setup();
+  const galata::model::LinearSystem computed =
+      setup.linearisation.to_linear_system("galata", "galata");
+
+  ASSERT_EQ(computed.state_count(), reference.state_count())
+      << "the two models do not even agree on how many states a hovering quadrotor has";
+  ASSERT_EQ(computed.input_count(), reference.input_count());
+  ASSERT_EQ(computed.output_count(), reference.output_count());
+
+  // The orders coincide, which is why an entry-by-entry comparison is legal:
+  // position, then velocity, then attitude error, then body rates, then rotors
+  // in the same rotor order; four commands then three NED wind columns; specific
+  // force, body rates, position, altitude, ground velocity. The NAMES differ —
+  // the other programme writes `ground_v_north_m_s` where galata writes
+  // `velocity_u_m_s`, which at a level hover is the same axis — and that
+  // difference is exactly the coordinate reading this case exists to confirm.
+  ASSERT_EQ(computed.state_count(), 16);
+
+  const double relative_budget = 1e-5;
+  const double absolute_floor = 1e-6;
+
+  // ONE OUTPUT ROW IS EXCLUDED FROM THE BULK COMPARISON AND HELD SEPARATELY
+  // BELOW. It is not a tolerance problem and it is not absorbed into one.
+  //
+  // The other implementation's tenth output is named `altitude_down_m` and its C
+  // row is +1 on the NED down state, so the quantity it reports is the DOWN
+  // COORDINATE. galata's `OutputKind::Altitude` is documented as positive up —
+  // the negative of the NED down state — which is -1. Both are internally
+  // consistent; they are different quantities under similar names, and the other
+  // programme's name has `down` in it.
+  //
+  // galata does not change. Altitude positive up is the ordinary meaning of the
+  // word, the observation model's header states it, and ADR-0002's down axis
+  // points down. Absorbing a factor of -1 into a numerical budget would be
+  // absorbing a SIGN ERROR, which is the one thing a budget must never hide, so
+  // charter rule 3 applies: the deviation is localised, published, and held by a
+  // two-sided check that fails if the disagreement disappears as well as if it
+  // grows. A change on either side is then loud rather than silent.
+  const Eigen::Index excluded_output_row = 9;
+
+  double worst_relative = 0.0;
+  double worst_absolute = 0.0;
+  int compared_entries = 0;
+
+  const auto compare =
+      [&](const char* name, const Eigen::MatrixXd& mine, const Eigen::MatrixXd& theirs) {
+        const bool is_output_matrix = name[0] == 'C' || name[0] == 'D';
+        ASSERT_EQ(mine.rows(), theirs.rows()) << name;
+        ASSERT_EQ(mine.cols(), theirs.cols()) << name;
+        for (Eigen::Index row = 0; row < mine.rows(); ++row) {
+          if (is_output_matrix && row == excluded_output_row) {
+            continue;
+          }
+          for (Eigen::Index column = 0; column < mine.cols(); ++column) {
+            const double target = theirs(row, column);
+            const double actual = mine(row, column);
+            ++compared_entries;
+            if (std::abs(target) <= absolute_floor) {
+              worst_absolute = std::fmax(worst_absolute, std::abs(actual - target));
+              EXPECT_LT(std::abs(actual - target), absolute_floor)
+                  << name << "(" << row << ", " << column << "): galata has " << actual
+                  << " where the independent implementation has a structural zero";
+              continue;
+            }
+            const double relative = std::abs(actual - target) / std::abs(target);
+            worst_relative = std::fmax(worst_relative, relative);
+            EXPECT_LT(relative, relative_budget)
+                << name << "(" << row << ", " << column << "): galata has " << actual
+                << " where the independent implementation has " << target;
+          }
+        }
+      };
+
+  compare("A", computed.a, reference.a);
+  compare("B", computed.b, reference.b);
+  compare("C", computed.output_matrix(), reference.output_matrix());
+  compare("D", computed.feedthrough_matrix(), reference.feedthrough_matrix());
+
+  // The localised deviation, held two-sidedly. Both rows are structural
+  // selectors rather than difference quotients of anything, so the relationship
+  // is exact and is asserted exactly.
+  ASSERT_EQ(computed.output_names[static_cast<std::size_t>(excluded_output_row)], "altitude_m");
+  ASSERT_EQ(reference.output_labels()[static_cast<std::size_t>(excluded_output_row)],
+            "altitude_down_m")
+      << "the excluded row is identified by position; if the reference's output order changed, "
+         "this exclusion is now hiding a different channel and must be re-derived";
+  const Eigen::MatrixXd mine_c = computed.output_matrix();
+  const Eigen::MatrixXd their_c = reference.output_matrix();
+  for (Eigen::Index column = 0; column < mine_c.cols(); ++column) {
+    EXPECT_DOUBLE_EQ(mine_c(excluded_output_row, column), -their_c(excluded_output_row, column))
+        << "altitude row, column " << column
+        << ": galata reports altitude positive UP and the reference reports the down "
+           "coordinate, so the two rows must be exact negatives. They are not, so the "
+           "disagreement is no longer only a sign and this exclusion is no longer justified.";
+  }
+  // The other side of the lock: if the reference is ever corrected to report
+  // altitude positive up, its entry becomes -1, the negation above stops holding
+  // and this fails. A future fix is loud.
+  EXPECT_DOUBLE_EQ(their_c(excluded_output_row, 2), 1.0)
+      << "the reference's altitude channel no longer selects +1 on the down state. If it now "
+         "reports altitude positive up, delete this exclusion and compare the row in bulk.";
+
+  RecordProperty("altitude_row_disagreement", "sign only; localised, not absorbed");
+  RecordProperty("compared_entries", std::to_string(compared_entries));
+  RecordProperty("worst_relative_disagreement", measured(worst_relative));
+  RecordProperty("worst_absolute_disagreement_on_structural_zeros", measured(worst_absolute));
+  RecordProperty("relative_budget", measured(relative_budget));
 }
