@@ -102,13 +102,27 @@
 // `frozen_appended_states` names those coordinates. A frozen coordinate is
 // KEPT in the chart — it is still a row and still a column, so a state that
 // reaches the dynamics through some other path keeps that path — and its OWN
-// derivative is declared zero rather than measured. That declaration is what
-// makes the linearisation exact instead of approximate: a frozen state's rate
-// is zero by construction, so there is no constant term. The rate that was
-// declared away is reported in `frozen_appended_state_rates`, so the reader can
-// divide it into the state's range and see the timescale over which the freeze
-// is defensible. Over a battery's discharge that is minutes; over a rotor lag
-// it is milliseconds, which is why only the caller can say which states qualify.
+// derivative is declared zero rather than measured.
+//
+// That declaration changes WHICH SYSTEM IS BEING LINEARISED. It does not make
+// the linearisation exact, and the earlier wording here that said so was wrong.
+// What is linearised is the MODIFIED plant whose frozen rows are identically
+// zero — a different dynamical system from the one the model integrates. Two
+// consequences follow, and both matter to a reader of the resulting matrices:
+//
+//   * Every OTHER row is still a finite-difference approximation, with the
+//     truncation and cancellation error the rest of this header describes. The
+//     freeze removes a constant term from ONE row; it buys no accuracy anywhere.
+//   * The result does not reproduce the discharging plant. The real vehicle's
+//     state of charge falls, its rotor speed ceiling falls with terminal
+//     voltage, and the true trajectory departs from this model's. The matrices
+//     are valid over a horizon short against that departure, and no longer.
+//
+// The rate that was declared away is reported in `frozen_appended_state_rates`,
+// so the reader can divide it into the state's range and see the timescale over
+// which the freeze is defensible — which is exactly the horizon named above.
+// Over a battery's discharge that is minutes; over a rotor lag it is
+// milliseconds, which is why only the caller can say which states qualify.
 //
 // ===========================================================================
 // WHAT THIS IS NOT
