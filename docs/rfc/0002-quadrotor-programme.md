@@ -508,12 +508,25 @@ always discharging, so a point that is a perfect equilibrium in all six dynamic
 coordinates still fails an equilibrium test that reads the battery row.
 Excluding it silently would leave a constant term in that row which A cannot
 represent and which nothing would report. `frozen_appended_states` names such
-coordinates: the state is KEPT in the chart, its own derivative is declared zero
-rather than measured — which makes the linearisation exact rather than
-approximate, since a frozen state's rate is zero by construction — and the rate
-that was declared away is reported so the reader can divide it into the state's
-range and see the horizon over which the freeze is defensible. The trim makes
-the same choice for the same reason.
+coordinates: the state is KEPT in the chart and its own derivative is declared
+zero rather than measured. The rate that was declared away is reported so the
+reader can divide it into the state's range and see the horizon over which the
+freeze is defensible. The trim makes the same choice for the same reason, and
+its exported evidence now carries its own `frozen_states` marker rather than
+leaving the exclusion to be inferred from the presence of a battery block.
+
+**What the freeze does and does not buy, corrected.** An earlier draft of this
+section, and of `include/galata/linearize/extended.hpp`, said the declaration
+"makes the linearisation exact rather than approximate". That was wrong and is
+withdrawn. Declaring a rate zero changes WHICH SYSTEM IS LINEARISED — the
+modified plant whose frozen rows vanish identically — and nothing else. Every
+other row remains a finite-difference approximation carrying the truncation and
+cancellation error the two findings below describe; the freeze removes a
+constant term from one row and buys no accuracy anywhere. Nor does the result
+reproduce the discharging plant: the real pack's charge falls, its speed ceiling
+falls with terminal voltage, and the true trajectory departs from this model's.
+The matrices are valid over a horizon short against that departure, which is
+what the reported rate exists to let a reader compute.
 
 *ADR-0013's channel cap is resolved, at 32.* The open question this RFC raised
 was real: the fixed-voltage quadrotor's hover linearisation is exactly sixteen
@@ -526,6 +539,46 @@ Nothing else in ADR-0013 moves. The record carries the amendment, and the
 boundary test now exercises 32 admitted and 33 refused; it also asserts the
 constant against the record's own figure, so raising the cap without amending
 the decision fails rather than passing quietly.
+
+**One INTENTIONAL INTERFACE DEVIATION from the request, recorded rather than
+left to be noticed.** This RFC asked for "a model-generic `linearize.finitediff`"
+— that is the heading of the WP2 request above, and it asks for an existing
+capability to be extended in place. What was delivered is a NEW capability
+called `linearize.extended`, registered beside `linearize.finitediff`, which is
+untouched. The deviation is deliberate and it is the same decision the
+acceptance section already made under a different name: acceptance condition (c)
+required the attitude-error chart to land beside the Euler path "rather than
+changing what `linearize.finitediff` exports for the NT-33A". Extending
+`linearize.finitediff` in place would have put two charts, two state orders and
+two singularity stories behind one capability name, and a caller's meaning would
+then have depended on which model it was handed — the failure mode being an
+NT-33A study that silently changes its exported state order. Two names cost a
+row in the capability table; one name would have cost the ability to say what a
+study did. The condition and the interface follow from each other, and the
+delivery satisfies the condition rather than the heading.
+
+**How a user selects the new path.** By capability name in the pipeline stage —
+there is no mode flag, no model sniffing and no default that changes under a
+caller:
+
+```yaml
+- id: hover
+  capability: trim.hover            # the multirotor equilibrium
+  input: {quadrotor: {from: plant}}
+- id: linear
+  capability: linearize.extended    # the attitude-error chart
+  input:
+    trim: {from: hover}
+    freeze_battery: true            # names the frozen coordinate explicitly
+    evidence_path: operating-point.yaml
+```
+
+`linearize.finitediff` continues to mean exactly what it meant before this PR,
+for exactly the models it accepted before it. A fixed-wing study is unaffected
+by WP2 in every respect, which is checked rather than asserted: the NT-33A
+generated artefacts all pass their `--check` mode unchanged, and
+`QuadrotorWorkflow.TheExistingStateSpaceFilesStillLoadUnchanged` reloads every
+state-space file already in the tree.
 
 **What exists now.** `include/galata/trim/hover.hpp` and `src/trim/hover.cpp`
 solve the multirotor equilibrium over roll, pitch and four rotor speeds against
@@ -573,9 +626,18 @@ validation.** `QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxma
 reads the requesting programme's own exported model — the one this document's
 opening section says `model.linear.statespace` consumes unchanged — through the
 shipped loader, and compares it entry by entry against what `linearize.extended`
-computes. **644 entries of A, B, C and D agree to 4.2e-7 relative** against a 1e-5
-budget derived, before any comparison, from the two implementations' independent
-finite-difference errors. Agreement between two implementations is not validation
+computes. It compares `compared_entries` entries of A, B, C and D and reports
+their `worst_relative_disagreement` against a `relative_budget` derived, before
+any comparison, from the two implementations' independent finite-difference
+errors. **Those figures are recorded properties of the run and are deliberately
+not restated here** — an earlier draft typed two of them into this paragraph,
+which is exactly the mistake charter rule 2 exists to prevent, since a number
+copied out of a run is a number no later run can contradict. They are read from
+the retained evidence named below, which carries them alongside the worst
+absolute disagreement on the structural zeros, the fixture path and the
+fixture's SHA-256.
+
+Agreement between two implementations is not validation
 and the registry records it as self-consistent, but this is the only case here
 that could catch a shared mistake in galata's own reasoning about the chart,
 because the other implementation trims and linearises in ENU/FLU with its own
@@ -591,6 +653,45 @@ velocity, three of them would be zero where the reference is not and one would
 be nonzero where the reference is zero. The fixture is not committed: ADR-0007
 routes it to a path plus regeneration instructions, and the case states why it
 did not run when the path is absent.
+
+**BOTH CROSS-CHECKS SKIPPED IN CI, AND A READER OF A GREEN RUN MUST NOT READ
+THEM AS HAVING PASSED THERE.** `GALATA_SOUXMAR_FIXTURE_DIR` is set by no
+workflow, so on every hosted job
+`QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport` and
+`QuadrotorCrossImplementation.ReproducesTheSouxmarOpenLoopTrajectory` report
+`Skipped`, not `Passed`. This is a consequence of ADR-0007 rather than an
+oversight — the fixture's rights position is unestablished, so it is not
+committed and CI has nothing to point at — but it means the single strongest
+piece of WP2 evidence, and the altitude finding below, are established by a
+CONFIGURED LOCAL RUN and by nothing else. The consequence for the two locks
+below is concrete: a future change on either side of the altitude convention
+will not turn any CI job red. Someone must run with the fixture configured.
+
+The run that establishes them, recorded so it can be repeated and contradicted:
+
+```text
+commit    7d424ab80123bef2d91c6a147c02b91fb019e0fb
+platform  Darwin arm64, AppleClang 21.0.0.21000099, CMAKE_BUILD_TYPE=Debug
+fixture   /Users/celikgo/souxmar/outputs/galata_bridge
+          quad_hover_ned_frd.yaml
+            sha256 ff99b38542b4308c6448c7b7cc3986f8eab0b1bc17c9ee5c4461c4b5563e2f4d
+          reference_trajectory.csv
+            sha256 b0329175e8ff1330ca7334827beff5f1225a3830a05f7cd60804d2fe72b75e85
+evidence  build/dev/souxmar-cross-check/cross-check.xml   (gtest XML, retained
+          in the build tree — it is the output of a run, not committed data)
+
+cmake -S . -B build/dev -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
+cmake --build build/dev --target galata_validation_tests
+./build/dev/tests/validation/galata_validation_tests \
+  --gtest_filter='*Souxmar*' \
+  --gtest_output=xml:build/dev/souxmar-cross-check/cross-check.xml
+```
+
+Both digests are recorded by the cases themselves as `fixture_sha256`, so the
+XML identifies the bytes it read rather than only the path it read them from —
+an uncommitted fixture at a stable path is not an identification, and two runs
+citing that path can have consumed different files. Every measured figure quoted
+by name above is read from that XML.
 
 The contracts are held in the `unit` tier by `HoverTrim.*` and
 `ExtendedLinearize.*`, which cover the refusals — an over-actuated vehicle, an
@@ -644,15 +745,40 @@ the mechanism that limits it.
 Its tenth output is named `altitude_down_m` and its C row selects `+1` on the NED
 down state; galata's `OutputKind::Altitude` is documented as positive up, which
 is `-1`. Both are internally consistent — they are different quantities under
-similar names, and the other programme's name has `down` in it. **galata does not
-change.** Altitude positive up is the ordinary meaning of the word, the
-observation model's header states it, and ADR-0002's down axis points down.
-Absorbing a factor of minus one into a numerical budget would be absorbing a sign
-error, which is the one thing a budget must never hide, so charter rule 3 applies
-and the row is excluded from the bulk comparison and held by a two-sided check
-instead: it fails if the two rows stop being exact negatives, and it fails if the
-reference's entry stops being `+1`. A correction on either side is loud rather
-than silent. This is the one entry of 667 that disagrees.
+similar names, and the other programme's name has `down` in it.
+
+**NEITHER SIDE CHANGES.** galata does not: altitude positive up is the ordinary
+meaning of the word, the observation model's header states it, and ADR-0002's
+down axis points down. Absorbing a factor of minus one into a numerical budget
+would be absorbing a sign error, which is the one thing a budget must never hide.
+
+And the reference is not asked to change either, which corrects how an earlier
+draft of this section read. It described a future sign flip on the Souxmar side
+as a "fix" that would let this exclusion be deleted. It would not be a fix. That
+row's sign is not a defect: `altitude_down_m` reports what its name declares.
+Flipping it would leave the file loading exactly as it does today — same schema,
+same shape, same channel name, same round-trip through
+`model.linear.statespace` — while reversing what the channel MEANS for every
+consumer already reading it. **That is a semantic compatibility break, and the
+preserved loadability is what makes it dangerous**, because no loader, schema
+check or round-trip test in either programme would report anything. Should the
+two ever want a single convention, it is a coordinated migration under a renamed
+channel, planned separately from this work and from this PR.
+
+So the mapping is DOCUMENTED rather than reconciled, and it is the mapping the
+bridge runs on today:
+
+| position | Souxmar | galata |
+|---|---|---|
+| output 10 (index 9) | `altitude_down_m`, C row `+1` on the NED down state — down position, positive downward | `altitude_m`, C row `-1` on the same state — altitude, positive upward |
+
+Charter rule 3 applies: the row is excluded from the bulk comparison and held by
+a two-sided check instead. It fails if the two rows stop being exact negatives,
+and it fails if the reference's entry stops being `+1` — the second side now
+reading as a compatibility alarm rather than as a fix detector. A change on
+either side is loud rather than silent, subject to the CI-skip caveat recorded
+above: loud in a configured local run, silent in CI. This is the one entry that
+disagrees, and the count and its budget are read from the retained evidence.
 
 **What WP2 deliberately did not do.** `linearize.finitediff` is unchanged and
 the NT-33A export is unchanged; the two charts coexist, which is the condition
