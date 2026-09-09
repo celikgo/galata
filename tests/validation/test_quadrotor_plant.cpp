@@ -17,6 +17,7 @@
 
 #include "galata/core/constants.hpp"
 #include "galata/core/frames.hpp"
+#include "galata/core/sha256.hpp"
 #include "galata/core/state.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
@@ -626,6 +627,16 @@ TEST(QuadrotorCrossImplementation, ReproducesTheSouxmarOpenLoopTrajectory) {
     ASSERT_TRUE(out) << "cannot retain the compared trajectories at " << retained_path;
     out << retained.str();
   }
+  // ADR-0007 keeps this fixture out of the tree, so the path alone does not say
+  // which bytes were read. The digest does, and a retained run is auditable only
+  // with it.
+  RecordProperty("fixture", path);
+  RecordProperty("fixture_sha256", galata::core::sha256([&] {
+                   std::ifstream in(path, std::ios::binary);
+                   std::ostringstream bytes;
+                   bytes << in.rdbuf();
+                   return bytes.str();
+                 }()));
   RecordProperty("retained_trajectories", retained_path);
 
   RecordProperty("worst_position_m", measured(worst_position_m));

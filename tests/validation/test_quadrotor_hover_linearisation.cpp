@@ -24,6 +24,7 @@
 #include "galata/core/constants.hpp"
 #include "galata/core/frames.hpp"
 #include "galata/core/quaternion.hpp"
+#include "galata/core/sha256.hpp"
 #include "galata/core/state.hpp"
 #include "galata/linearize/extended.hpp"
 #include "galata/model/linear_system.hpp"
@@ -40,6 +41,7 @@
 #include <cmath>
 #include <complex>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -51,6 +53,21 @@ std::string measured(double value) {
   std::ostringstream text;
   text << std::scientific << std::setprecision(3) << value;
   return text.str();
+}
+
+// The fixture is not committed (ADR-0007), so a path is not an identification:
+// two runs citing the same path can have read different bytes. The digest is
+// the only durable statement about WHICH fixture a retained run consumed, and
+// it is recorded as a property so an auditor reads it off the run rather than
+// off somebody's shell history.
+std::string fixture_digest(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return "unreadable";
+  }
+  std::ostringstream bytes;
+  bytes << in.rdbuf();
+  return galata::core::sha256(bytes.str());
 }
 
 using galata::core::kStandardGravity;
@@ -961,6 +978,8 @@ TEST(QuadrotorHoverLinearisation, MatricesAgreeWithTheIndependentSouxmarExport) 
       << "the reference's altitude channel no longer selects +1 on the down state. If it now "
          "reports altitude positive up, delete this exclusion and compare the row in bulk.";
 
+  RecordProperty("fixture", path);
+  RecordProperty("fixture_sha256", fixture_digest(path));
   RecordProperty("altitude_row_disagreement", "sign only; localised, not absorbed");
   RecordProperty("compared_entries", std::to_string(compared_entries));
   RecordProperty("worst_relative_disagreement", measured(worst_relative));
