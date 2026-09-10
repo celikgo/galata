@@ -75,13 +75,28 @@ struct LqrDesign {
 // makes the margin well posed here and ill posed for the other-loops-open
 // reading.
 //
-// WHAT THIS IS NOT. Not a MIMO robustness measure. A set of single-loop margins,
-// each generous, can coexist with a small simultaneous perturbation that
-// destabilises the loop: the classic counterexample perturbs two channels at
-// once, and no loop-at-a-time figure sees it. For simultaneous variation use
-// `analyze.diskmargin`, and for the MIMO peaks use `analyze.sensitivity` and
-// `analyze.sigma`. Reporting a loop-at-a-time margin as though it bounded MIMO
-// robustness is the specific error this comment exists to prevent.
+// WHAT THIS IS NOT. Not a MIMO robustness measure, and THREE DIFFERENT THINGS
+// ARE EASY TO CONFLATE HERE. An earlier version of this comment conflated the
+// second and the third, which is the error it now exists to prevent:
+//
+//   1. A GAIN OR PHASE MARGIN on this loop bounds a pure gain change, or a pure
+//      phase change, in THIS ONE CHANNEL with the others held at nominal.
+//   2. A DISK MARGIN on this loop — `analyze.diskmargin` — bounds SIMULTANEOUS
+//      GAIN AND PHASE variation, still in THIS ONE CHANNEL. It is strictly
+//      stronger than (1) and it is a SISO condition;
+//      `include/galata/analyze/disk_margin.hpp` says so in its own words: "Not
+//      a MIMO disk margin. This is the SISO condition. The multi-loop case
+//      needs a structured singular value, which galata does not have."
+//   3. SIMULTANEOUS VARIATION ACROSS CHANNELS — every input perturbed at once —
+//      is bounded by NEITHER of the above, at any number of channels. The
+//      classic counterexample perturbs two channels together while every
+//      loop-at-a-time figure, disk margins included, stays comfortable.
+//      GALATA HAS NO CAPABILITY FOR THIS. Running `analyze.diskmargin` on each
+//      single loop in turn does not add up to it.
+//
+// `analyze.sensitivity` and `analyze.sigma` give MIMO PEAKS — norms of S, T and
+// the principal gains — which qualify the design and are not a structured
+// robustness margin either.
 //
 // Not a sampled-loop margin either. This is the continuous design's loop; a
 // controller executed at a rate with a hold and a delay has different margins,

@@ -107,8 +107,13 @@ stages:
   # `analyze.margins` refuses it, correctly. This reading closes back to the
   # design's own closed loop, so the Nyquist test is well posed.
   #
-  # A set of loop-at-a-time margins does NOT bound simultaneous variation. That
-  # is what `analyze.diskmargin` below is for, and neither of them says anything
+  # THREE THINGS THAT ARE NOT THE SAME, and the disk margin below covers only
+  # the second. (1) Gain and phase margins bound a pure gain or a pure phase
+  # change in THIS channel. (2) The disk margin bounds simultaneous gain AND
+  # phase variation, still in THIS channel — it is a SISO condition.
+  # (3) Simultaneous variation ACROSS channels is bounded by neither, and
+  # galata has no capability for it: running the disk margin on each loop in
+  # turn does not add up to a MIMO result. None of the three says anything
   # about the SAMPLED loop.
   - id: loop_0
     capability: model.control_system
