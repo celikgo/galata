@@ -6,6 +6,7 @@ galata_find_eigen()
 
 add_library(galata_identify
   static_fit.cpp
+  greybox.cpp
 )
 add_library(galata::identify ALIAS galata_identify)
 
@@ -13,6 +14,8 @@ target_link_libraries(galata_identify
   PUBLIC
     galata::public_headers
     galata::data
+    galata::model
+    galata::numerics
     Eigen3::Eigen
   PRIVATE
     galata::warnings

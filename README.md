@@ -199,6 +199,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `sim.linear` | Integrate a continuous linear model with a constant input and fixed-step RK4 | `linear_trajectory` | implemented, unvalidated |
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
+| `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
 | `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
