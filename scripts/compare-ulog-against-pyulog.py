@@ -160,7 +160,7 @@ def read_pyulog(python: str, fixture: pathlib.Path):
     importable from anything this repository ships or builds.
     """
     program = f"""
-import json, sys
+import importlib.metadata, json, sys
 from pyulog import ULog
 log = ULog({str(fixture)!r})
 wanted = {json.dumps([[t, f, m] for _, t, f, m in CHANNELS])}
@@ -180,8 +180,8 @@ for topic, field, multi in wanted:
 instances = {{}}
 for d in log.data_list:
     instances.setdefault(d.name, []).append(d.multi_id)
-json.dump({{"series": series, "instances": {{k: sorted(v) for k, v in instances.items()}}}},
-          sys.stdout)
+json.dump({{"series": series, "instances": {{k: sorted(v) for k, v in instances.items()}},
+           "pyulog_version": importlib.metadata.version("pyulog")}}, sys.stdout)
 """
     finished = subprocess.run([python, "-c", program], capture_output=True, text=True, check=False)
     if finished.returncode != 0:
@@ -271,7 +271,9 @@ def main() -> int:
         print(f"{len(problems)} disagreement(s) between galata's reader and pyulog",
               file=sys.stderr)
         return 1
-    print("galata's ULog reader agrees with pyulog on every compared value.")
+    print("galata's ULog reader agrees with pyulog "
+          f"{reference.get('pyulog_version', '(version unreported)')} "
+          "on every compared value.")
     print("NOT established: behaviour on a real PX4 flight log. Neither implementation has "
           "read one here.")
     return 0

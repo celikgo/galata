@@ -382,6 +382,10 @@ pyulog's own interpreter, and compares:
 | **Arrays** | every compared element by name — `q[0..3]`, `xyz[0..2]`, `control[0]` and `control[11]` | element 1 of a quaternion is a small number whichever index you actually read, so an off-by-one is invisible without naming |
 | **Values** | **exact equality**, no tolerance anywhere | a float32 promoted to double is exact and an integer is an integer, so any difference is a decoding defect, and a tolerance would hide exactly what the comparison is for |
 
+**Which pyulog agreed is part of the evidence**, so the comparison reads the version out of the
+interpreter it was handed and prints it in its agreement line rather than having it typed here.
+A future run against a different pyulog is a different check and says so on its own face.
+
 `report.record` was added to make this possible: until it existed there was no way to see what
 galata had decoded, which left the reader's agreement unverifiable from outside the test suite.
 It is the counterpart to `data.import.*` and writes the samples as CSV with each channel's unit,
