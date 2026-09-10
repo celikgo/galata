@@ -443,6 +443,40 @@ Artifact csv(const StageContext& context) {
       }
       out << '\n';
     }
+  } else if (source.kind == "sampled_trajectory") {
+    // The plant rows, plus what the controller asked for beside what it got. A
+    // reader comparing the two sees the authority the law wanted and did not
+    // have; a file with only the applied command cannot show that.
+    const auto& sampled = source.payload_as<SampledRun>("sampled_trajectory");
+    const PlantRun& plant = sampled.plant;
+    out << "time_s";
+    for (const auto& name : plant.state_names) {
+      out << ',' << csv_label("state:" + name);
+    }
+    for (Eigen::Index j = 0; j < plant.command_rad_s.size(); ++j) {
+      const std::string index = std::to_string(j);
+      out << ',' << csv_label("requested:omega_" + index + "_rad_s");
+      out << ',' << csv_label("applied:omega_" + index + "_rad_s");
+    }
+    out << ',' << csv_label("wind:north_m_s") << ',' << csv_label("wind:east_m_s") << ','
+        << csv_label("wind:down_m_s") << '\n';
+    for (std::size_t i = 0; i < plant.trajectory.states.size(); ++i) {
+      out << plant.trajectory.times_s[i];
+      const auto& x = plant.trajectory.states[i];
+      for (Eigen::Index j = 0; j < x.size(); ++j) {
+        out << ',' << x(j);
+      }
+      // The final sample is the state after the last hold; it has no tick of
+      // its own, so it repeats the last tick's commands rather than inventing
+      // one that was never issued.
+      const std::size_t tick = std::min(i, sampled.control.requested_rad_s.size() - 1);
+      for (Eigen::Index j = 0; j < plant.command_rad_s.size(); ++j) {
+        out << ',' << sampled.control.requested_rad_s[tick](j);
+        out << ',' << sampled.control.applied_rad_s[tick](j);
+      }
+      const Eigen::Vector3d& wind_now = plant.wind_samples_ned_m_s[i];
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
+    }
   } else if (source.kind == "plant_trajectory") {
     // The columns are the model's, so they are read from the run rather than
     // written down here: a six-rotor vehicle and a four-rotor one with a battery
@@ -478,7 +512,8 @@ Artifact csv(const StageContext& context) {
       out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
     }
   } else {
-    throw std::invalid_argument("report.csv requires a linear, nonlinear or plant trajectory");
+    throw std::invalid_argument(
+        "report.csv requires a linear, nonlinear, plant or sampled trajectory");
   }
   const auto path = context.input->string_at("path");
   context.write_output(path, out.str());

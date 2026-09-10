@@ -51,6 +51,40 @@ struct PlantRun {
   int step_count = 0;
 };
 
+// What `sim.sampled` adds to a plant run: the controller's own record, one
+// entry per CONTROLLER TICK rather than per integration sample.
+//
+// REQUESTED AND APPLIED ARE BOTH KEPT. The requested command is what the law
+// asked for; the applied command is what the plant received after saturation
+// and after the delay line. Reporting only the second hides a controller that
+// spent the whole run against its limits; reporting only the first describes a
+// vehicle that was never flown. The residual between them is the honest measure
+// of how much authority the law asked for and did not get.
+struct SampledControlRecord {
+  std::vector<double> tick_times_s;
+  std::vector<Eigen::VectorXd> requested_rad_s;  // what the law asked for
+  std::vector<Eigen::VectorXd> saturated_rad_s;  // after limits, before delay
+  std::vector<Eigen::VectorXd> applied_rad_s;    // what the plant received
+  std::vector<Eigen::VectorXd> chart_error;      // the coordinates it fed back on
+  double controller_period_s = 0.0;
+  int delay_periods = 0;
+  // Ticks at which saturation changed the command at all, and the worst single
+  // channel residual over the run.
+  int saturated_tick_count = 0;
+  double worst_saturation_residual_rad_s = 0.0;
+  // Declared, not inferred: whether the reference position translates.
+  bool reference_follows_trim_velocity = false;
+};
+
+// What `sim.sampled` produces. The plant run and the controller's own record
+// travel together because neither answers the interesting question alone: the
+// trajectory says what the aircraft did, and the record says what it was asked
+// to do and how much of that it was allowed.
+struct SampledRun {
+  PlantRun plant;
+  SampledControlRecord control;
+};
+
 void register_design_capabilities(Registry& registry);
 void register_model_capabilities(Registry& registry);
 void register_quadrotor_capabilities(Registry& registry);

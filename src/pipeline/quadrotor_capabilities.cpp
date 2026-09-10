@@ -17,6 +17,7 @@
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/sim/schedule.hpp"
+#include "galata/synth/control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/units.hpp"
 
@@ -462,6 +463,271 @@ Artifact simulate_plant_capability(const StageContext& context) {
   return artifact;
 }
 
+// --- sim.sampled -----------------------------------------------------------
+//
+// A controller executed at a DECLARED RATE against the nonlinear plant.
+//
+// THE ORDERING, written down because a sampled loop is defined by it and two
+// implementations that disagree about it produce different aircraft. At every
+// controller tick k, at time t_k = k * period:
+//
+//   1. MEASURE.    The plant state at t_k, sampled instantaneously. There is no
+//                  sensor model here: this is the ideal-measurement case, and a
+//                  sensor's own dynamics belong in the plant, not in the loop.
+//   2. COORDINATES. The error in the chart the gain was designed in, taken
+//                  against the reference AT t_k — see the reference motion note
+//                  below, which is where cruise differs from hover.
+//   3. LAW.        u_requested = u_trim - K e. Static state feedback: no
+//                  controller state, and therefore NO ANTI-WINDUP, because
+//                  there is no integrator to wind up. That is a property of
+//                  this law and not a general claim; an integrating law added
+//                  here later must bring its own anti-windup and say so.
+//   4. ALLOCATION. The identity, stated rather than skipped. This law's outputs
+//                  ARE rotor-speed commands, because the gain was designed
+//                  against a B whose columns are rotor commands. A law that
+//                  produced collective and moments would need a mixer here, and
+//                  that mixer would be a declared part of the contract.
+//   5. SATURATION. Clamped to each rotor's own [minimum, maximum]. The
+//                  requested and the clamped command are BOTH recorded.
+//   6. DELAY.      The clamped command enters a queue of `delay_periods`
+//                  entries; what the plant receives at t_k is the command
+//                  computed `delay_periods` ticks ago. At t = 0 the queue holds
+//                  the TRIM command, declared rather than zero, because a
+//                  multirotor commanded to zero falls.
+//   7. HOLD.       That command is held until t_{k+1}. Zero-order, exactly.
+//
+// TIMING IS AN INTEGER SCHEDULE. The controller period must be a whole number
+// of integration steps and the horizon a whole number of periods; anything else
+// is refused rather than rounded. A tick that landed inside a step would have
+// the integrator's four stages straddling a command change, which costs the
+// method its order and — unlike a wind step — cannot be fixed by splitting,
+// because the tick is where the command is DEFINED to change.
+//
+// WHAT THIS IS NOT. Not a claim about margins: gain and phase margins computed
+// from the continuous linearisation describe the continuous loop, and this loop
+// samples, holds and delays. The sampled loop's own robustness is a separate
+// question this capability does not answer. Not an ESC model either — commands
+// are rotor speeds in rad/s, and the map to an electrical command is out of
+// scope by RFC-0002's own boundary.
+Artifact simulate_sampled_capability(const StageContext& context) {
+  const auto& trimmed = context.upstream_at("trim").payload_as<HoverTrimArtifact>("hover_trim");
+  const model::Quadrotor& model = trimmed.model;
+  const Eigen::VectorXd reference_state = trimmed.point.extended_state;
+  const Eigen::VectorXd trim_command = trimmed.point.command_rad_s;
+
+  const auto& law = context.upstream_at("law").payload_as<synth::LqrDesign>("control_law");
+  const Eigen::MatrixXd gain = law.riccati.k;
+
+  const double step_s = context.input->number_at("step_s");
+  if (!(step_s > 0.0) || !std::isfinite(step_s)) {
+    throw std::invalid_argument("sim.sampled: step_s must be a positive finite number of seconds");
+  }
+  const int steps = positive_integer_at(context, "steps", 0);
+  const double period_s = context.input->number_at("controller_period_s");
+  if (!(period_s > 0.0) || !std::isfinite(period_s)) {
+    throw std::invalid_argument(
+        "sim.sampled: controller_period_s must be a positive finite number of seconds");
+  }
+  const double periods_per_step = period_s / step_s;
+  const double nearest = std::round(periods_per_step);
+  if (std::fabs(periods_per_step - nearest) > 1e-9 * std::fmax(1.0, periods_per_step)
+      || nearest < 1.0) {
+    std::ostringstream message;
+    message << "sim.sampled: the controller period " << period_s << " s is not a whole number of "
+            << step_s
+            << " s integration steps. A tick inside a step would put the integrator's stages "
+               "either side of a command change, and unlike a wind step it cannot be split "
+               "around, because the tick is where the command is defined to change. Choose a "
+               "period that the step divides";
+    throw std::invalid_argument(message.str());
+  }
+  const int steps_per_tick = static_cast<int>(nearest);
+  if (steps % steps_per_tick != 0) {
+    std::ostringstream message;
+    message << "sim.sampled: " << steps << " step(s) is not a whole number of " << steps_per_tick
+            << "-step controller periods; the run would end partway through a hold";
+    throw std::invalid_argument(message.str());
+  }
+  const int tick_count = steps / steps_per_tick;
+
+  const double delay_number = context.input->number_at("delay_periods", 0.0);
+  if (!std::isfinite(delay_number) || delay_number < 0.0
+      || std::floor(delay_number) != delay_number) {
+    throw std::invalid_argument(
+        "sim.sampled: delay_periods must be a whole number of controller periods, zero or more. "
+        "A delay that is not a whole number of periods is not representable by this schedule");
+  }
+  const int delay_periods = static_cast<int>(delay_number);
+
+  // THE REFERENCE, AND WHY CRUISE IS NOT HOVER WITH A NUMBER CHANGED.
+  //
+  // At hover the reference state is constant. At a relative equilibrium it is
+  // not: the position rate is nonzero by construction, so a reference held at
+  // the trim's initial position becomes, one second later, a demand to fly back
+  // to where the aircraft started. The position error then grows without bound
+  // and the controller fights the very equilibrium it was designed about.
+  //
+  // So a trim with a nonzero ground velocity must SAY which it means, and gets
+  // no default. `follow_trim_velocity` translates the reference position at the
+  // trim's ground velocity; `hold_position` keeps it fixed, which is station
+  // keeping and a legitimate but different task.
+  const bool cruising = trimmed.point.ground_velocity_ned_m_s.norm() > 0.0;
+  const ValuePtr motion = context.input->get("reference_motion");
+  if (cruising && !motion) {
+    throw std::invalid_argument(
+        "sim.sampled: this trim has a nonzero ground velocity, so `reference_motion` must be "
+        "declared: `follow_trim_velocity` translates the reference position along the "
+        "equilibrium, `hold_position` keeps it fixed. There is no default, because a hover "
+        "reference silently reused at cruise becomes a demand to fly back to the start");
+  }
+  bool reference_moves = false;
+  if (motion) {
+    const std::string name = motion->as_string();
+    if (name == "follow_trim_velocity") {
+      reference_moves = true;
+    } else if (name == "hold_position") {
+      reference_moves = false;
+    } else {
+      throw std::invalid_argument(
+          "sim.sampled: `reference_motion` must be `follow_trim_velocity` or `hold_position`; '"
+          + name + "' is neither");
+    }
+  }
+
+  const sim::InputSchedule wind_history = schedule_at(context, "wind_schedule", 3);
+  const bool freeze_battery = context.input->bool_at("freeze_battery", false);
+  if (freeze_battery && !model.has_battery()) {
+    throw std::invalid_argument(
+        "sim.sampled: freeze_battery was asked for on a model that carries no battery");
+  }
+  const int battery_index = model.has_battery() ? model.battery_state_index() : -1;
+
+  Eigen::VectorXd state = reference_state;
+  if (context.input->get("initial_chart_perturbation") != nullptr) {
+    const int chart_width =
+        linearize::kRigidChartSize + model.extended_state_size() - core::kStateSize;
+    const Eigen::VectorXd delta = vector_at(context, "initial_chart_perturbation", chart_width);
+    state = linearize::extended_from_chart(delta, reference_state);
+  }
+
+  PlantRun run;
+  run.state_names = model.extended_state_names();
+  run.command_rad_s = trim_command;
+  run.wind_ned_m_s = trimmed.point.wind_ned_m_s;
+  run.battery_present = model.has_battery();
+  run.battery_frozen = freeze_battery;
+  run.step_s = step_s;
+  run.step_count = steps;
+
+  SampledControlRecord record;
+  record.controller_period_s = period_s;
+  record.delay_periods = delay_periods;
+  record.reference_follows_trim_velocity = reference_moves;
+
+  // The delay line, initialised to the TRIM command. Zero would be a multirotor
+  // switched off for the first `delay_periods` ticks.
+  std::vector<Eigen::VectorXd> queue(static_cast<std::size_t>(delay_periods) + 1, trim_command);
+  std::size_t queue_head = 0;
+
+  const auto record_sample =
+      [&](double time_s, const Eigen::VectorXd& x, const Eigen::VectorXd& applied) {
+        run.trajectory.times_s.push_back(time_s);
+        run.trajectory.states.push_back(x);
+        run.command_samples_rad_s.push_back(applied);
+        run.wind_samples_ned_m_s.push_back(
+            wind_history.empty() ? run.wind_ned_m_s : Eigen::Vector3d(wind_history.at(time_s)));
+      };
+
+  Eigen::VectorXd applied = trim_command;
+  for (int tick = 0; tick < tick_count; ++tick) {
+    const double tick_time_s = static_cast<double>(tick) * period_s;
+
+    // 2. Coordinates, against the reference AT THIS TICK.
+    Eigen::VectorXd reference_now = reference_state;
+    if (reference_moves) {
+      reference_now.segment<3>(core::kPositionNorth) +=
+          trimmed.point.ground_velocity_ned_m_s * tick_time_s;
+    }
+    const Eigen::VectorXd error = linearize::chart_from_extended(state, reference_now);
+
+    // 3. Law. 4. Allocation is the identity. 5. Saturation.
+    const Eigen::VectorXd requested = trim_command - gain * error;
+    Eigen::VectorXd clamped = requested;
+    bool clipped = false;
+    for (int rotor = 0; rotor < model.rotor_count(); ++rotor) {
+      const auto& description = model.rotors[static_cast<std::size_t>(rotor)];
+      const double ceiling =
+          std::fmax(model.speed_ceiling_rad_s(rotor, trimmed.point.battery_state_of_charge),
+                    description.minimum_speed_rad_s);
+      clamped(rotor) = std::clamp(requested(rotor), description.minimum_speed_rad_s, ceiling);
+      const double residual = std::fabs(clamped(rotor) - requested(rotor));
+      if (residual > 0.0) {
+        clipped = true;
+        record.worst_saturation_residual_rad_s =
+            std::fmax(record.worst_saturation_residual_rad_s, residual);
+      }
+    }
+    if (clipped) {
+      ++record.saturated_tick_count;
+    }
+
+    // 6. Delay: what the plant receives now was computed `delay_periods` ago.
+    queue[queue_head] = clamped;
+    queue_head = (queue_head + 1) % queue.size();
+    applied = queue[queue_head];
+
+    record.tick_times_s.push_back(tick_time_s);
+    record.requested_rad_s.push_back(requested);
+    record.saturated_rad_s.push_back(clamped);
+    record.applied_rad_s.push_back(applied);
+    record.chart_error.push_back(error);
+
+    record_sample(tick_time_s, state, applied);
+
+    // 7. Hold, and integrate one period under it. The wind is the plant's, not
+    // the controller's: it is read per stage exactly as `sim.plant` reads it.
+    const numerics::DerivativeFunction derivative =
+        [&](double time_s, const Eigen::VectorXd& x) -> Eigen::VectorXd {
+      const Eigen::Vector3d wind_now =
+          wind_history.empty() ? run.wind_ned_m_s : Eigen::Vector3d(wind_history.at(time_s));
+      Eigen::VectorXd rate = model.derivative(x, applied, wind_now);
+      if (freeze_battery) {
+        rate(battery_index) = 0.0;
+      }
+      return rate;
+    };
+    const numerics::ProjectionFunction projection = [&](Eigen::VectorXd& x) { model.project(x); };
+    const numerics::Trajectory piece = numerics::integrate_fixed_step(
+        derivative, state, tick_time_s, step_s, steps_per_tick, steps_per_tick, projection);
+    state = piece.states.back();
+  }
+  record_sample(static_cast<double>(steps) * step_s, state, applied);
+
+  run.trajectory.step_s = step_s;
+  run.trajectory.step_count = steps;
+  run.trajectory.sample_stride = steps_per_tick;
+
+  std::ostringstream summary;
+  summary << tick_count << " ticks at " << std::fixed << std::setprecision(1) << (1.0 / period_s)
+          << " Hz, delay " << delay_periods << " period(s)";
+  if (record.saturated_tick_count > 0) {
+    summary << "; saturated at " << record.saturated_tick_count << " tick(s), worst residual "
+            << std::scientific << std::setprecision(2) << record.worst_saturation_residual_rad_s
+            << " rad/s";
+  } else {
+    summary << "; no saturation";
+  }
+  if (run.battery_present) {
+    summary << "; battery " << (freeze_battery ? "frozen" : "evolving");
+  }
+
+  Artifact artifact;
+  artifact.kind = "sampled_trajectory";
+  artifact.summary = summary.str();
+  artifact.payload = SampledRun{std::move(run), std::move(record)};
+  return artifact;
+}
+
 // --- trim.hover ------------------------------------------------------------
 
 Artifact trim_hover_capability(const StageContext& context) {
@@ -712,6 +978,24 @@ void register_quadrotor_capabilities(Registry& registry) {
   // ImplementedUnvalidated, for the reason `model.quadrotor` carries: the cases
   // behind these are exact invariants of the equations and a cross-check
   // against an independent implementation. Neither is a published reference.
+  registry.add(Capability{
+      "sim.sampled",
+      "Execute a state-feedback controller at a declared rate against the nonlinear plant, with "
+      "zero-order hold, whole-period delay and per-rotor saturation",
+      "sampled_trajectory",
+      Capability::State::ImplementedUnvalidated,
+      simulate_sampled_capability,
+      {"trim",
+       "law",
+       "controller_period_s",
+       "delay_periods",
+       "reference_motion",
+       "initial_chart_perturbation",
+       "wind_schedule",
+       "step_s",
+       "steps",
+       "freeze_battery"}});
+
   registry.add(Capability{
       "sim.plant",
       "Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, "

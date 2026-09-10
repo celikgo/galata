@@ -168,6 +168,7 @@ against.
 | `sim.model` | implemented, unvalidated | — |
 | `sim.nonlinear` | implemented, unvalidated | — |
 | `sim.plant` | implemented, unvalidated | — |
+| `sim.sampled` | implemented, unvalidated | — |
 | `synth.care` | implemented and validated | `synth.care.worked` |
 | `synth.lqr` | implemented, unvalidated | — |
 | `synth.pid` | implemented, unvalidated | — |
