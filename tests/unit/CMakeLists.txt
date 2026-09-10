@@ -13,6 +13,7 @@ add_executable(galata_unit_tests
   test_integrator.cpp
   test_modes.cpp
   test_frequency_response.cpp
+  test_chart_mapping.cpp
   test_margins.cpp
   test_disk_margin.cpp
   test_singular_values.cpp

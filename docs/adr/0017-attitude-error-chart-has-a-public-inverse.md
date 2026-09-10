@@ -30,22 +30,31 @@ exp(e/2)`. It is a local lambda inside the linearisation, reachable from nothing
 else.
 
 **The direction a controller needs does not exist anywhere.** Going full → chart
-requires the inverse of that composition — `e = 2 log(q0^-1 * q)` — and
-`include/galata/core/quaternion.hpp` today has no quaternion product, no
-inverse and no logarithm. It has `angular_distance`, which returns the magnitude
-of the rotation between two attitudes and discards its axis. A magnitude cannot
-close a loop.
+requires the inverse of that composition, `e = 2 log(q0^-1 * q)`.
+
+*Corrected while implementing this record, 2026-09-10.* An earlier draft said
+that `include/galata/core/quaternion.hpp` had "no quaternion product, no inverse
+and no logarithm". The first two were wrong: `core::Quaternion` is an alias for
+`Eigen::Quaterniond`, which supplies both, and the composition above needs no
+new primitive. Only the LOGARITHM was missing, and it is the only one this
+record adds. The claim is corrected rather than deleted because a decision
+argued from a false premise should show which part of the premise was false.
+
+What galata does have and cannot use here is `angular_distance`, which returns
+the magnitude of the rotation between two attitudes and discards its axis. A
+magnitude cannot close a loop.
 
 ## Decision
 
 **Make the chart a named, public, two-way map**, in `galata::linearize`, with the
 reference attitude an explicit argument in both directions.
 
-Two functions, proposed as `chart_from_extended` and `extended_from_chart`, plus
-the quaternion primitives the first needs — a product, an inverse and a
-logarithm — added to `galata::core` where the rest of the attitude algebra
-already lives. The existing `unpack` becomes a caller of the public forward map
-rather than a second copy of it.
+Two functions, `chart_from_extended` and `extended_from_chart`, plus the one
+primitive they need that did not exist — the logarithm, `rotation_vector_from_
+quaternion`, with its inverse `quaternion_from_rotation_vector` beside it —
+added to `galata::core` where the rest of the attitude algebra lives. Product
+and inverse come from Eigen. The existing `unpack` becomes a caller of the
+public forward map rather than a second copy of it.
 
 The reference is an argument, never an ambient default. A chart coordinate is
 meaningless without the attitude it is measured from, and a function that
@@ -69,10 +78,12 @@ convention and a sign; when they drift, the symptom is a controller that works
 in simulation and not in analysis, or the reverse, with no test between them
 able to see it.
 
-**Ship the inverse without the quaternion primitives**, computing the logarithm
-inline. Rejected. `q0^-1 * q` is attitude algebra and belongs beside the rest of
-it. Written inline it would be the third place in this repository that composes
-quaternions by hand.
+**Ship the inverse with the logarithm written inline**, at its one call site.
+Rejected. The logarithm is attitude algebra and belongs beside the rest of it,
+and its partner — the exponential the forward map needs — was already written
+by hand inside `linearize`. Two halves of one map, in two files, that must agree
+about a half-angle and a sign. They are now one pair in `galata::core`, and the
+copy in `linearize` is gone.
 
 ## What this must get right, stated because it is easy to get wrong quietly
 
@@ -109,9 +120,11 @@ gate on that: they must pass unchanged, bit for bit.
 - ADR-0004 is unaffected in kind: the map is closed-form, has no iteration and no
   tolerance-based branch, and its one conditional — the small-angle series — is
   taken on a declared constant.
-- The functions named here are **proposed** until they exist. They needed no
-  entry in `scripts/doc-references-allow.txt`, because the gate checks file
-  paths and gtest names and a proposed function name is neither — which is worth
-  saying rather than leaving as an apparent omission. Nothing mechanical will
-  notice if they are never written; this record is the only thing that says they
-  were intended.
+- **Implemented 2026-09-10**, in the change that carries this correction.
+  `chart_from_extended`, `extended_from_chart`,
+  `core::rotation_vector_from_quaternion` and
+  `core::quaternion_from_rotation_vector` exist; `perturbed_attitude` in
+  `src/linearize/extended.cpp` is gone, its logic now the public exponential.
+  `ChartMapping.*` and `RotationVector.*` hold the round-trips, the double cover
+  and the refusals, and the extended-linearisation cases — including the
+  cross-check against the Souxmar export — pass unchanged.

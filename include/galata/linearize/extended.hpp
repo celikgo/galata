@@ -223,6 +223,37 @@ enum ChartIndex : int {
   kChartRateR = 11,
 };
 
+// The chart, both ways, with the reference an explicit argument.
+//
+// `linearize.extended` produces matrices whose state is this chart: twelve
+// rigid coordinates — position, body velocity, a three-component attitude ERROR
+// and body rates — followed by one per appended state. The plant those matrices
+// describe is integrated in ADR-0002's coordinates instead, whose attitude is a
+// quaternion. A gain designed against the first cannot be applied to the second
+// without this map.
+//
+// THE REFERENCE IS AN ARGUMENT AND NEVER A DEFAULT. A chart coordinate is a
+// displacement from somewhere, and the somewhere is the caller's operating
+// point. A function that supplied its own would let a caller difference against
+// a reference they did not choose and receive a number that looks like an
+// error, which is the failure this signature exists to prevent.
+//
+// The attitude coordinate is multiplicative — q = q0 * exp(e/2) — while every
+// other coordinate is additive. `chart_from_extended` inverts exactly that, so
+// the two round-trip to the bound the tests state, and the result is always the
+// short way round: see `core::rotation_vector_from_quaternion` on the double
+// cover.
+//
+// Both refuse a state whose length disagrees with the reference's, and a chart
+// whose length disagrees with the reference's appended block. A caller who has
+// miscounted their own appended states finds out here rather than in a
+// plausible trajectory.
+[[nodiscard]] Eigen::VectorXd chart_from_extended(const Eigen::VectorXd& extended_state,
+                                                  const Eigen::VectorXd& reference_state);
+
+[[nodiscard]] Eigen::VectorXd extended_from_chart(const Eigen::VectorXd& chart,
+                                                  const Eigen::VectorXd& reference_state);
+
 struct ExtendedLinearisationOptions {
   // Names for the appended states, in the model's order. Its size sets how many
   // appended states there are, so a mismatch with x_ext is an error rather than
