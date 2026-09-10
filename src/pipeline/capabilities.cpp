@@ -1070,6 +1070,7 @@ Registry build_registry() {
                  {},
                  {"path"}});
 
+  register_data_capabilities(registry);
   register_design_capabilities(registry);
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);

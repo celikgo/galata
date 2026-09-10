@@ -2,6 +2,7 @@
 #ifndef GALATA_PIPELINE_ARTIFACTS_HPP
 #define GALATA_PIPELINE_ARTIFACTS_HPP
 
+#include "galata/data/record.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/registry.hpp"
@@ -25,6 +26,7 @@ struct HoverTrimArtifact {
   model::Quadrotor model;
 };
 
+void register_data_capabilities(Registry& registry);
 void register_design_capabilities(Registry& registry);
 void register_model_capabilities(Registry& registry);
 void register_quadrotor_capabilities(Registry& registry);

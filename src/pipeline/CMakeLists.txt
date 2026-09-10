@@ -11,6 +11,7 @@ add_library(galata_pipeline
   registry.cpp
   pipeline.cpp
   capabilities.cpp
+  data_capabilities.cpp
   design_capabilities.cpp
   model_capabilities.cpp
   quadrotor_capabilities.cpp
@@ -33,6 +34,7 @@ target_link_libraries(galata_pipeline
     galata::trim
     galata::linearize
     galata::synth
+    galata::data
     galata::simulation
     Eigen3::Eigen
   PRIVATE
