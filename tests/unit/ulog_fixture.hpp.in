@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Where the generated ULog fixture lives, and how a test gets its bytes.
+//
+// The fixture is GENERATED at build time by tests/data/make_ulog_fixture.py, so
+// no binary blob is committed: what is in the file is what that script says, in
+// the open. Writing it needs nothing but Python; only the independent CHECK —
+// handing the result to pyulog — needs pyulog, and that is a separate step a
+// developer or a CI job runs, never a requirement of the build.
+#pragma once
+
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+#define GALATA_ULOG_FIXTURE "@GALATA_ULOG_FIXTURE@"
+
+namespace galata::test {
+
+inline std::string ulog_fixture() {
+  std::ifstream file(GALATA_ULOG_FIXTURE, std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("the generated ULog fixture is missing: " GALATA_ULOG_FIXTURE);
+  }
+  std::ostringstream bytes;
+  bytes << file.rdbuf();
+  return bytes.str();
+}
+
+}  // namespace galata::test

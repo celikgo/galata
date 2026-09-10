@@ -10,6 +10,7 @@
 add_library(galata_data
   record.cpp
   csv.cpp
+  ulog.cpp
 )
 add_library(galata::data ALIAS galata_data)
 
