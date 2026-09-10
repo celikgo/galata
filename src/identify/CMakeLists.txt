@@ -7,6 +7,7 @@ galata_find_eigen()
 add_library(galata_identify
   static_fit.cpp
   greybox.cpp
+  validate.cpp
 )
 add_library(galata::identify ALIAS galata_identify)
 
