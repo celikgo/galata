@@ -132,10 +132,22 @@ HoverTrim trim_hover(const model::Quadrotor& model, const HoverTrimRequest& requ
   // share of the weight. For every condition this solve admits that is inside
   // Newton's basin, because a multirotor's tilt at any airspeed it can hold is
   // small.
+  //
+  // The share is a share of FORCE, not a shared speed. Asking each rotor for
+  // m g / n gives sqrt(m g / (n k_T_i)) per rotor, which is the same number for
+  // every rotor of a homogeneous vehicle and a different one for each rotor of a
+  // vehicle whose thrust coefficients differ. The earlier form asked the model
+  // for one vehicle-wide hover speed, which is undefined when the coefficients
+  // differ and threw — so a model with four measured rotors could not be trimmed
+  // at all, though the solve below has always carried one unknown per rotor and
+  // needed no vehicle-wide speed to run. The restriction was in the starting
+  // point, never in the equations.
+  //
+  // This is a guess and not an equilibrium: equal thrust balances the force and
+  // leaves a residual couple whenever the rotors differ. Newton removes it.
   Eigen::VectorXd guess = Eigen::VectorXd::Zero(unknown_count);
-  const double hover_speed = model.hover_speed_rad_s(core::kStandardGravity);
   for (int rotor = 0; rotor < rotor_count; ++rotor) {
-    guess(kAttitudeUnknowns + rotor) = hover_speed;
+    guess(kAttitudeUnknowns + rotor) = model.hover_speed_rad_s(rotor, core::kStandardGravity);
   }
 
   numerics::NewtonOptions options;
