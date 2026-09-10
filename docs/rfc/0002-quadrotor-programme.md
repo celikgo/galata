@@ -696,7 +696,15 @@ evidence  build/dev/souxmar-cross-check/cross-check-7dd36f7.xml
           it too. The digest is what makes it citable: the file is named after
           the revision it tested, and the digest says which bytes carry that name.
 
-cmake -S . -B build/dev -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
+# The toolchain file is NOT optional and was missing from this block until
+# 2026-09-10. Without it a from-scratch configure fails at
+# cmake/GalataInstall.cmake with "Set GALATA_EIGEN_LICENSE_FILE"; it appeared to
+# work only for a reader whose build/dev already carried the preset's cache,
+# which is the environment-dependent trap this record exists to avoid.
+cmake -S . -B build/dev \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
 cmake --build build/dev --target galata_validation_tests
 ./build/dev/tests/validation/galata_validation_tests \
   --gtest_filter='*Souxmar*' \
@@ -900,9 +908,30 @@ defect WP4 found in its own held-out semantics, described below; it is not a con
 fixture is generated from `tests/data/make_ulog_fixture.py` rather than committed, because a
 binary blob nobody can read is a fixture nobody can check.
 
+**ADR-0016's obligation is now discharged in full.** Choosing an in-repo parser over a
+dependency came with a condition: the reader must be checked against an implementation that is
+not ours. `--verify` on the fixture generator discharged half — pyulog can read the fixture, so
+the fixture is valid ULog — and said nothing about the READER.
+`scripts/compare-ulog-against-pyulog.py` compares the two decodings: timestamps as integer
+microseconds, topic instances, the integer fields between float arrays, every array element by
+name, and every value at EXACT equality with no tolerance. `report.record` was added so that
+what galata decoded can be seen at all; it is the counterpart to `data.import.*` and was
+missing.
+
+Two things about that comparison are recorded rather than left implicit. The fixture now logs
+`sensor_combined` TWICE, at multi_id 0 and 1 offset by exactly 100, because a reader that
+ignored multi_id would merge the instances into a channel that is neither and would pass every
+single-instance test. And the comparison's own channel table drives BOTH sides, so it detects a
+decoding disagreement and cannot detect a mis-specified channel — measured, by injecting four
+defects and recording which two were caught. The specification is held by `UlogImport.*`
+instead, which asserts against what the generator visibly wrote.
+
 **What WP3 does not deliver.** No frame conversion is performed anywhere: PX4's NED and FRD
 already match ADR-0002, and a record in FLU stays in FLU and says so. There is no smoothing,
-no interpolation on demand and no gap repair, by design.
+no interpolation on demand and no gap repair, by design. And NO REAL PX4 FLIGHT LOG HAS BEEN
+READ BY EITHER IMPLEMENTATION. A real log carries topics, formats, appended data and corruption
+this fixture does not; the parser comparison above is independent and is not a substitute for
+one. That limitation is separate and stays open.
 
 ### WP4 — identification, 2026-09-10
 
