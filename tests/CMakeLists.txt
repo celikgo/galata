@@ -73,6 +73,23 @@ if(UNIX AND TARGET galata_cli)
   # below every module TIMEOUT set below, so it still fires first and still
   # names the command. The uninstrumented default is untouched at 45.
   #
+  # CONFIRMED ON THE HOSTED RUNNER, which is what turns the paragraph above
+  # from an inference into a measurement. Run 34521117651 passed 637/637 under
+  # the 360 s deadline with no timeout and no sanitizer diagnostic, and the four
+  # suites' own times against the same four at 48f131b are:
+  #
+  #                          48f131b    this head    growth
+  #     ProjectWorkflow      653.43 s     762.54 s     16.7%
+  #     ProjectLinearImport  157.76 s     183.34 s     16.2%
+  #     ProjectRecovery      158.60 s     184.76 s     16.5%
+  #     ProjectRoutes        125.08 s     145.49 s     16.3%
+  #
+  # against an instrumented binary 16.8 percent larger. Four suites of quite
+  # different content, all growing within half a point of the SIZE of the
+  # executable: that is the hashing mechanism, measured on the machine that
+  # matters rather than argued from a laptop. It also means the next material
+  # addition to the CLI moves these figures again, and predictably.
+  #
   # This is a wall-clock guard, NOT an error budget on a computed quantity. No
   # numerical tolerance moves, no comparison loosens, no required outcome is
   # relaxed and no test changes what it asserts — the same reasoning the

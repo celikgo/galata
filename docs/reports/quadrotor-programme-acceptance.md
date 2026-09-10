@@ -190,9 +190,12 @@ and all three `identify.*` capabilities.
 **The trigger fix does not reach the already-open stacks retroactively.** GitHub resolves a
 `pull_request` trigger against the workflow file in the merge of head into base, so a stacked
 pull request keeps firing — or not firing — according to whichever `ci.yml` its own base carries.
-Measured after the fix landed on the integration branch, `#26`, `#29`, `#31` and `#32` still
-reported zero checks. ADR-0019 records the three ways to close that and their costs; until one
-of them happens, the seven remain individually unchecked.
+Measured again after the fix landed on the integration branch, and reported in full rather than
+as a sample: of the fifteen constituent pull requests, **eight carry all eleven checks** — `#18`,
+`#19`, `#20`, `#21`, `#22`, `#24`, `#27`, `#28` — and **seven report zero**: `#23`, `#25`, `#26`,
+`#29`, `#30`, `#31`, `#32`. An empty rollup is unverified, not green. ADR-0019 records the three
+ways to close that and their costs; until one of them happens, those seven are covered by the
+integration head's run and by nothing of their own.
 
 **Where validation happens, decided and recorded.** On *each stack branch, at its own head*, so
 no pull request can be reviewed against an empty rollup — and *additionally at one integration
@@ -229,6 +232,45 @@ The integration pull request's own runs are on [#33](https://github.com/celikgo/
 Note that its `concurrency` group cancels a run when a newer commit arrives, so only the run
 against the final head is meaningful; an earlier head's partial result is not evidence about
 the head that superseded it.
+
+### The integration head's own result, and the sanitizer
+
+The combined stack is **CI-verified** at head `ff8c0e37400e344f2703afb20efa4b49ae63ab76`:
+run [34521117651](https://github.com/celikgo/galata/actions/runs/34521117651), **11 of 11 jobs
+green**, `637/637` tests under the sanitizer with `Total Test time (real) = 6400.24 sec`. That
+is the whole required graph — Charter gates, Format, Engine on linux-gcc / linux-clang / macos,
+both Determinism fingerprints, Determinism tier 2, the Clang static analyzer, ASan/UBSan, and
+the `CI` aggregate.
+
+**The sanitizer failed first, and why is worth recording.** At the previous head, run
+[34506763806](https://github.com/celikgo/galata/actions/runs/34506763806) failed — not on a
+sanitizer diagnostic. ASan configure and build both succeeded and there was no leak, undefined
+behaviour report or crash. **Fifteen** `galata project ...` invocations lost a 45-second
+Python-level deadline at once across all four project suites, with `ProjectLinearImport` losing
+its very first call in `setUpClass` and running zero tests.
+
+That deadline is a hang guard, and 45 s was never a sound figure for the instrumented build; it
+survived only while the CLI stayed small enough. `tests/CMakeLists.txt` already documented the
+mechanism one level up — the worker SHA-256s its own executable once per run, so cost scales
+with the **size of the CLI** and not with what the test exercises — and this branch adds
+capabilities to that binary. The deadline was scaled by the measured instrumentation factor
+rather than raised until the suite went green, and only for the sanitizer build; the
+uninstrumented default is untouched at 45 s. The full derivation is committed beside the code.
+
+**The hosted run then confirmed the mechanism rather than merely clearing the gate.** Against
+the same four suites at `48f131b`:
+
+| Suite | `48f131b` | `ff8c0e3` | Growth |
+|---|---|---|---|
+| `ProjectWorkflow` | 653.43 s | 762.54 s | 16.7% |
+| `ProjectLinearImport` | 157.76 s | 183.34 s | 16.2% |
+| `ProjectRecovery` | 158.60 s | 184.76 s | 16.5% |
+| `ProjectRoutes` | 125.08 s | 145.49 s | 16.3% |
+
+against an instrumented binary measured 16.8% larger. Four suites of quite different content,
+all growing within half a point of the size of the executable. **This is a wall-clock guard and
+not an error budget on a computed quantity** — no numerical tolerance moved, no comparison
+loosened, and no test changed what it asserts.
 
 ### Per-item local evidence
 

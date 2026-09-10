@@ -150,6 +150,16 @@ class ProjectWorkflow(unittest.TestCase):
             process.communicate(timeout=10)
 
         self.addCleanup(cleanup)
+        # THIS DEADLINE IS CHECKED AT THE TOP OF THE LOOP, so the first
+        # `inspect()` always completes however long it takes, and under
+        # instrumentation it takes longer than the deadline by itself. The
+        # effective requirement is therefore "the first inspect sees the job
+        # running", and the message below is accurate only for the
+        # uninstrumented build. Left at 15 s deliberately: it has not failed,
+        # and scaling a guard that is passing would relax a requirement on no
+        # evidence. If it ever fires under the sanitizer, this is why, and the
+        # fix is to observe the worker's state without a second full CLI
+        # invocation rather than to raise the number.
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             for run in self.inspect()["runs"]:
