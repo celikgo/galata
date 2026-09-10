@@ -14,6 +14,7 @@ add_executable(galata_unit_tests
   test_modes.cpp
   test_frequency_response.cpp
   test_csv_import.cpp
+  test_static_fit.cpp
   test_margins.cpp
   test_disk_margin.cpp
   test_singular_values.cpp
@@ -35,6 +36,7 @@ target_link_libraries(galata_unit_tests
   PRIVATE
     galata::core
     galata::data
+    galata::identify
     galata::numerics
     galata::analyze
     galata::model

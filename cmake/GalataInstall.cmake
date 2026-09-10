@@ -5,7 +5,7 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 set(_galata_install_targets galata_public_headers galata_warnings)
-foreach(_part core data numerics sim simulation analyze model trim linearize pipeline synth modeling)
+foreach(_part core data identify numerics sim simulation analyze model trim linearize pipeline synth modeling)
   if(TARGET galata_${_part})
     set_target_properties(galata_${_part} PROPERTIES EXPORT_NAME ${_part})
     target_compile_features(galata_${_part} PUBLIC cxx_std_20)
