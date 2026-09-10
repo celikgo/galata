@@ -519,10 +519,13 @@ TEST_F(QuadrotorWorkflow, AScheduleThatMissesTheStepLatticeIsRefused) {
 namespace {
 
 // A study that designs a gain and then flies it. Everything here goes through
-// public capabilities; nothing reaches into C++ to build a controller.
-std::string sampled_chain(const std::string& trim_input,
-                          const std::string& sampled_extra,
-                          int steps = 400) {
+// public capabilities; nothing reaches into C++ to build a controller. The law
+// stage's head — which capability, and the keys before the weights — is the
+// caller's, so the same chain serves a continuous and a discrete design.
+std::string law_chain(const std::string& trim_input,
+                      const std::string& law_head,
+                      const std::string& sampled_extra,
+                      int steps) {
   std::ostringstream q;
   q << "[";
   for (int i = 0; i < 16; ++i) {
@@ -558,15 +561,37 @@ std::string sampled_chain(const std::string& trim_input,
          "      system: {from: linear}\n"
          "      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]\n"
          "      outputs: [position_north_m, position_east_m, altitude_m]\n"
-      << "  - id: lqr\n    capability: synth.lqr\n    input: {system: {from: rotors}, "
-         "break_at: plant_input, q: "
-      << q.str() << ", r: " << r.str() << "}\n"
+      << law_head << q.str() << ", r: " << r.str() << "}\n"
       << "  - id: closed\n    capability: sim.sampled\n    input:\n"
          "      trim: {from: hover}\n      law: {from: lqr}\n"
          "      step_s: 0.002\n      steps: "
       << steps << "\n"
       << sampled_extra;
   return out.str();
+}
+
+std::string sampled_chain(const std::string& trim_input,
+                          const std::string& sampled_extra,
+                          int steps = 400) {
+  return law_chain(trim_input,
+                   "  - id: lqr\n    capability: synth.lqr\n    input: {system: {from: rotors}, "
+                   "break_at: plant_input, q: ",
+                   sampled_extra,
+                   steps);
+}
+
+// The same chain with the law DESIGNED in discrete time, at 250 Hz unless the
+// caller says otherwise.
+std::string discrete_chain(const std::string& sampled_extra,
+                           const std::string& design_keys =
+                               "sample_time_s: 0.004, hold: zero_order, evidence_path: lqr.yaml",
+                           int steps = 400) {
+  return law_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                   "  - id: lqr\n    capability: synth.sampled_lqr\n    input: {system: {from: "
+                   "rotors}, "
+                       + design_keys + ", q: ",
+                   sampled_extra,
+                   steps);
 }
 
 }  // namespace
@@ -717,6 +742,168 @@ TEST_F(QuadrotorWorkflow, UnsupportedSampledTimingIsRefused) {
                                        "      delay_periods: 1.5\n"),
                          {.overwrite = true, .write_manifest = false}),
                std::runtime_error);
+}
+
+// --- a law designed in discrete time -----------------------------------------
+
+// THE PERIOD IS THE DESIGN'S. A discrete gain is optimal for the period its
+// plant and cost were discretised at and for no other, and no transformation
+// between rates is supported — so running it at any other period is refused,
+// faster and slower alike, and the refusal names the remedy.
+TEST_F(QuadrotorWorkflow, ADiscreteLawIsRefusedAtAPeriodItWasNotDesignedFor) {
+  for (const char* period : {"0.008", "0.002"}) {
+    try {
+      (void)run(discrete_chain(std::string("      controller_period_s: ") + period
+                               + "\n      hold: zero_order\n      delay_periods: 0\n"),
+                {.overwrite = true, .write_manifest = false});
+      ADD_FAILURE() << "a law designed at 0.004 s ran at " << period << " s";
+    } catch (const std::runtime_error& error) {
+      const std::string message = error.what();
+      EXPECT_NE(message.find("designed at a sample time of"), std::string::npos) << message;
+      EXPECT_NE(message.find("synth.sampled_lqr"), std::string::npos)
+          << "the refusal must name the redesign that would make it admissible: " << message;
+    }
+  }
+}
+
+// THE TIMING IS DECLARED. The design modelled a hold and no delay, so a study
+// flying it must state both rather than inherit defaults written for a
+// continuous law.
+TEST_F(QuadrotorWorkflow, ADiscreteLawMustDeclareItsHoldAndItsDelay) {
+  EXPECT_THROW((void)run(discrete_chain("      controller_period_s: 0.004\n"
+                                        "      delay_periods: 0\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "no hold declared";
+  EXPECT_THROW((void)run(discrete_chain("      controller_period_s: 0.004\n"
+                                        "      hold: zero_order\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "no delay declared";
+  EXPECT_THROW((void)run(discrete_chain("      controller_period_s: 0.004\n"
+                                        "      hold: first_order\n"
+                                        "      delay_periods: 0\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a hold this schedule does not execute";
+  // The design itself refuses the same hold, by the same name.
+  EXPECT_THROW(
+      (void)run(discrete_chain("      controller_period_s: 0.004\n"
+                               "      hold: zero_order\n"
+                               "      delay_periods: 0\n",
+                               "sample_time_s: 0.004, hold: tustin, evidence_path: lqr.yaml"),
+                {.overwrite = true, .write_manifest = false}),
+      std::runtime_error);
+}
+
+// THE INDEPENDENT CHECK, for a discrete law. As for the continuous one, the
+// trajectory is not re-derived; the SAMPLED LOGIC is. From the chart errors the
+// run recorded, the law is recomputed with the DISCRETE gain and required to
+// reproduce every requested command, the delay line is required to shift by
+// exactly the declared period, and the prediction is required to start where
+// the run did.
+TEST_F(QuadrotorWorkflow, TheDiscreteLawIsExecutedAsDesigned) {
+  const RunResult result = run(discrete_chain("      controller_period_s: 0.004\n"
+                                              "      hold: zero_order\n"
+                                              "      delay_periods: 1\n"
+                                              "      initial_chart_perturbation: "
+                                              "[0.2, -0.1, 0.1, 0,0,0, 0.01,0.0,0.0, 0,0,0, "
+                                              "0,0,0,0]\n"),
+                               {.overwrite = true, .write_manifest = false});
+  const auto& design =
+      result.find("lqr")->payload_as<galata::synth::SampledLqrDesign>("sampled_control_law");
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& control = result.find("closed")->payload_as<SampledRun>("sampled_trajectory").control;
+
+  EXPECT_EQ(control.law_time_domain, "discrete_design");
+  EXPECT_EQ(control.design_sample_time_s, 0.004);
+  ASSERT_GT(control.tick_times_s.size(), 10U);
+  for (std::size_t tick = 0; tick < control.tick_times_s.size(); ++tick) {
+    const Eigen::VectorXd expected =
+        trimmed.point.command_rad_s - design.riccati.k * control.chart_error[tick];
+    EXPECT_LT((expected - control.requested_rad_s[tick]).norm(), 1e-12) << "tick " << tick;
+    if (tick >= 1) {
+      EXPECT_LT((control.applied_rad_s[tick] - control.saturated_rad_s[tick - 1]).norm(), 1e-12)
+          << "tick " << tick << " did not receive the command computed one period earlier";
+    }
+  }
+  ASSERT_TRUE(control.prediction.available) << control.prediction.unavailable_reason;
+  EXPECT_EQ(control.prediction.predicted_chart.size(), control.tick_times_s.size() + 1);
+  EXPECT_EQ(control.prediction.predicted_chart.front(), control.chart_error.front());
+  EXPECT_FALSE(control.prediction.budget_declared)
+      << "no budget was declared, so the comparison is reported without a verdict";
+}
+
+// A GAIN ON THE WRONG BASIS IS REFUSED. With the allocation the identity, a law
+// whose inputs are the rotor commands in another order would drive each rotor
+// with another rotor's row of the gain — a plausible, wrong aircraft. The
+// check applies to a continuous law as much as to a discrete one.
+TEST_F(QuadrotorWorkflow, ALawWhoseInputsAreNotTheRotorCommandsInOrderIsRefused) {
+  for (const bool discrete : {false, true}) {
+    std::string study = discrete ? discrete_chain(
+                                       "      controller_period_s: 0.004\n"
+                                       "      hold: zero_order\n"
+                                       "      delay_periods: 0\n")
+                                 : sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                                                 "      controller_period_s: 0.004\n");
+    const std::string in_order = "inputs: [omega_command_0, omega_command_1,";
+    const auto at = study.find(in_order);
+    ASSERT_NE(at, std::string::npos);
+    study.replace(at, in_order.size(), "inputs: [omega_command_1, omega_command_0,");
+    try {
+      (void)run(study, {.overwrite = true, .write_manifest = false});
+      ADD_FAILURE() << "a permuted " << (discrete ? "discrete" : "continuous") << " law ran";
+    } catch (const std::runtime_error& error) {
+      EXPECT_NE(std::string(error.what()).find("rotor commands"), std::string::npos)
+          << error.what();
+    }
+  }
+}
+
+// A BUDGET ON NOTHING IS REFUSED. A continuous law has no discrete prediction,
+// and a declared wind history acts on the plant and not on a prediction; in
+// both cases a declared agreement budget would have nothing to hold.
+TEST_F(QuadrotorWorkflow, AnAgreementBudgetWithNothingToHoldIsRefused) {
+  EXPECT_THROW((void)run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                                       "      controller_period_s: 0.004\n"
+                                       "      linear_agreement_budget: 0.05\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a continuous law";
+  EXPECT_THROW((void)run(discrete_chain("      controller_period_s: 0.004\n"
+                                        "      hold: zero_order\n"
+                                        "      delay_periods: 0\n"
+                                        "      linear_agreement_budget: 0.05\n"
+                                        "      wind_schedule:\n"
+                                        "        hold: zero_order\n"
+                                        "        extrapolation: hold\n"
+                                        "        samples:\n"
+                                        "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                                        "          - {time_s: 0.4, values: [1.0, 0.0, 0.0]}\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a declared wind history";
+}
+
+// SAMPLED-LOOP MARGINS ARE NOT DELIVERED, and the continuous margin path does
+// not quietly supply them. `model.control_system` builds loops from a
+// CONTINUOUS design's plant; handed a discrete design it is refused by the
+// artefact kind, so no continuous-domain margin can be read off a sampled law.
+TEST_F(QuadrotorWorkflow, TheContinuousMarginPathRefusesADiscreteDesign) {
+  std::string study = discrete_chain(
+      "      controller_period_s: 0.004\n"
+      "      hold: zero_order\n"
+      "      delay_periods: 0\n");
+  study +=
+      "  - id: loop\n    capability: model.control_system\n    input: "
+      "{law: {from: lqr}, use: single_loop, channel: omega_command_0}\n";
+  try {
+    (void)run(study, {.overwrite = true, .write_manifest = false});
+    ADD_FAILURE() << "a discrete design reached the continuous margin path";
+  } catch (const std::runtime_error& error) {
+    EXPECT_NE(std::string(error.what()).find("sampled_control_law"), std::string::npos)
+        << error.what();
+  }
 }
 
 // --- the two analyses that were unavailable on this plant --------------------

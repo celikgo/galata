@@ -915,7 +915,7 @@ std::string markdown_document(const StageContext& context) {
       write_sensitivity_section(out, std::any_cast<const SensitivityArtifact&>(artifact.payload));
     } else if (artifact.kind == "disk_margin") {
       write_disk_margin_section(out, std::any_cast<const DiskMarginArtifact&>(artifact.payload));
-    } else if (!write_design_section(out, artifact)) {
+    } else if (!write_design_section(out, artifact) && !write_discrete_section(out, artifact)) {
       throw std::runtime_error("no report writer exists for artifact kind '" + artifact.kind + "'");
     }
     write_linearization_evidence(out, artifact);
@@ -1097,6 +1097,7 @@ Registry build_registry() {
   register_identify_capabilities(registry);
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);
+  register_discrete_capabilities(registry);
   return registry;
 }
 

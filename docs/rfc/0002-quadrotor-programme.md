@@ -1107,3 +1107,103 @@ SAMPLED loop's own robustness is unanswered — every margin in this repository 
 continuous loop, and no claim of sampled-loop robustness is made anywhere from one. Per
 `docs/product/FEATURES.md`, this implements the proposed work of F14 and part of F17 and
 delivers neither row; both stay open.
+
+### WP5 addendum — discrete-time synthesis through the public interface, 2026-09-11
+
+The paragraph above records `c2d`-style discretisation and a sampled DARE as absent. They are
+now present, and this addendum supersedes that one sentence of it and nothing else: the
+sampled loop's own robustness is **still unanswered**, and the per-F-row position below is
+unchanged.
+
+**What is delivered.** Three capabilities under vehicle-neutral ids, as the acceptance section
+decided, each registered with a closed input vocabulary and each implemented and unvalidated:
+
+| Capability | Takes | Produces | Refuses |
+|---|---|---|---|
+| `model.discretize` | a continuous `linear_system`, a required `sample_time_s`, a required `hold: zero_order` | a `discrete_linear_system` carrying its sample time, its hold and the discretisation's evidence | a discrete model; any other hold; a missing or non-positive sample time |
+| `synth.dare` | a `discrete_linear_system`, or bare `a` and `b` with a required `sample_time_s`; per-sample `q`, `r` and optional `n` | a `dare_solution` carrying the sample time it belongs to | a continuous model, naming `model.discretize`; both entry forms at once, or neither; a second sample time beside a model's own |
+| `synth.sampled_lqr` | a continuous `linear_system`, `sample_time_s`, `hold`, continuous `q`, `r`, optional `n`, and a required `evidence_path` | a `sampled_control_law` | a discrete model, naming `synth.dare`; any hold other than `zero_order` |
+
+Continuous and discrete models are **different artefact kinds**, not one kind with a flag, so
+every continuous capability already in the registry refuses a discrete one by the kind check,
+with both kinds named. `model.control_system` refuses a `sampled_control_law` for the same
+reason, so no continuous-domain margin can be read off a discrete design.
+
+**The cost.** `synth.sampled_lqr` discretises the plant AND the continuous cost under one hold
+at one sample time, by Van Loan's block exponential, and solves the discrete Riccati equation
+for that discretised problem. The hold produces a state-input cross term even where the
+declared continuous cost has none, and it is kept at every step: it goes to the solver, into
+the artefact, into the report section, and into the required evidence file beside the declared
+continuous weights. The cost is the sum over ticks of `x' Q x + 2 x' N u + u' R u`, with
+weights per sample. The gain is applied as `u[k] = -K x[k]`, with
+`K = (R + B'XB)^-1 (B'XA + N')`. The residual is that of the equation as posed, cross term
+included, relative to the norms of its terms, against a budget no caller can widen. Every
+closed-loop eigenvalue must lie strictly inside the unit circle and the symplectic spectrum
+must stay off it. Each of these is a refusal when it fails, never a returned result with a
+flag, and each is stated in the report section and in the evidence file.
+
+**Execution.** `sim.sampled` accepts a `sampled_control_law` beside the `control_law` it always
+took, and treats them differently:
+
+- It executes a discrete design **only at the period it was designed for**, and refuses every
+  other period. No transformation between rates is supported, so the refusal names the remedy,
+  which is a redesign at the execution period.
+- It requires the `hold` and the `delay_periods` to be declared rather than defaulted.
+- For both kinds of law, it refuses a gain whose inputs are not the vehicle's rotor commands in
+  the model's order, or whose chart does not match the vehicle's.
+
+With a discrete design, `sim.sampled` also computes the design's own prediction of its loop:
+the same discrete model, gain, whole-period delay and hold, from the same initial chart state.
+It reports the nonlinear run's discrepancy from that prediction in the design's cost-to-go
+norm, against an optional declared small-perturbation budget.
+
+**The acceptance case.** `examples/souxmar-sampled-lqr` runs the whole chain on the native
+Souxmar plant: trim, linearisation, discretisation and sampled synthesis, then nonlinear sampled
+simulation, with rotor lag, a declared one-period delay and per-rotor speed limits. Its
+small-perturbation budget was fixed in the study file before the study first ran, and the run
+lands **just outside** it. That was localised rather than absorbed:
+
+- The discrepancy is second order in the perturbation.
+- It is not the quadratic drag.
+- It is carried by the collective channel, where the thrust's ω² curvature turns differential
+  rotor commands into collective thrust. The budget's derivation did not count that mechanism.
+
+A two-sided labelled lock holds the finding. The negative control first chosen — a prediction
+one tick out in delay — turned out to be below the comparison's resolution at this
+perturbation. That is recorded by its own test. The delay line is certified by exact
+re-derivation instead, and the negative control is now a prediction at the wrong period. The
+example's README carries all of it.
+
+**Evidence.**
+
+- `DiscreteControl`, `DiscreteSystem` and `DiscretePrediction` in the `unit` tier hold the
+  closed forms, value iteration, the hand-integrated interval cost and the augmented-state
+  delay.
+- `DiscreteWorkflow` in the `integration` tier holds the three schemas against the same
+  references. It also holds the refusals between the time domains, the declared hold and
+  sample time, unknown keys, and evidence that a linearisation's record survives
+  discretisation and design as the same object.
+- The discrete-law tests in `QuadrotorWorkflow` hold the period refusal and the declared
+  timing, re-derive the executed commands from the discrete gain, and refuse a permuted
+  basis.
+- `ExampleSouxmarSampledLqr` runs the example.
+- `Determinism.ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns` and the fingerprint
+  battery's sampled-design section cover determinism.
+- The case registry records `sampled.discrete_references` and `sampled.small_perturbation`,
+  both self-consistent and neither validated.
+
+**What this still does not deliver.**
+
+- **No margin of the sampled loop** — gain, phase, delay or disk. It is not computed, and
+  nothing here implies one. A DARE solution whose closed loop lies inside the unit circle
+  says the nominal sampled loop converges. A run that converged is one trajectory. Neither is
+  a margin.
+- No delay-aware design.
+- No constrained design.
+- No hold other than zero-order.
+- No pencil-based solver for a transition too ill-conditioned to invert; that case is refused
+  by name.
+- No validation against a published DARE benchmark.
+
+Per `docs/product/FEATURES.md`, this implements the proposed work of F14. It still delivers
+neither F14 nor F17: both rows stay open while their dependencies are unresolved.

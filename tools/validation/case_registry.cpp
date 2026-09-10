@@ -720,6 +720,50 @@ const std::vector<Case>& validation_cases() {
        "aircraft blocks, sampled/hybrid execution and aircraft-model validity remain open; "
        "successful execution does not assess numerical accuracy for an arbitrary run."},
 
+      {"sampled.discrete_references",
+       "Exact zero-order-hold discretisation, the discrete Riccati equation and sampled LQR",
+       {"model.discretize", "synth.dare", "synth.sampled_lqr"},
+       "Closed-form scalar DARE; Riccati value iteration (Anderson & Moore, Optimal Control: "
+       "Linear Quadratic Methods, 1990, ch. 3); the hand-integrated cost of one held interval; "
+       "Van Loan, IEEE TAC 23(3), 1978, for the block-matrix exponential",
+       Status::SelfConsistent,
+       {E{kUnit, "DiscreteControl.TheScalarDareMatchesItsClosedFormSolution"},
+        E{kUnit, "DiscreteControl.ADareWithACrossTermAgreesWithValueIteration"},
+        E{kUnit, "DiscreteControl.TheDiscretisedCostMatchesTheHandIntegratedInterval"},
+        E{kUnit, "DiscreteSystem.AHeldInputTrajectoryAgreesWithTheExactContinuousSolution"},
+        E{kIntegration, "DiscreteWorkflow.TheScalarDareThroughThePipelineMatchesItsClosedForm"},
+        E{kIntegration,
+          "DiscreteWorkflow.ASampledDesignThroughThePipelineAgreesWithValueIteration"}},
+       "Every reference is independent of the routine it checks: an algebraic closed form, a "
+       "Riccati iteration that forms no symplectic matrix and no Schur decomposition, and an "
+       "interval cost integrated by hand, which is what shows the hold's cross term exists and "
+       "pins its size. None is a published DARE benchmark; the DAREX collection has not been "
+       "transcribed, so none of these capabilities claims validation. The refusals F14 names "
+       "are held beside these, through the pipeline as well as the library."},
+      {"sampled.small_perturbation",
+       "A discrete design's own prediction against the nonlinear plant it was designed from",
+       {"sim.sampled", "synth.sampled_lqr"},
+       "First-order agreement with a second-order remainder under small perturbation; Astrom & "
+       "Wittenmark, Computer-Controlled Systems, 3rd ed., 1997, section 2.3, for a whole-period "
+       "delay represented exactly by extra states",
+       Status::SelfConsistent,
+       {E{kUnit, "DiscretePrediction.AMultivariableDelayedLoopMatchesTheAugmentedStateMatrix"},
+        E{kIntegration, "ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution"},
+        E{kIntegration, "ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock"}},
+       "The prediction is shown right to first order by the scaling of its miss, and a negative "
+       "control shows the same test failing a prediction made at the wrong period. It does NOT "
+       "resolve a one-tick delay error at this perturbation, which is recorded by its own test; "
+       "the delay line is certified by exact re-derivation instead. At the example's declared "
+       "perturbation the run falls just outside the budget the study set before its first run. "
+       "The excess is localised to the collective channel, where the thrust's quadratic "
+       "curvature turns differential rotor commands into collective thrust, and is held by a "
+       "two-sided labelled lock rather than absorbed. No margin of the sampled loop is computed "
+       "or implied."},
+
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
        "Full CAREX and DAREX benchmark collections and generalised-pencil solvers",
@@ -727,8 +771,11 @@ const std::vector<Case>& validation_cases() {
        "",
        Status::NotImplemented,
        {},
-       "Only the bounded continuous-time Schur solver and small worked comparisons exist. "
-       "Singular or indefinite costs and discrete-time Riccati equations remain unsupported."},
+       "Bounded continuous- and discrete-time Schur solvers exist, with small worked, "
+       "closed-form and value-iteration comparisons. The benchmark collections have not been "
+       "transcribed. Singular or indefinite costs remain unsupported, and so does a discrete "
+       "problem whose transition A - B R^-1 N' is too ill-conditioned to invert, which a "
+       "pencil-based QZ solver would handle and which is refused by name instead."},
 
   };
   return cases;

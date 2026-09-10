@@ -548,7 +548,17 @@ Artifact csv(const StageContext& context) {
       out << ',' << csv_label("applied:omega_" + index + "_rad_s");
     }
     out << ',' << csv_label("wind:north_m_s") << ',' << csv_label("wind:east_m_s") << ','
-        << csv_label("wind:down_m_s") << '\n';
+        << csv_label("wind:down_m_s");
+    // A discrete design's prediction of its own loop, beside what the plant did,
+    // in the same chart coordinates and at the same ticks. Both columns, because
+    // the discrepancy the report summarises is only checkable from the pair.
+    const LinearPredictionRecord& prediction = sampled.control.prediction;
+    if (prediction.available) {
+      for (const std::string& name : prediction.chart_names) {
+        out << ',' << csv_label("chart:" + name) << ',' << csv_label("predicted:" + name);
+      }
+    }
+    out << '\n';
     for (std::size_t i = 0; i < plant.trajectory.states.size(); ++i) {
       out << plant.trajectory.times_s[i];
       const auto& x = plant.trajectory.states[i];
@@ -564,7 +574,15 @@ Artifact csv(const StageContext& context) {
         out << ',' << sampled.control.applied_rad_s[tick](j);
       }
       const Eigen::Vector3d& wind_now = plant.wind_samples_ned_m_s[i];
-      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z();
+      if (prediction.available) {
+        const Eigen::VectorXd& measured = prediction.measured_chart[i];
+        const Eigen::VectorXd& predicted = prediction.predicted_chart[i];
+        for (Eigen::Index j = 0; j < measured.size(); ++j) {
+          out << ',' << measured(j) << ',' << predicted(j);
+        }
+      }
+      out << '\n';
     }
   } else if (source.kind == "plant_trajectory") {
     // The columns are the model's, so they are read from the run rather than
@@ -1017,19 +1035,97 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
         << "| Ticks at which saturation changed the command | " << control.saturated_tick_count
         << " |\n"
         << "| Worst single-channel saturation residual | "
-        << control.worst_saturation_residual_rad_s << " rad/s |\n\n";
+        << control.worst_saturation_residual_rad_s << " rad/s |\n";
+    const bool discrete = control.law_time_domain == "discrete_design";
+    out << "| Law | "
+        << (discrete ? "discrete design, executed at the period it was designed for"
+                     : "continuous design, executed at a rate (emulation)")
+        << " |\n"
+        << "| Design sample time | ";
+    if (discrete) {
+      out << control.design_sample_time_s << " s";
+    } else {
+      out << "none — a continuous design has no sample time";
+    }
+    out << " |\n| Hold | " << control.hold << " |\n\n";
     if (control.saturated_tick_count > 0) {
       out << "The law asked for authority it did not get at " << control.saturated_tick_count
           << " tick(s). The residual above is the honest measure of how much: a run reported "
              "only through its applied commands would not show it.\n\n";
     }
+    if (discrete) {
+      const LinearPredictionRecord& prediction = control.prediction;
+      out << "### The discrete design's own prediction\n\n";
+      if (!prediction.available) {
+        out << "No comparison was made: " << prediction.unavailable_reason << ".\n\n";
+      } else {
+        out << "| Quantity | Value |\n|---|---|\n"
+            << "| Worst discrepancy over the prediction's peak, in the design's cost-to-go norm "
+               "| ";
+        if (prediction.relative_discrepancy_defined) {
+          out << prediction.relative_discrepancy;
+        } else {
+          out << "undefined — the prediction is identically zero, because the run started at "
+                 "the reference";
+        }
+        out << " |\n| At tick | " << prediction.worst_tick << " |\n"
+            << "| Smallest over largest eigenvalue of the cost-to-go X | "
+            << prediction.cost_to_go_eigenvalue_ratio << " |\n"
+            << "| Declared small-perturbation budget | ";
+        if (prediction.budget_declared) {
+          out << prediction.budget << " |\n| Verdict | "
+              << (prediction.within_budget ? "within the declared budget"
+                                           : "**OUTSIDE the declared budget**");
+        } else {
+          out << "none declared; reported without a verdict";
+        }
+        out << " |\n\n";
+        if (prediction.premise_violated_by_saturation) {
+          out << "**The run saturated, and the prediction has no actuator limits.** The "
+                 "comparison above is outside the premise it rests on.\n\n";
+        }
+        out << "| Chart coordinate | Peak of the prediction | Worst absolute discrepancy |\n"
+               "|---|---:|---:|\n";
+        for (std::size_t j = 0; j < prediction.chart_names.size(); ++j) {
+          const auto index = static_cast<Eigen::Index>(j);
+          double peak = 0.0;
+          double miss = 0.0;
+          for (std::size_t k = 0; k < prediction.predicted_chart.size(); ++k) {
+            peak = std::fmax(peak, std::fabs(prediction.predicted_chart[k](index)));
+            miss = std::fmax(miss,
+                             std::fabs(prediction.measured_chart[k](index)
+                                       - prediction.predicted_chart[k](index)));
+          }
+          out << "| " << prediction.chart_names[j] << " | " << peak << " | " << miss << " |\n";
+        }
+        out << "\nThe prediction is the design's own discrete model, iterated with the same "
+               "gain, the same whole-period delay and the same hold from the same initial chart "
+               "state. It has no nonlinearity and no actuator limits, so the discrepancy is the "
+               "linearisation's error plus whatever else the run did that the design did not "
+               "model. The chart coordinates mix units, which is why the headline uses the "
+               "design's own cost-to-go norm and the table above shows each coordinate in its "
+               "own unit.\n\n";
+      }
+    }
     matrix_table(
         out, "Final state", sampled.plant.trajectory.states.back(), sampled.plant.state_names);
-    out << "This is the NONLINEAR plant, executed with zero-order hold and a whole-period "
-           "delay. Gain and phase margins computed from the continuous linearisation describe "
-           "the continuous loop and not this one; the sampled loop's own robustness is a "
-           "separate question no capability here answers. Use report.csv for the requested and "
-           "applied commands at every tick.\n\n";
+    if (discrete) {
+      out << "This is the NONLINEAR plant, flown by a law designed in discrete time for this "
+             "period and this hold. A Riccati solution whose closed loop lies inside the unit "
+             "circle and a run that converged are both statements about the nominal loop: "
+             "neither is a gain, phase, delay or disk margin of the sampled loop, and the "
+             "sampled loop's own robustness is a separate question no capability here answers. "
+             "The design modelled no delay, so the "
+          << control.delay_periods
+          << " period(s) of delay this run applied are a plant it did not see. Use report.csv "
+             "for the requested, applied, measured and predicted values at every tick.\n\n";
+    } else {
+      out << "This is the NONLINEAR plant, executed with zero-order hold and a whole-period "
+             "delay. Gain and phase margins computed from the continuous linearisation describe "
+             "the continuous loop and not this one; the sampled loop's own robustness is a "
+             "separate question no capability here answers. Use report.csv for the requested "
+             "and applied commands at every tick.\n\n";
+    }
     return true;
   }
   if (artifact.kind == "nonlinear_trajectory") {

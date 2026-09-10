@@ -24,7 +24,9 @@
 #include "galata/model/linear_system.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
+#include "galata/sim/discrete.hpp"
 #include "galata/sim/rigid_body.hpp"
+#include "galata/synth/discrete_control.hpp"
 #include "galata/trim/hover.hpp"
 
 #include "fingerprint.hpp"
@@ -264,6 +266,42 @@ TEST(Determinism, NoLongDoubleInTheNumericalCore) {
 // ADR-0002 thirteen. Both facts are new places for determinism to break: a
 // std::clamp whose bounds are computed differently between runs, or a rotor
 // loop whose order is not fixed, would show up here and nowhere else.
+// A sampled design is a new place for determinism to break, and it breaks
+// differently from the continuous one. The matrix exponential chooses a Pade
+// order and a squaring count from a norm; the discrete Riccati solution
+// reorders a Schur form by exchanges; the prediction iterates a delay line.
+// Each of those is a closed form or a fixed count rather than a tolerance, and
+// this holds it: the design and its prediction, twice, bit for bit, on a plant
+// with a lagged actuator so the exponential has a fast mode to scale.
+TEST(Determinism, ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns) {
+  galata::model::LinearSystem plant;
+  plant.a = Eigen::MatrixXd::Zero(3, 3);
+  plant.a << 0.0, 1.0, 0.0, 0.0, -0.4, 2.0, 0.0, 0.0, -28.6;
+  plant.b = Eigen::MatrixXd::Zero(3, 1);
+  plant.b(2, 0) = 28.6;
+  plant.state_names = {"position_m", "velocity_m_s", "actuator"};
+  plant.input_names = {"command"};
+  Eigen::MatrixXd q = Eigen::MatrixXd::Zero(3, 3);
+  q.diagonal() << 40.0, 1.0, 0.001;
+  const Eigen::MatrixXd r = Eigen::MatrixXd::Constant(1, 1, 0.02);
+
+  const auto run = [&]() {
+    const auto design = galata::synth::design_sampled_lqr(plant, q, r, {}, 0.004);
+    const auto prediction = galata::sim::predict_sampled_loop(
+        design.discretisation.system, design.riccati.k, 1, Eigen::Vector3d(0.2, 0.0, 0.0), 750);
+    return std::make_pair(design, prediction);
+  };
+  const auto [first_design, first_prediction] = run();
+  const auto [second_design, second_prediction] = run();
+
+  EXPECT_EQ(first_design.discretisation.system.a, second_design.discretisation.system.a);
+  EXPECT_EQ(first_design.cost.n, second_design.cost.n);
+  EXPECT_EQ(first_design.riccati.x, second_design.riccati.x);
+  EXPECT_EQ(first_design.riccati.k, second_design.riccati.k);
+  EXPECT_EQ(first_design.riccati.relative_residual, second_design.riccati.relative_residual);
+  EXPECT_EQ(first_prediction.states.back(), second_prediction.states.back());
+}
+
 TEST(Determinism, QuadrotorTrajectoryIsBitIdenticalAcrossRuns) {
   const galata::model::Quadrotor model = galata::model::load_quadrotor(
       std::string(GALATA_MODELS_DIR) + "/souxmar-quad/souxmar-quad.yaml");

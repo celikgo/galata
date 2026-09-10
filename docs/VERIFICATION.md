@@ -57,8 +57,8 @@ Four checks stand behind it, each a test rather than a convention:
 | Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
 | All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
-| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux and macOS over 171 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
-| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 52 of the 171 values — because dividing by h amplifies a libm disagreement by 1/h. |
+| Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux and macOS over 187 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
+| Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 52 of the 187 values — because dividing by h amplifies a libm disagreement by 1/h. |
 | Frequency response G(jw) against closed-form transfer functions | Closed-form evaluation of rational transfer functions at s = jw | **validated** — The reference is arithmetic, not a document: for a system whose transfer function can be written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding. |
 | The hand-written Hessenberg solver against a general LU on the unreduced matrix | Laub, *Efficient multivariable frequency response computations*, IEEE TAC 26(2) (1981) | **validated** — Two different eliminations of the same system over a grid reaching a condition number above 1e6. The gate is kappa * eps — the conditioning of the problem — not a chosen tolerance. |
 | Gain, phase and delay margins against loops whose margins are exact | Franklin, Powell & Emami-Naeini, *Feedback Control of Dynamic Systems*; Astrom & Murray, *Feedback Systems*, ch. 10 | **validated** — 1/(s(s+1)(s+2)) has gain margin exactly 6 at exactly sqrt(2) rad/s, and 1/(s(s+1)^2) exactly 2 at exactly 1 rad/s. The delay margin is checked by PROPERTY as well as by formula: applying the reported delay must land the loop on the critical point. |
@@ -75,7 +75,9 @@ Four checks stand behind it, each a test rather than a convention:
 | Hamiltonian H-infinity and sensitivity/disk bounds | Benner & Mitchell, arXiv:1707.02497, Theorem 2.1; Seiler, Packard & Gahinet (2020) | self-consistent, not externally validated — Analytic scalar/MIMO cases check DC, feedthrough, a narrow resonance and conservative reciprocal direction. The eigensystem is checked numerically; this is not a directed-rounding enclosure or an independent-package benchmark collection. |
 | Linear/nonlinear time histories and local convergence | Hairer, Norsett & Wanner, Solving Ordinary Differential Equations I (1993); smooth-ODE RK4 order and small-disturbance linearization | self-consistent, not externally validated — The actuator is checked against its exact exponential; smooth aircraft trajectories are checked under step halving and shrinking perturbations against a full linearization with actuator lags. Flight-data validation remains absent. |
 | Experimental continuous scalar graph compilation and simulation | MODEL_CONFORMANCE.md MC01-MC26/B01-B04; analytic linear ODEs and independent RK4 polynomial | unvalidated — Synthetic analytic, structural/refusal, parser and source-to-run contracts cover the bounded continuous scalar feasibility profile. Broader platform/reviewer acceptance, aircraft blocks, sampled/hybrid execution and aircraft-model validity remain open; successful execution does not assess numerical accuracy for an arbitrary run. |
-| Full CAREX and DAREX benchmark collections and generalised-pencil solvers | — | not implemented — Only the bounded continuous-time Schur solver and small worked comparisons exist. Singular or indefinite costs and discrete-time Riccati equations remain unsupported. |
+| Exact zero-order-hold discretisation, the discrete Riccati equation and sampled LQR | Closed-form scalar DARE; Riccati value iteration (Anderson & Moore, Optimal Control: Linear Quadratic Methods, 1990, ch. 3); the hand-integrated cost of one held interval; Van Loan, IEEE TAC 23(3), 1978, for the block-matrix exponential | self-consistent, not externally validated — Every reference is independent of the routine it checks: an algebraic closed form, a Riccati iteration that forms no symplectic matrix and no Schur decomposition, and an interval cost integrated by hand, which is what shows the hold's cross term exists and pins its size. None is a published DARE benchmark; the DAREX collection has not been transcribed, so none of these capabilities claims validation. The refusals F14 names are held beside these, through the pipeline as well as the library. |
+| A discrete design's own prediction against the nonlinear plant it was designed from | First-order agreement with a second-order remainder under small perturbation; Astrom & Wittenmark, Computer-Controlled Systems, 3rd ed., 1997, section 2.3, for a whole-period delay represented exactly by extra states | self-consistent, not externally validated — The prediction is shown right to first order by the scaling of its miss, and a negative control shows the same test failing a prediction made at the wrong period. It does NOT resolve a one-tick delay error at this perturbation, which is recorded by its own test; the delay line is certified by exact re-derivation instead. At the example's declared perturbation the run falls just outside the budget the study set before its first run. The excess is localised to the collective channel, where the thrust's quadratic curvature turns differential rotor commands into collective thrust, and is held by a two-sided labelled lock rather than absorbed. No margin of the sampled loop is computed or implied. |
+| Full CAREX and DAREX benchmark collections and generalised-pencil solvers | — | not implemented — Bounded continuous- and discrete-time Schur solvers exist, with small worked, closed-form and value-iteration comparisons. The benchmark collections have not been transcribed. Singular or indefinite costs remain unsupported, and so does a discrete problem whose transition A - B R^-1 N' is too ill-conditioned to invert, which a pencil-based QZ solver would handle and which is refused by name instead. |
 
 ### Evidence
 
@@ -131,6 +133,8 @@ ctest --preset dev -R '<test name>'
 | Hamiltonian H-infinity and sensitivity/disk bounds | `Hinfinity.NarrowResonanceMissedByAFrequencyGridIsBracketed` (unit)<br>`Hinfinity.DiagonalAndRectangularMimoMatchAnalyticSingularValues` (unit)<br>`RobustBounds.DiskEndpointsInvertTheNormInTheConservativeDirection` (unit) |
 | Linear/nonlinear time histories and local convergence | `NonlinearSimulation.UnsaturatedActuatorStepConvergesToTheExponentialAtFourthOrder` (unit)<br>`SimulationConvergence.NonlinearPipelineConvergesUnderStepHalving` (integration)<br>`SimulationConvergence.SmallDisturbancePipelineApproachesTheAugmentedLinearClosedLoop` (integration) |
 | Experimental continuous scalar graph compilation and simulation | `Modeling.ExponentialFeedbackMatchesIndependentRk4PolynomialAndContinuousBounds` (unit)<br>`Modeling.CoupledOscillatorUsesOneTemporaryStateForAllDerivatives` (unit)<br>`ModelIo.CanonicalVersionHasAHandSpecifiedByteContract` (unit)<br>`ModelWorkflow.CompiledFeedbackProducesLabeledSamplesAndExplicitEvidenceLimits` (integration) |
+| Exact zero-order-hold discretisation, the discrete Riccati equation and sampled LQR | `DiscreteControl.TheScalarDareMatchesItsClosedFormSolution` (unit)<br>`DiscreteControl.ADareWithACrossTermAgreesWithValueIteration` (unit)<br>`DiscreteControl.TheDiscretisedCostMatchesTheHandIntegratedInterval` (unit)<br>`DiscreteSystem.AHeldInputTrajectoryAgreesWithTheExactContinuousSolution` (unit)<br>`DiscreteWorkflow.TheScalarDareThroughThePipelineMatchesItsClosedForm` (integration)<br>`DiscreteWorkflow.ASampledDesignThroughThePipelineAgreesWithValueIteration` (integration) |
+| A discrete design's own prediction against the nonlinear plant it was designed from | `DiscretePrediction.AMultivariableDelayedLoopMatchesTheAugmentedStateMatrix` (unit)<br>`ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation` (integration)<br>`ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest` (integration)<br>`ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution` (integration)<br>`ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` (integration) |
 | Full CAREX and DAREX benchmark collections and generalised-pencil solvers | — |
 
 ### Capabilities, and the cases that validate them
@@ -164,6 +168,7 @@ against.
 | `model.channels` | implemented, unvalidated | — |
 | `model.compile` | implemented, unvalidated | — |
 | `model.control_system` | implemented, unvalidated | — |
+| `model.discretize` | implemented, unvalidated | — |
 | `model.feedback` | implemented, unvalidated | — |
 | `model.linear.export` | implemented, unvalidated | — |
 | `model.linear.statespace` | implemented, unvalidated | — |
@@ -181,8 +186,10 @@ against.
 | `sim.plant` | implemented, unvalidated | — |
 | `sim.sampled` | implemented, unvalidated | — |
 | `synth.care` | implemented and validated | `synth.care.worked` |
+| `synth.dare` | implemented, unvalidated | — |
 | `synth.lqr` | implemented, unvalidated | — |
 | `synth.pid` | implemented, unvalidated | — |
+| `synth.sampled_lqr` | implemented, unvalidated | — |
 | `trim.hover` | implemented, unvalidated | `quadrotor.hover_trim` |
 | `trim.level` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 
@@ -282,7 +289,7 @@ ADR-0004 defines two tiers, and both are gated by
 `.github/workflows/determinism.yml` on Linux and macOS.
 
 **Tier 1 — same binary, same platform, byte-identical.** `tools/determinism`
-emits 171 values at `%.17g`, which round-trips a double exactly, so byte-identical
+emits 187 values at `%.17g`, which round-trips a double exactly, so byte-identical
 output means bit-identical values rather than values that merely print the same.
 Gated absolutely on every platform.
 
@@ -293,7 +300,7 @@ is an arbitrary choice that then shows up in the published numbers. The gate is
 far below the roughly 1e-5 that any real divergence in the physics would
 produce, so it discriminates between "different libm" and "different answer".
 
-119 of the 171 fingerprinted values are compared this way. The
+135 of the 187 fingerprinted values are compared this way. The
 other 52 are downstream of a finite difference and are held byte-identical
 in tier 1 instead, for the reason given below.
 

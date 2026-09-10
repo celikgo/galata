@@ -13,7 +13,9 @@
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/sim/discrete.hpp"
 #include "galata/synth/control.hpp"
+#include "galata/synth/discrete_control.hpp"
 
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
@@ -24,6 +26,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -520,6 +523,362 @@ TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousD
            "but a shipped example whose design sat the wrong side of it would be one nobody "
            "should copy";
   }
+}
+
+// ===========================================================================
+// A discrete design on the native Souxmar plant
+// ===========================================================================
+//
+// `examples/souxmar-sampled-lqr` designs in DISCRETE time, flies the design at
+// the period it was designed for against the nonlinear plant, and compares the
+// run with the design's own prediction of its loop.
+//
+// Each test runs into ITS OWN directory. gtest_discover_tests makes every test
+// a separate ctest entry, entries run concurrently, and RFC-0002's housekeeping
+// section records the race a shared per-example directory caused.
+
+namespace souxmar {
+
+using galata::pipeline::LinearPredictionRecord;
+using galata::pipeline::RunResult;
+using galata::pipeline::SampledRun;
+
+const std::string kExample = "souxmar-sampled-lqr";
+// The perturbation the study declares, restated rather than parsed, so that a
+// study that quietly changed it fails the text match below instead of moving
+// the comparison along with it.
+const std::string kDeclaredPerturbation =
+    "[0.2, -0.1, 0.15, 0, 0, 0, 0.01, -0.01, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+const std::string kHalvedPerturbation =
+    "[0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+// What the study declares, restated for the same reason.
+constexpr double kDeclaredBudget = 0.05;
+constexpr double kControllerPeriodS = 0.004;
+
+std::filesystem::path scratch(const std::string& test) {
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / (kExample + "-" + test);
+  std::filesystem::create_directories(directory);
+  return directory;
+}
+
+RunResult run_shipped(const std::string& test) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample;
+  return galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "study.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      scratch(test).string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+}
+
+// The shipped study with ONE edit: the perturbation. The model path is made
+// absolute because the copy does not live beside the models directory; every
+// other byte of the text is the shipped study's.
+RunResult run_with_perturbation(const std::string& test, const std::string& perturbation) {
+  std::string text =
+      read_file(std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample / "study.yaml");
+  const auto replace = [&text](const std::string& from, const std::string& to) {
+    const auto at = text.find(from);
+    if (at == std::string::npos) {
+      ADD_FAILURE() << "the shipped study no longer contains '" << from << "'";
+      return;
+    }
+    text.replace(at, from.size(), to);
+  };
+  replace(
+      "../../models/souxmar-quad/souxmar-quad.yaml",
+      (std::filesystem::path(GALATA_MODELS_DIR) / "souxmar-quad" / "souxmar-quad.yaml").string());
+  replace(kDeclaredPerturbation, perturbation);
+  const auto directory = scratch(test);
+  const auto copy = directory / "study.yaml";
+  {
+    std::ofstream file(copy);
+    file << text;
+  }
+  return galata::pipeline::run_pipeline(galata::pipeline::load_pipeline(copy.string()),
+                                        galata::pipeline::builtin_registry(),
+                                        directory.string(),
+                                        (directory / "output").string(),
+                                        nullptr,
+                                        galata::pipeline::RunOptions{.overwrite = true});
+}
+
+const SampledRun& sampled_run(const galata::pipeline::RunResult& result) {
+  const galata::pipeline::Artifact* closed = result.find("closed");
+  if (closed == nullptr) {
+    throw std::runtime_error("the study has no stage 'closed'");
+  }
+  return closed->payload_as<SampledRun>("sampled_trajectory");
+}
+
+const galata::synth::SampledLqrDesign& design_of(const galata::pipeline::RunResult& result) {
+  const galata::pipeline::Artifact* sampled = result.find("sampled");
+  if (sampled == nullptr) {
+    throw std::runtime_error("the study has no stage 'sampled'");
+  }
+  return sampled->payload_as<galata::synth::SampledLqrDesign>("sampled_control_law");
+}
+
+// The design's cost-to-go norm, recomputed here from the recorded vectors and
+// the design's own X rather than read back from the record.
+double x_norm(const Eigen::VectorXd& value, const Eigen::MatrixXd& x) {
+  return std::sqrt(std::fmax(0.0, value.dot(x * value)));
+}
+
+double worst_miss(const std::vector<Eigen::VectorXd>& measured,
+                  const std::vector<Eigen::VectorXd>& predicted,
+                  const Eigen::MatrixXd& x) {
+  double worst = 0.0;
+  for (std::size_t k = 0; k < measured.size(); ++k) {
+    worst = std::fmax(worst, x_norm(measured[k] - predicted[k], x));
+  }
+  return worst;
+}
+
+double peak(const std::vector<Eigen::VectorXd>& predicted, const Eigen::MatrixXd& x) {
+  double largest = 0.0;
+  for (const Eigen::VectorXd& value : predicted) {
+    largest = std::fmax(largest, x_norm(value, x));
+  }
+  return largest;
+}
+
+// THE ORDER GATE, fixed before any run and derived from the two hypotheses it
+// separates. A prediction that is right to first order misses by O(delta^2),
+// so halving the perturbation divides the miss by four: observed order 2. A
+// prediction that is structurally wrong misses by O(delta): order 1. The gate
+// is the midpoint. What it can see is a structural error LARGER than the
+// second-order term at the tested perturbation — see the two tests below for
+// one it sees and one it does not.
+constexpr double kOrderGate = 1.5;
+
+double observed_order(double miss_at_delta, double miss_at_half_delta) {
+  return std::log2(miss_at_delta / miss_at_half_delta);
+}
+
+}  // namespace souxmar
+
+TEST(ExampleSouxmarSampledLqr, RunsEndToEndOnTheNativePlant) {
+  const auto result = souxmar::run_shipped("end-to-end");
+  ASSERT_EQ(result.stages.size(), 9U);
+  const std::vector<std::string> expected = {"model.quadrotor",
+                                             "trim.hover",
+                                             "linearize.extended",
+                                             "model.channels",
+                                             "model.discretize",
+                                             "synth.sampled_lqr",
+                                             "sim.sampled",
+                                             "report.csv",
+                                             "report.markdown"};
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(result.stages[i].capability, expected[i]) << "stage " << i;
+  }
+
+  // The NATIVE model, read from the models directory and not from a copy.
+  const auto& plant =
+      result.find("plant")->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  EXPECT_NE(plant.identity.path.find("models/souxmar-quad/souxmar-quad.yaml"), std::string::npos)
+      << plant.identity.path;
+
+  // The explicit adapter and the design discretise the same plant the same way.
+  const auto& design = souxmar::design_of(result);
+  const auto& discretised =
+      result.find("discrete")->payload_as<galata::model::Discretisation>("discrete_linear_system");
+  EXPECT_EQ(discretised.system.a, design.discretisation.system.a);
+  EXPECT_EQ(discretised.system.b, design.discretisation.system.b);
+  EXPECT_LT(design.riccati.spectral_radius, 1.0);
+  EXPECT_LE(design.riccati.relative_residual, design.riccati.residual_budget);
+
+  // THE CROSS TERM, retained from the discretised cost through to the file. The
+  // study declares no continuous cross term, so any nonzero N is the hold's.
+  EXPECT_EQ(design.continuous_n.norm(), 0.0);
+  EXPECT_GT(design.cost.n.norm(), 0.0);
+  const std::string evidence = read_file(souxmar::scratch("end-to-end") / "sampled-lqr.yaml");
+  EXPECT_NE(evidence.find("discretised_cost:"), std::string::npos);
+  EXPECT_NE(evidence.find("the cross term n is the hold's own and is RETAINED"), std::string::npos);
+  EXPECT_NE(evidence.find("not_established:"), std::string::npos);
+
+  // Flown at the period it was designed for, with the timing the study states.
+  const auto& control = souxmar::sampled_run(result).control;
+  EXPECT_EQ(control.law_time_domain, "discrete_design");
+  EXPECT_EQ(control.design_sample_time_s, souxmar::kControllerPeriodS);
+  EXPECT_EQ(control.controller_period_s, souxmar::kControllerPeriodS);
+  EXPECT_EQ(control.hold, "zero_order");
+  EXPECT_EQ(control.delay_periods, 1);
+  EXPECT_EQ(control.saturated_tick_count, 0)
+      << "the prediction has no actuator limits, so a run that saturated would be outside the "
+         "premise the comparison rests on";
+
+  const galata::pipeline::LinearPredictionRecord& prediction = control.prediction;
+  ASSERT_TRUE(prediction.available) << prediction.unavailable_reason;
+  ASSERT_TRUE(prediction.budget_declared);
+  EXPECT_EQ(prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_EQ(prediction.predicted_chart.front(), prediction.measured_chart.front())
+      << "the prediction starts from exactly the chart state the run started from";
+  // The headline, re-derived here from the vectors rather than trusted.
+  EXPECT_NEAR(
+      prediction.relative_discrepancy,
+      souxmar::worst_miss(prediction.measured_chart, prediction.predicted_chart, design.riccati.x)
+          / souxmar::peak(prediction.predicted_chart, design.riccati.x),
+      1e-12);
+
+  // And the report does not let the comparison be read as a margin.
+  const std::string report = read_file(souxmar::scratch("end-to-end") / "sampled-lqr.md");
+  EXPECT_NE(report.find("sampled loop's own robustness"), std::string::npos);
+  EXPECT_NE(report.find("no capability here computes one"), std::string::npos);
+}
+
+// THE CHECK THAT GIVES THE BUDGET ITS MEANING. The study's budget is a number;
+// what makes a number of that kind worth having is that the prediction it
+// bounds is right to first order, and that is a property the perturbation's
+// SCALING exposes and its size does not.
+TEST(ExampleSouxmarSampledLqr, TheDisagreementIsSecondOrderInThePerturbation) {
+  const auto full = souxmar::run_shipped("order-full");
+  const auto half = souxmar::run_with_perturbation("order-half", souxmar::kHalvedPerturbation);
+  const auto& x = souxmar::design_of(full).riccati.x;
+  const auto& at_full = souxmar::sampled_run(full).control.prediction;
+  const auto& at_half = souxmar::sampled_run(half).control.prediction;
+  ASSERT_TRUE(at_full.available && at_half.available);
+  EXPECT_EQ(souxmar::sampled_run(half).control.saturated_tick_count, 0);
+
+  const double order = souxmar::observed_order(
+      souxmar::worst_miss(at_full.measured_chart, at_full.predicted_chart, x),
+      souxmar::worst_miss(at_half.measured_chart, at_half.predicted_chart, x));
+  EXPECT_GT(order, souxmar::kOrderGate)
+      << "halving the perturbation must divide the miss by about four; observed order " << order
+      << ". An order near one means the prediction is structurally wrong, not merely "
+         "linearised";
+}
+
+namespace souxmar {
+
+// The observed order of the miss between the two runs and a prediction the
+// CALLER builds from the recorded initial chart state — the control tests'
+// way of asking the gate about a prediction the capability did not make.
+template <typename Predict>
+double order_against(const galata::pipeline::RunResult& full,
+                     const galata::pipeline::RunResult& half,
+                     const Eigen::MatrixXd& x,
+                     Predict predict) {
+  const auto miss = [&](const galata::pipeline::RunResult& result) {
+    const auto& prediction = sampled_run(result).control.prediction;
+    const auto wrong = predict(prediction.measured_chart.front(),
+                               static_cast<int>(prediction.measured_chart.size()) - 1);
+    return worst_miss(prediction.measured_chart, wrong.states, x);
+  };
+  return observed_order(miss(full), miss(half));
+}
+
+}  // namespace souxmar
+
+// THE NEGATIVE CONTROL, without which the order gate above would measure
+// nothing. The same two runs, against a prediction made at the WRONG PERIOD:
+// the design's gain on the plant discretised at 8 ms, while the law was designed
+// for and flown at 4 ms. That is exactly the mismatch `sim.sampled` refuses to
+// execute, its error is first order in the perturbation, and the gate must see
+// it.
+TEST(ExampleSouxmarSampledLqr, APredictionAtTheWrongPeriodFailsTheSameOrderTest) {
+  const auto full = souxmar::run_shipped("period-full");
+  const auto half = souxmar::run_with_perturbation("period-half", souxmar::kHalvedPerturbation);
+  const auto& design = souxmar::design_of(full);
+  const auto& continuous =
+      full.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system");
+  const galata::model::Discretisation wrong_period =
+      galata::model::discretize_zoh(continuous, 2.0 * souxmar::kControllerPeriodS);
+
+  const double order = souxmar::order_against(
+      full, half, design.riccati.x, [&](const Eigen::VectorXd& start, int ticks) {
+        return galata::sim::predict_sampled_loop(
+            wrong_period.system, design.riccati.k, 1, start, ticks);
+      });
+  EXPECT_LT(order, souxmar::kOrderGate)
+      << "a prediction at twice the design period must fail the order gate; observed order "
+      << order << ". If this passes, the gate cannot tell a right prediction from a wrong one";
+}
+
+// WHAT THE COMPARISON CANNOT SEE, recorded so that nobody reads it as more than
+// it is. The same two runs, against a prediction wrong by exactly one tick of
+// delay — the study flies one period and this prediction assumes none. At 250
+// Hz, on a loop this slow, one tick of delay moves the prediction by less than
+// the linearisation's own second-order error at the declared perturbation, so
+// the miss still scales as a second-order one and the gate passes it.
+//
+// This test was written as the negative control and FAILED as one; it was kept
+// and inverted rather than deleted, because the limitation is the finding. The
+// comparison does not certify the delay line. What does is exact re-derivation:
+// `QuadrotorWorkflow.TheDiscreteLawIsExecutedAsDesigned` checks every applied
+// command against the one computed a period earlier, and
+// `DiscretePrediction.AMultivariableDelayedLoopMatchesTheAugmentedStateMatrix`
+// checks the prediction's queue against the augmented-state matrix.
+//
+// If this starts failing, the comparison has begun to resolve a one-tick
+// delay — a smaller perturbation or a faster loop — and the README's account of
+// what it can see must be revisited.
+TEST(ExampleSouxmarSampledLqr, AOneTickDelayErrorIsBelowThisComparisonsResolution) {
+  const auto full = souxmar::run_shipped("delay-full");
+  const auto half = souxmar::run_with_perturbation("delay-half", souxmar::kHalvedPerturbation);
+  const auto& design = souxmar::design_of(full);
+  ASSERT_EQ(souxmar::sampled_run(full).control.delay_periods, 1);
+
+  const double order = souxmar::order_against(
+      full, half, design.riccati.x, [&](const Eigen::VectorXd& start, int ticks) {
+        return galata::sim::predict_sampled_loop(
+            design.discretisation.system, design.riccati.k, 0, start, ticks);
+      });
+  EXPECT_GT(order, souxmar::kOrderGate)
+      << "a prediction one tick out in delay now FAILS the order gate (observed order " << order
+      << "), so the comparison resolves a one-tick delay error at this perturbation. Revisit "
+         "examples/souxmar-sampled-lqr/README.md";
+}
+
+// A LABELLED REGRESSION LOCK, NOT A VALIDATION. Its bounds come from galata's
+// own output when it was written, which charter rule 3 permits only when it is
+// said.
+//
+// THE FINDING IT HOLDS. The study's budget was derived before the first run,
+// from each nonlinearity measured against its OWN linear part. The first run
+// fell just outside it, and the discrepancy was then localised rather than
+// absorbed: it is second order (the test above), it is not the quadratic drag
+// (zeroing the drag coefficients leaves it unchanged), and it lives in the
+// COLLECTIVE channel — at the worst tick the four rotor speeds miss their
+// prediction by nearly the same amount, with the vertical velocity beside
+// them. That is where the thrust's w^2 curvature acts, and it acts there even
+// when the first-order motion is mostly horizontal: squaring a differential
+// rotor command produces a collective thrust and a yaw torque that the
+// derivation's per-term ratio did not count. The budget is left where it was
+// set.
+//
+// Two-sided, as every lock here is. If the run comes inside the declared budget
+// the finding is stale and the README must be revisited; if the discrepancy
+// grows, something changed that nobody meant to change.
+TEST(ExampleSouxmarSampledLqr, TheOverBudgetDiscrepancyIsHeldByATwoSidedLock) {
+  const auto result = souxmar::run_shipped("lock");
+  const galata::pipeline::LinearPredictionRecord& prediction =
+      souxmar::sampled_run(result).control.prediction;
+  ASSERT_TRUE(prediction.available && prediction.relative_discrepancy_defined);
+
+  // Measured at 5.05e-2 when this lock was written.
+  EXPECT_GT(prediction.relative_discrepancy, souxmar::kDeclaredBudget)
+      << "the run now falls INSIDE the budget its study declared. The recorded finding no longer "
+         "holds: work out why, and revisit examples/souxmar-sampled-lqr/README.md";
+  EXPECT_LT(prediction.relative_discrepancy, 0.06)
+      << "the discrepancy between the run and its own prediction has grown to "
+      << prediction.relative_discrepancy;
+  EXPECT_FALSE(prediction.within_budget);
+
+  // Where it lives. The rotor-speed block is the last four chart coordinates;
+  // split its miss at the worst tick into the part all four share and the part
+  // that differs between them. Measured at about twenty to one.
+  const std::size_t worst = static_cast<std::size_t>(prediction.worst_tick);
+  const Eigen::VectorXd miss =
+      (prediction.measured_chart[worst] - prediction.predicted_chart[worst]).tail(4);
+  const double common = miss.mean();
+  const double differential = (miss.array() - common).matrix().norm();
+  EXPECT_GT(std::fabs(common), 5.0 * differential)
+      << "the miss at the worst tick is no longer carried by the collective channel: common "
+      << common << " rad/s against differential " << differential << " rad/s";
 }
 
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {

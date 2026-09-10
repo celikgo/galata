@@ -9,6 +9,7 @@
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/synth/discrete_control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/trim/level.hpp"
 
@@ -200,6 +201,45 @@ struct PlantRun {
   int step_count = 0;
 };
 
+// A DISCRETE DESIGN'S PREDICTION OF ITS OWN LOOP, beside what the nonlinear
+// plant actually did under that loop. Present only when `sim.sampled` executes
+// a `sampled_control_law`: a continuous design has no discrete prediction, and
+// comparing it against one would mix the sampling into the discrepancy.
+//
+// THE MEASURE IS THE DESIGN'S OWN. The chart coordinates carry metres, metres
+// per second, radians and radians per second side by side, so no plain vector
+// norm of their difference has a unit. The discrete cost-to-go X the Riccati
+// solution returns does: ||e||_X = sqrt(e' X e) is the cost the design assigns
+// to a deviation e, and it is the norm the design is optimal in. The
+// discrepancy is that norm of (measured - predicted) at the worst tick, over
+// the largest that norm of the prediction reaches. X is positive semidefinite,
+// not necessarily definite; its smallest-to-largest eigenvalue ratio is carried
+// so a reader can see whether any direction is weighted at zero and would pass
+// unmeasured.
+struct LinearPredictionRecord {
+  bool available = false;
+  // Why not, when not. A prediction is withheld rather than reported when the
+  // measured coordinates would not be deviations from the equilibrium the
+  // design was linearised about.
+  std::string unavailable_reason;
+  std::vector<std::string> chart_names;
+  // tick_count + 1 entries each: every tick, and the state after the last hold.
+  std::vector<Eigen::VectorXd> predicted_chart;
+  std::vector<Eigen::VectorXd> measured_chart;
+  bool relative_discrepancy_defined = false;
+  double relative_discrepancy = 0.0;  // dimensionless, in the X norm
+  int worst_tick = 0;
+  double cost_to_go_eigenvalue_ratio = 0.0;  // dimensionless, smallest / largest of X
+  // The small-perturbation budget the study DECLARED. Absent means the
+  // comparison is reported without a verdict.
+  bool budget_declared = false;
+  double budget = 0.0;  // dimensionless
+  bool within_budget = false;
+  // The prediction has no actuator limits. A run that saturated at any tick has
+  // left the premise the comparison rests on, and says so beside the verdict.
+  bool premise_violated_by_saturation = false;
+};
+
 // What `sim.sampled` adds to a plant run: the controller's own record, one
 // entry per CONTROLLER TICK rather than per integration sample.
 //
@@ -223,6 +263,38 @@ struct SampledControlRecord {
   double worst_saturation_residual_rad_s = 0.0;
   // Declared, not inferred: whether the reference position translates.
   bool reference_follows_trim_velocity = false;
+
+  // WHICH LAW, FROM WHICH TIME DOMAIN. A static gain is a matrix whichever
+  // domain produced it, so the record says. "continuous_design" is a gain
+  // designed on the continuous linearisation and executed at a rate — emulation,
+  // not discrete design. "discrete_design" is one designed for this period,
+  // this hold and this plant, and `sim.sampled` refuses to run it at any other
+  // period.
+  std::string law_time_domain = "continuous_design";
+  // The period the law was DESIGNED at. Zero for a continuous design, which has
+  // none; equal to `controller_period_s` for a discrete one.
+  double design_sample_time_s = 0.0;  // s
+  // The hold the schedule applied. Zero-order is the only one executed.
+  std::string hold = "zero_order";
+  LinearPredictionRecord prediction;
+};
+
+// What `synth.dare` produces. The sample time travels with the solution because
+// a discrete Riccati solution is a solution FOR one sample time: its weights are
+// per sample and its closed-loop eigenvalues are judged against the unit circle
+// of that rate and no other.
+struct DareArtifact {
+  synth::DareSolution solution;
+  double sample_time_s = 0.0;  // s
+  std::vector<std::string> state_names;
+  std::vector<std::string> input_names;
+  // The per-sample weights exactly as posed, cross term included.
+  Eigen::MatrixXd q;
+  Eigen::MatrixXd r;
+  Eigen::MatrixXd n;
+  // True when the plant came from a `discrete_linear_system`, false when the
+  // study wrote the matrices out and declared their sample time itself.
+  bool from_discrete_model = false;
 };
 
 // What `sim.sampled` produces. The plant run and the controller's own record
@@ -237,7 +309,9 @@ struct SampledRun {
 void register_design_capabilities(Registry& registry);
 void register_model_capabilities(Registry& registry);
 void register_quadrotor_capabilities(Registry& registry);
+void register_discrete_capabilities(Registry& registry);
 void register_linear_graph_capability(Registry& registry);
 bool write_design_section(std::ostream& out, const Artifact& artifact);
+bool write_discrete_section(std::ostream& out, const Artifact& artifact);
 }  // namespace galata::pipeline
 #endif

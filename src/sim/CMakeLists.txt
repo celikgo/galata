@@ -26,6 +26,7 @@ set_target_properties(galata_sim PROPERTIES FOLDER "libraries")
 add_library(galata_simulation
   nonlinear.cpp
   linear.cpp
+  discrete.cpp
 )
 add_library(galata::simulation ALIAS galata_simulation)
 target_link_libraries(galata_simulation

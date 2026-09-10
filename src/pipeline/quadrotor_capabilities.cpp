@@ -16,11 +16,14 @@
 #include "galata/numerics/integrator.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
+#include "galata/sim/discrete.hpp"
 #include "galata/sim/schedule.hpp"
 #include "galata/synth/control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/units.hpp"
 #include "galata/version.hpp"
+
+#include <Eigen/Eigenvalues>
 
 #include <algorithm>
 #include <cmath>
@@ -506,20 +509,105 @@ Artifact simulate_plant_capability(const StageContext& context) {
 // method its order and — unlike a wind step — cannot be fixed by splitting,
 // because the tick is where the command is DEFINED to change.
 //
+// TWO KINDS OF LAW, and they are not interchangeable. A `control_law` from
+// `synth.lqr` was designed on the continuous linearisation; executing it here
+// at a rate is emulation, which this capability has always done and says so. A
+// `sampled_control_law` from `synth.sampled_lqr` was designed FOR one sample
+// time, one hold and one plant, and is optimal at that period and no other. So
+// for a discrete design the execution period must EQUAL the design period, the
+// hold and the delay must both be declared rather than defaulted, and the run
+// carries the design's own prediction of the loop beside what the nonlinear
+// plant did. No transformation between rates is supported: a mismatch is
+// refused, and the remedy is a redesign at the execution period.
+//
 // WHAT THIS IS NOT. Not a claim about margins: gain and phase margins computed
 // from the continuous linearisation describe the continuous loop, and this loop
 // samples, holds and delays. The sampled loop's own robustness is a separate
-// question this capability does not answer. Not an ESC model either — commands
-// are rotor speeds in rad/s, and the map to an electrical command is out of
-// scope by RFC-0002's own boundary.
+// question this capability does not answer — for a discrete design as much as
+// for a continuous one, since a converging run and a stabilising Riccati
+// solution are both statements about the nominal loop. Not an ESC model either
+// — commands are rotor speeds in rad/s, and the map to an electrical command is
+// out of scope by RFC-0002's own boundary.
+
+// A gain can be applied to this vehicle only if it was designed on this
+// vehicle's chart: one row per rotor command in the model's order, one column
+// per chart coordinate, and the appended coordinates the model's own. Checked
+// for both kinds of law, because a gain of the wrong shape would otherwise
+// reach Eigen as a size mismatch rather than a sentence.
+void require_law_basis(const model::Quadrotor& model,
+                       const Eigen::MatrixXd& gain,
+                       const std::vector<std::string>& state_names,
+                       const std::vector<std::string>& input_names) {
+  const int chart_width =
+      linearize::kRigidChartSize + model.extended_state_size() - core::kStateSize;
+  if (gain.rows() != model.rotor_count() || gain.cols() != chart_width
+      || static_cast<int>(state_names.size()) != chart_width) {
+    std::ostringstream message;
+    message << "sim.sampled: the law's gain is " << gain.rows() << "x" << gain.cols() << " over "
+            << state_names.size() << " named states; this vehicle needs " << model.rotor_count()
+            << "x" << chart_width
+            << " — one row per rotor command and one column per attitude-error chart "
+               "coordinate. A gain designed on another vehicle, or on a selection that dropped "
+               "states, cannot be applied to this one";
+    throw std::invalid_argument(message.str());
+  }
+  const std::vector<std::string> commands = model.input_names();
+  if (input_names != commands) {
+    std::ostringstream message;
+    message << "sim.sampled: the law commands [";
+    for (std::size_t i = 0; i < input_names.size(); ++i) {
+      message << (i == 0 ? "" : ", ") << input_names[i];
+    }
+    message << "] and this vehicle's rotor commands are [";
+    for (std::size_t i = 0; i < commands.size(); ++i) {
+      message << (i == 0 ? "" : ", ") << commands[i];
+    }
+    message << "]. The allocation here is the identity, so the law's inputs must BE the rotor "
+               "commands, in the model's order";
+    throw std::invalid_argument(message.str());
+  }
+  const std::vector<std::string> extended = model.extended_state_names();
+  for (int i = linearize::kRigidChartSize; i < chart_width; ++i) {
+    const std::string& expected =
+        extended[static_cast<std::size_t>(i - linearize::kRigidChartSize + core::kStateSize)];
+    if (state_names[static_cast<std::size_t>(i)] != expected) {
+      throw std::invalid_argument("sim.sampled: the law's chart coordinate " + std::to_string(i)
+                                  + " is '" + state_names[static_cast<std::size_t>(i)]
+                                  + "' and this vehicle's is '" + expected + "'");
+    }
+  }
+}
+
 Artifact simulate_sampled_capability(const StageContext& context) {
   const auto& trimmed = context.upstream_at("trim").payload_as<HoverTrimArtifact>("hover_trim");
   const model::Quadrotor& model = trimmed.model;
   const Eigen::VectorXd reference_state = trimmed.point.extended_state;
   const Eigen::VectorXd trim_command = trimmed.point.command_rad_s;
 
-  const auto& law = context.upstream_at("law").payload_as<synth::LqrDesign>("control_law");
-  const Eigen::MatrixXd gain = law.riccati.k;
+  const Artifact& law_artifact = context.upstream_at("law");
+  const synth::SampledLqrDesign* discrete_law = nullptr;
+  Eigen::MatrixXd gain;
+  std::vector<std::string> law_state_names;
+  std::vector<std::string> law_input_names;
+  if (law_artifact.kind == "sampled_control_law") {
+    discrete_law = &law_artifact.payload_as<synth::SampledLqrDesign>("sampled_control_law");
+    gain = discrete_law->riccati.k;
+    law_state_names = discrete_law->discretisation.system.state_names;
+    law_input_names = discrete_law->discretisation.system.input_names;
+  } else if (law_artifact.kind == "control_law") {
+    const synth::LqrDesign* continuous_law =
+        &law_artifact.payload_as<synth::LqrDesign>("control_law");
+    gain = continuous_law->riccati.k;
+    law_state_names = continuous_law->plant.state_names;
+    law_input_names = continuous_law->plant.input_names;
+  } else {
+    throw std::invalid_argument(
+        "sim.sampled: `law` must be a `control_law` from synth.lqr — a continuous design this "
+        "capability executes at a rate — or a `sampled_control_law` from synth.sampled_lqr, "
+        "designed for the period it runs at. Stage produced a '"
+        + law_artifact.kind + "'");
+  }
+  require_law_basis(model, gain, law_state_names, law_input_names);
 
   const double step_s = context.input->number_at("step_s");
   if (!(step_s > 0.0) || !std::isfinite(step_s)) {
@@ -552,6 +640,49 @@ Artifact simulate_sampled_capability(const StageContext& context) {
     throw std::invalid_argument(message.str());
   }
   const int tick_count = steps / steps_per_tick;
+
+  // THE HOLD. Zero-order is the only one this schedule executes, so a study
+  // running a continuous law may omit it, as every study written before
+  // discrete designs existed does. A discrete design must state it: the design
+  // was discretised under a hold, and this run is the loop the design describes
+  // only if it holds the same way.
+  const ValuePtr hold_value = context.input->get("hold");
+  if (hold_value && hold_value->as_string() != "zero_order") {
+    throw std::invalid_argument("sim.sampled: `hold: " + hold_value->as_string()
+                                + "` is not executed here; `zero_order` is the only hold this "
+                                  "schedule applies");
+  }
+  if (discrete_law != nullptr) {
+    if (!hold_value) {
+      throw std::invalid_argument(
+          "sim.sampled: a discrete design must declare `hold: zero_order`. It was discretised "
+          "under a hold, and this run is the loop it describes only if it holds the same way; "
+          "a study that flies it should say so rather than inherit it");
+    }
+    if (context.input->get("delay_periods") == nullptr) {
+      throw std::invalid_argument(
+          "sim.sampled: a discrete design must declare `delay_periods`, zero included. The "
+          "design modelled no delay at all, so the delay it is flown with is the study's "
+          "statement about the implementation and not something to default");
+    }
+    // THE PERIOD, CHECKED AND NOT ASSUMED. Exact equality, because both numbers
+    // are read from the same kind of decimal text and a design at 0.004 s is
+    // executed at 0.004 s or it is not.
+    if (period_s != discrete_law->sample_time_s) {
+      std::ostringstream message;
+      message << std::setprecision(std::numeric_limits<double>::max_digits10)
+              << "sim.sampled: the law was designed at a sample time of "
+              << discrete_law->sample_time_s << " s and this run executes it every " << period_s
+              << " s. A discrete gain is optimal for the period its plant and cost were "
+                 "discretised at and for no other: at another period the same matrix acts on a "
+                 "different plant, minimises a cost that is not this loop's, and has closed-loop "
+                 "eigenvalues on a different circle. No transformation between rates is "
+                 "supported, so the mismatch is refused. Redesign with synth.sampled_lqr at "
+                 "`sample_time_s: "
+              << period_s << "`, or execute at the design's period";
+      throw std::invalid_argument(message.str());
+    }
+  }
 
   const double delay_number = context.input->number_at("delay_periods", 0.0);
   if (!std::isfinite(delay_number) || delay_number < 0.0
@@ -604,6 +735,36 @@ Artifact simulate_sampled_capability(const StageContext& context) {
         "sim.sampled: freeze_battery was asked for on a model that carries no battery");
   }
   const int battery_index = model.has_battery() ? model.battery_state_index() : -1;
+
+  // THE DESIGN'S OWN PREDICTION, and when there is none to compare. The
+  // prediction is in deviations from the equilibrium the design was linearised
+  // about, so it is withheld — not reported — whenever the measured chart
+  // coordinates would be deviations from something else.
+  std::string prediction_blocker;
+  if (discrete_law == nullptr) {
+    prediction_blocker = "the law is a continuous design and has no discrete prediction";
+  } else if (cruising && !reference_moves) {
+    prediction_blocker =
+        "the reference holds position at a relative equilibrium, so the measured coordinates "
+        "are not deviations from the equilibrium the design was linearised about";
+  } else if (!wind_history.empty()) {
+    prediction_blocker = "a declared wind history acts on the plant and not on the prediction";
+  }
+  const ValuePtr budget_value = context.input->get("linear_agreement_budget");
+  double agreement_budget = 0.0;
+  if (budget_value) {
+    if (!prediction_blocker.empty()) {
+      throw std::invalid_argument(
+          "sim.sampled: `linear_agreement_budget` was declared, but there is nothing on this run "
+          "to hold it against: "
+          + prediction_blocker + ". A budget on nothing is refused rather than ignored");
+    }
+    agreement_budget = budget_value->as_number();
+    if (!(agreement_budget > 0.0) || !std::isfinite(agreement_budget)) {
+      throw std::invalid_argument(
+          "sim.sampled: `linear_agreement_budget` must be a positive finite fraction");
+    }
+  }
 
   Eigen::VectorXd state = reference_state;
   if (context.input->get("initial_chart_perturbation") != nullptr) {
@@ -710,9 +871,69 @@ Artifact simulate_sampled_capability(const StageContext& context) {
   run.trajectory.step_count = steps;
   run.trajectory.sample_stride = steps_per_tick;
 
+  if (discrete_law != nullptr) {
+    record.law_time_domain = "discrete_design";
+    record.design_sample_time_s = discrete_law->sample_time_s;
+    LinearPredictionRecord& prediction = record.prediction;
+    prediction.chart_names = law_state_names;
+    prediction.unavailable_reason = prediction_blocker;
+    if (prediction_blocker.empty()) {
+      // The same initial chart state the run started from, the same gain, the
+      // same whole-period delay and the same hold — only the nonlinearity and
+      // the actuator limits are missing from the prediction.
+      const sim::SampledLoopPrediction predicted =
+          sim::predict_sampled_loop(discrete_law->discretisation.system,
+                                    gain,
+                                    delay_periods,
+                                    record.chart_error.front(),
+                                    tick_count);
+      Eigen::VectorXd reference_end = reference_state;
+      if (reference_moves) {
+        reference_end.segment<3>(core::kPositionNorth) +=
+            trimmed.point.ground_velocity_ned_m_s * (static_cast<double>(tick_count) * period_s);
+      }
+      prediction.available = true;
+      prediction.predicted_chart = predicted.states;
+      prediction.measured_chart = record.chart_error;
+      prediction.measured_chart.push_back(linearize::chart_from_extended(state, reference_end));
+
+      // In the design's own cost-to-go norm; see `LinearPredictionRecord`.
+      const Eigen::MatrixXd& cost_to_go = discrete_law->riccati.x;
+      double worst = 0.0;
+      double peak = 0.0;
+      for (std::size_t k = 0; k < prediction.predicted_chart.size(); ++k) {
+        const Eigen::VectorXd miss = prediction.measured_chart[k] - prediction.predicted_chart[k];
+        const Eigen::VectorXd& expected = prediction.predicted_chart[k];
+        const double miss_size = std::sqrt(std::fmax(0.0, miss.dot(cost_to_go * miss)));
+        const double expected_size = std::sqrt(std::fmax(0.0, expected.dot(cost_to_go * expected)));
+        if (miss_size > worst) {
+          worst = miss_size;
+          prediction.worst_tick = static_cast<int>(k);
+        }
+        peak = std::fmax(peak, expected_size);
+      }
+      prediction.relative_discrepancy_defined = peak > 0.0;
+      prediction.relative_discrepancy = peak > 0.0 ? worst / peak : 0.0;
+      const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(cost_to_go,
+                                                                    Eigen::EigenvaluesOnly);
+      const double largest = spectrum.eigenvalues().maxCoeff();
+      prediction.cost_to_go_eigenvalue_ratio =
+          largest > 0.0 ? spectrum.eigenvalues().minCoeff() / largest : 0.0;
+      prediction.premise_violated_by_saturation = record.saturated_tick_count > 0;
+      if (budget_value) {
+        prediction.budget_declared = true;
+        prediction.budget = agreement_budget;
+        prediction.within_budget = prediction.relative_discrepancy_defined
+                                   && prediction.relative_discrepancy <= agreement_budget;
+      }
+    }
+  }
+
   std::ostringstream summary;
   summary << tick_count << " ticks at " << std::fixed << std::setprecision(1) << (1.0 / period_s)
-          << " Hz, delay " << delay_periods << " period(s)";
+          << " Hz, delay " << delay_periods << " period(s), "
+          << (discrete_law != nullptr ? "discrete design at its own period"
+                                      : "continuous design executed at a rate");
   if (record.saturated_tick_count > 0) {
     summary << "; saturated at " << record.saturated_tick_count << " tick(s), worst residual "
             << std::scientific << std::setprecision(2) << record.worst_saturation_residual_rad_s
@@ -722,6 +943,19 @@ Artifact simulate_sampled_capability(const StageContext& context) {
   }
   if (run.battery_present) {
     summary << "; battery " << (freeze_battery ? "frozen" : "evolving");
+  }
+  const LinearPredictionRecord& prediction = record.prediction;
+  if (prediction.available && prediction.relative_discrepancy_defined) {
+    summary << "; nonlinear run differs from the discrete prediction by " << std::scientific
+            << std::setprecision(2) << prediction.relative_discrepancy
+            << " of its peak in the design's cost-to-go norm";
+    if (prediction.budget_declared) {
+      summary << (prediction.within_budget ? ", within" : ", OUTSIDE") << " the declared budget "
+              << prediction.budget;
+    }
+    if (prediction.premise_violated_by_saturation) {
+      summary << " (the run saturated, which the prediction does not model)";
+    }
   }
 
   Artifact artifact;
@@ -1178,15 +1412,18 @@ void register_quadrotor_capabilities(Registry& registry) {
   // against an independent implementation. Neither is a published reference.
   registry.add(Capability{
       "sim.sampled",
-      "Execute a state-feedback controller at a declared rate against the nonlinear plant, with "
-      "zero-order hold, whole-period delay and per-rotor saturation",
+      "Execute a state-feedback law against the nonlinear plant — a continuous design at a "
+      "declared rate, or a discrete design only at its own period — with zero-order hold, "
+      "whole-period delay and per-rotor saturation",
       "sampled_trajectory",
       Capability::State::ImplementedUnvalidated,
       simulate_sampled_capability,
       {"trim",
        "law",
        "controller_period_s",
+       "hold",
        "delay_periods",
+       "linear_agreement_budget",
        "reference_motion",
        "initial_chart_perturbation",
        "wind_schedule",

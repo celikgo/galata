@@ -193,6 +193,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
 | `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
 | `model.control_system` | Extract an LQR design's closed loop, its plant-input return ratio, or the single loop at one input with the other loops still closed | `linear_system` | implemented, unvalidated |
+| `model.discretize` | Discretise a continuous linear model exactly under a declared zero-order hold at a declared sample time, reporting the fastest mode against the Nyquist frequency | `discrete_linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
 | `model.linear.export` | Write a linear model as the named-matrix YAML that model.linear.statespace reads | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
@@ -208,10 +209,12 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
 | `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |
-| `sim.sampled` | Execute a state-feedback controller at a declared rate against the nonlinear plant, with zero-order hold, whole-period delay and per-rotor saturation | `sampled_trajectory` | implemented, unvalidated |
+| `sim.sampled` | Execute a state-feedback law against the nonlinear plant — a continuous design at a declared rate, or a discrete design only at its own period — with zero-order hold, whole-period delay and per-rotor saturation | `sampled_trajectory` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
+| `synth.dare` | Solve a discrete-time algebraic Riccati equation, cross term included, refusing a residual over budget or a closed loop not strictly inside the unit circle | `dare_solution` | implemented, unvalidated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
 | `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
+| `synth.sampled_lqr` | Design sampled full-state feedback: discretise the plant and the continuous cost under one hold, retain the cost's state-input cross term, and solve the discrete Riccati equation | `sampled_control_law` | implemented, unvalidated |
 | `trim.hover` | Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a relative equilibrium — for attitude and rotor speeds, reporting each rotor's margin | `hover_trim` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->
