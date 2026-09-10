@@ -8,6 +8,7 @@ find_package(yaml-cpp CONFIG REQUIRED)
 
 add_library(galata_model
   linear_system.cpp
+  discrete_system.cpp
   aircraft.cpp
   quadrotor.cpp
 )
@@ -17,6 +18,7 @@ target_link_libraries(galata_model
   PUBLIC
     galata::public_headers
     galata::core
+    galata::numerics
     galata::sim
     Eigen3::Eigen
   PRIVATE
