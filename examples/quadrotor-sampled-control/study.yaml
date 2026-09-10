@@ -88,6 +88,45 @@ stages:
           [0, 0, 0, 0.02]
         ]
 
+  # BEFORE THE DESIGN IS TRUSTED, WHAT THE MODEL CAN AND CANNOT DO. Reachability
+  # and observability of the chart coordinates for this input and output set,
+  # reported by name rather than discovered later from a failed synthesis. The
+  # horizon is declared because the answer depends on it; the infinite-horizon
+  # Gramians do not exist for a hover linearisation at all, and the capability
+  # says so rather than returning a Lyapunov solution that is not a Gramian.
+  - id: reachability
+    capability: analyze.gramians
+    input:
+      system: {from: linear}
+      horizon_s: 4.0
+
+  # THE MARGINS OF THE DESIGN, read one loop at a time with the other loops
+  # CLOSED. Handing the MIMO return ratio to a SISO margin routine breaks one
+  # channel and leaves the other three open, which is a vehicle with most of its
+  # controller disconnected: that closure is not internally stable and
+  # `analyze.margins` refuses it, correctly. This reading closes back to the
+  # design's own closed loop, so the Nyquist test is well posed.
+  #
+  # A set of loop-at-a-time margins does NOT bound simultaneous variation. That
+  # is what `analyze.diskmargin` below is for, and neither of them says anything
+  # about the SAMPLED loop.
+  - id: loop_0
+    capability: model.control_system
+    input:
+      law: {from: lqr}
+      use: single_loop
+      channel: omega_command_0
+
+  - id: margins_0
+    capability: analyze.margins
+    input:
+      system: {from: loop_0}
+
+  - id: disk_0
+    capability: analyze.diskmargin
+    input:
+      system: {from: loop_0}
+
   # 250 Hz, two periods of delay, from a displaced initial condition. The
   # integration step divides the controller period exactly, which `sim.sampled`
   # requires rather than rounds.
@@ -112,5 +151,5 @@ stages:
     capability: report.markdown
     input:
       title: A sampled law flown against the nonlinear plant it was designed from
-      sections: [{from: lqr}, {from: closed}]
+      sections: [{from: reachability}, {from: lqr}, {from: margins_0}, {from: disk_0}, {from: closed}]
       path: sampled-control.md

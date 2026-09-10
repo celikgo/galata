@@ -7,6 +7,7 @@
 // runs is worse than no example: it is the first thing a new reader tries, and
 // its failure is the first thing they learn about the project.
 
+#include "galata/analyze/gramians.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
@@ -275,16 +276,54 @@ TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedMod
 
 TEST(ExampleQuadrotorSampledControl, RunsEndToEnd) {
   const auto result = run_example("quadrotor-sampled-control", "study.yaml");
-  ASSERT_EQ(result.stages.size(), 8U);
+  ASSERT_EQ(result.stages.size(), 12U);
   EXPECT_EQ(result.stages[0].capability, "model.quadrotor");
   EXPECT_EQ(result.stages[1].capability, "trim.hover");
   EXPECT_EQ(result.stages[2].capability, "linearize.extended");
   EXPECT_EQ(result.stages[3].capability, "model.channels");
   EXPECT_EQ(result.stages[4].capability, "synth.lqr");
-  EXPECT_EQ(result.stages[5].capability, "sim.sampled");
+  EXPECT_EQ(result.stages[5].capability, "analyze.gramians");
+  EXPECT_EQ(result.stages[6].capability, "model.control_system");
+  EXPECT_EQ(result.stages[7].capability, "analyze.margins");
+  EXPECT_EQ(result.stages[8].capability, "analyze.diskmargin");
+  EXPECT_EQ(result.stages[9].capability, "sim.sampled");
   for (const auto& stage : result.stages) {
     EXPECT_NE(stage.artifact.produced_by_build.find("galata "), std::string::npos);
   }
+}
+
+// The two analyses the audit found unavailable on this plant, exercised through
+// the shipped study rather than through a test harness. What is asserted is
+// that each is AVAILABLE and says what it does not establish; the values are
+// properties of this study's declared weights and horizon and are not pinned.
+TEST(ExampleQuadrotorSampledControl, ReportsWhatTheModelCanReachAndWhatTheLoopTolerates) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+
+  const galata::pipeline::Artifact* reach = result.find("reachability");
+  ASSERT_NE(reach, nullptr);
+  const auto& analysis = reach->payload_as<galata::analyze::GramianAnalysis>("gramians");
+  EXPECT_EQ(analysis.reachability.rank, analysis.reachability.state_count);
+  // The heading is unobservable from this sensor set, and the study reports it
+  // by name before any design is trusted.
+  EXPECT_LT(analysis.observability.rank, analysis.observability.state_count);
+  EXPECT_FALSE(analysis.spectrum_is_strictly_stable)
+      << "a hover linearisation has integrator eigenvalues, so no infinite-horizon Gramian "
+         "exists and the report must not imply one was computed";
+
+  const galata::pipeline::Artifact* margins = result.find("margins_0");
+  ASSERT_NE(margins, nullptr);
+  EXPECT_NE(margins->summary.find("PM "), std::string::npos) << margins->summary;
+  const galata::pipeline::Artifact* disk = result.find("disk_0");
+  ASSERT_NE(disk, nullptr);
+  EXPECT_NE(disk->summary.find("alpha"), std::string::npos) << disk->summary;
+
+  // And the report says, in the reader's path, that none of it is a statement
+  // about the SAMPLED loop.
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+  EXPECT_NE(text.find("sampled loop's own robustness"), std::string::npos)
+      << "the report must not let a continuous-loop margin be read as a sampled-loop one";
 }
 
 // The point of the example: a law designed on the linearisation, executed at a
@@ -417,15 +456,15 @@ TEST(ExampleQuadrotorIdentification, LabelsTheHeldOutWindowAndTheTrainingWindowD
   const auto& held_out = held->payload_as<galata::pipeline::ValidationArtifact>("validation");
   const auto& on_training = trained->payload_as<galata::pipeline::ValidationArtifact>("validation");
 
-  EXPECT_EQ(held_out.result.independence, galata::identify::Independence::VerifiedDisjoint);
-  EXPECT_EQ(on_training.result.independence, galata::identify::Independence::NotHeldOut);
+  EXPECT_EQ(held_out.result.separation, galata::identify::RecordSeparation::VerifiedDisjoint);
+  EXPECT_EQ(on_training.result.separation, galata::identify::RecordSeparation::NotHeldOut);
   // Both records came from one import, so the digests are EQUAL in both stages.
   // A classification that read the digests could not have separated them.
   EXPECT_EQ(held_out.result.estimation_record_sha256, held_out.result.validation_record_sha256);
   EXPECT_EQ(on_training.result.estimation_record_sha256,
             on_training.result.validation_record_sha256);
-  EXPECT_FALSE(held_out.result.independence_basis.empty());
-  EXPECT_NE(held_out.result.independence_basis, on_training.result.independence_basis);
+  EXPECT_FALSE(held_out.result.separation_basis.empty());
+  EXPECT_NE(held_out.result.separation_basis, on_training.result.separation_basis);
 
   // The estimation digest was read from the fitted model's own provenance, not
   // declared in the study — study.yaml states no digest anywhere.

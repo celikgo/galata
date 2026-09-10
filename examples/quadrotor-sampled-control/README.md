@@ -16,10 +16,11 @@ heterogeneous trim path end to end.
 galata run examples/quadrotor-sampled-control/study.yaml
 ```
 
-Eight stages: load the plant, trim it at hover, linearise on the attitude-error
-chart, select the channels the design may see, solve the LQR, run the law
-against the nonlinear plant at 250 Hz with two periods of delay, write the time
-history, write the report.
+Twelve stages: load the plant, trim it at hover, linearise on the attitude-error
+chart, select the channels the design may see, solve the LQR, report what the
+model can reach and what the sensors can see, read the margins one loop at a
+time, run the law against the nonlinear plant at 250 Hz with two periods of
+delay, write the time history, write the report.
 
 ## What it demonstrates
 
@@ -38,6 +39,36 @@ describes a vehicle that was never flown. The report gives the worst
 single-channel saturation residual over the run, which is the honest measure of
 how much authority the law asked for and did not get.
 
+**What the model can reach, and what the sensors can see, before the design is
+trusted.** `analyze.gramians` reports the reachable and observable subspaces of
+the chart coordinates for this input and output set, and names the directions
+that fall outside them. On this vehicle the heading is unobservable — the
+observation model carries body rates, position, altitude, ground velocity and
+specific force, and none of them measures an absolute yaw angle — and the report
+says so by name. Without it, that fact arrives later as a Riccati diagnostic
+from a synthesis that failed, and the reader has to work backwards to which
+coordinate it was.
+
+The Gramians are integrals over a **declared** horizon, and the capability
+refuses to default it. The infinite-horizon Gramians do not exist for a hover
+linearisation at all: six eigenvalues sit at the origin, so the limit diverges
+and the matrix a Lyapunov solve would return for it is not a Gramian of
+anything. The report states that rather than leaving a reader to assume the
+textbook quantity was computed.
+
+**Frequency-domain margins, read one loop at a time with the others closed.**
+Handing the MIMO return ratio to a SISO margin routine breaks one channel and
+leaves the other three *open* — a vehicle flying with most of its controller
+disconnected. That closure is not internally stable, and `analyze.margins`
+refuses it and names the cause. The loop-at-a-time reading closes back to the
+design's own closed loop, so the Nyquist test is well posed and the margin
+exists.
+
+A set of loop-at-a-time margins does **not** bound simultaneous variation: each
+can be generous while a small perturbation applied to two channels at once
+destabilises the loop. `analyze.diskmargin` is in the study for that reason, and
+neither figure says anything about the sampled loop.
+
 **The trim is a real equilibrium of a vehicle whose rotors differ.** Four
 different thrust coefficients mean four different equilibrium speeds and no
 vehicle-wide hover speed to seed the solve from; `trim.hover` seeds per rotor
@@ -55,7 +86,19 @@ history. A figure typed into a README is a figure no later run can contradict.
 **Not a statement about the sampled loop's robustness.** Gain, phase and disk
 margins computed from the continuous linearisation describe the *continuous*
 loop. This loop samples, holds and delays, and its own margins are a separate
-question no capability in this repository answers yet.
+question no capability in this repository answers yet. The figures in
+`sampled-control.md` are the continuous design's, and the report says so where a
+reader will meet them.
+
+**Not a MIMO robustness measure.** The loop-at-a-time margins are per channel.
+Simultaneous variation is `analyze.diskmargin`'s question, and the MIMO peaks
+are `analyze.sensitivity`'s and `analyze.sigma`'s.
+
+**Not a controllability guarantee under actuator limits.** Every actuator is
+unbounded in the Gramian analysis. A direction it reports as reachable may be
+reachable only through a rotor speed no motor can produce, and nothing in those
+figures says so — the trim's per-rotor margins and the sampled run's saturation
+record are where that question is answered.
 
 **Not an ESC model.** Commands are rotor speeds in rad/s. The map from a rotor
 speed to an electrical command is outside RFC-0002's scope and is not modelled.
@@ -68,10 +111,18 @@ requirement.
 
 ## What checks this
 
-`ExampleQuadrotorSampledControl.RunsEndToEnd` and
-`ExampleQuadrotorSampledControl.TheLawDrivesTheDisplacementOut` in the
-`integration` tier run this exact study file and require the closed loop to
-remove the declared initial displacement. The sampled logic itself — the law,
+`ExampleQuadrotorSampledControl.RunsEndToEnd`,
+`ExampleQuadrotorSampledControl.TheLawDrivesTheDisplacementOut` and
+`ExampleQuadrotorSampledControl.ReportsWhatTheModelCanReachAndWhatTheLoopTolerates`
+in the `integration` tier run this exact study file: they require the closed loop
+to remove the declared initial displacement, require the heading to be reported
+as unobservable by name, and require the report to say that none of its margins
+is a statement about the sampled loop.
+`QuadrotorWorkflow.SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefused`
+holds both halves of the margin argument — the other-loops-open reading refused
+with its cause named, and the loop-at-a-time reading yielding a margin — and
+`Gramians.*` in the `unit` tier holds the Gramian arithmetic against closed
+forms rather than against a previous run. The sampled logic itself — the law,
 the saturation and the delay line — is re-derived independently from the
 recorded states by `QuadrotorWorkflow` in the same tier, so a loop that sampled
 at the wrong instant or shifted its delay by one tick fails there rather than
