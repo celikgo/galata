@@ -305,8 +305,9 @@ TEST(ExampleQuadrotorSampledControl, ReportsWhatTheModelCanReachAndWhatTheLoopTo
   ASSERT_NE(reach, nullptr);
   const auto& analysis = reach->payload_as<galata::analyze::GramianAnalysis>("gramians");
   EXPECT_EQ(analysis.reachability.rank, analysis.reachability.state_count);
-  // The heading is unobservable from this sensor set, and the study reports it
-  // by name before any design is trusted.
+  // The heading is unobservable in the observation model this study declares —
+  // a statement about that output set, not about any airframe's sensors — and
+  // the study reports it by name before any design is trusted.
   EXPECT_LT(analysis.observability.rank, analysis.observability.state_count);
   EXPECT_FALSE(analysis.spectrum_is_strictly_stable)
       << "a hover linearisation has integrator eigenvalues, so no infinite-horizon Gramian "
@@ -478,9 +479,18 @@ TEST(ExampleQuadrotorIdentification, LabelsTheHeldOutWindowAndTheTrainingWindowD
             fitted.identity.fit->estimation_record_sha256);
 }
 
-// The other half of the delay argument, on the SHIPPED study rather than on a
+// The other half of the delay COMPARISON, on the SHIPPED study rather than on a
 // throwaway design. `QuadrotorWorkflow.AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate`
-// shows the condition can fail; this shows this study passes it, with room.
+// shows the comparison can fail; this shows this study's design falls the right
+// side of it, with room.
+//
+// It is a comparison and not a stability condition, in either direction. The
+// half-period term is an APPROXIMATION of the zero-order hold's low-frequency
+// lag, not a model of it; a continuous delay margin bounds a continuous
+// perturbation; and a sampled loop can be stable past the margin or unstable
+// inside it. The figures are properties of THIS design and THIS loop
+// construction, not of the plant or of the sample rate. Discrete-time analysis
+// is what would settle the question and galata has none.
 TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousDelayMargin) {
   const auto result = run_example("quadrotor-sampled-control", "study.yaml");
   const galata::pipeline::Artifact* law_stage = result.find("lqr");
@@ -492,9 +502,9 @@ TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousD
   // reference alongside itself.
   const double controller_period_s = 0.004;
   const double equivalent_lag_s = 2.0 * controller_period_s + 0.5 * controller_period_s;
-  // The budget, fixed before the numbers are read. Five, because the necessary
-  // condition alone is weak — a zero-order hold is not a pure delay — and
-  // because a factor nothing could fail is not a gate.
+  // The budget, fixed before the numbers are read. Five, because the comparison
+  // is weak — the half-period term approximates the hold rather than modelling
+  // it — and because a factor nothing could fail is not a gate.
   constexpr double kRequiredFactor = 5.0;
 
   for (int channel = 0; channel < law.plant.input_count(); ++channel) {
@@ -506,8 +516,9 @@ TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousD
         << name << ": the continuous loop tolerates " << margins.delay_margin_s
         << " s of delay and the sampled implementation applies an equivalent lag of "
         << equivalent_lag_s
-        << " s. This is a NECESSARY condition for the sampled loop and not a sufficient one, "
-           "but a design outside it should not be shipped as an example";
+        << " s. This comparison proves nothing about the sampled loop in either direction, "
+           "but a shipped example whose design sat the wrong side of it would be one nobody "
+           "should copy";
   }
 }
 

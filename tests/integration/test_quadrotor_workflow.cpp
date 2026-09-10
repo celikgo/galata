@@ -749,11 +749,15 @@ TEST_F(QuadrotorWorkflow, ReachabilityAndObservabilityAreReportedBeforeAnyDesign
       << analysis.assumptions;
   EXPECT_GT(analysis.horizon_s, 0.0);
 
-  // The heading is unobservable from this observation model: it has body rates,
-  // position, altitude, ground velocity and specific force, and none of them
-  // measures an absolute yaw angle. That is a physical fact about the sensor
-  // set, and it is the kind of answer a failed synthesis would have delivered
-  // as a Riccati diagnostic three stages later.
+  // The heading is unobservable in THE OBSERVATION MODEL THIS CHAIN DECLARES:
+  // body rates, position, altitude, ground velocity and specific force, none of
+  // which is a heading reference. It is a statement about that declared output
+  // set and about nothing else — not about any airframe's sensors, which may
+  // well include a heading reference; a model that omits one is unobservable in
+  // yaw whether or not the aircraft is. Adding a magnetic observation would be
+  // a model extension, not a fix to this. What the assertion is for is that the
+  // answer arrives HERE rather than three stages later as a Riccati diagnostic
+  // a reader has to work backwards from.
   ASSERT_FALSE(analysis.observability.missing_directions.empty())
       << "a hover observation model with no heading reference must leave yaw unobservable";
   bool names_yaw = false;
@@ -833,21 +837,35 @@ TEST_F(QuadrotorWorkflow, SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefus
   EXPECT_NE(disk->summary.find("alpha"), std::string::npos) << disk->summary;
 }
 
-// THE SAMPLED IMPLEMENTATION'S DELAY IS A CONSTRAINT ON THE DESIGN, AND IT BINDS.
+// A SANITY COMPARISON WITH A STATED APPROXIMATION, AND NOT A STABILITY
+// CONDITION IN EITHER DIRECTION.
 //
 // `sim.sampled` applies a whole-period transport delay plus a zero-order hold.
 // The continuous loop has a DELAY MARGIN, which `analyze.margins` reports, and
-// that is the one continuous-domain figure speaking directly to whether a
-// sampled implementation's delay is defensible: a transport delay EXCEEDING it
-// condemns the design outright, whatever the trajectory looks like.
+// comparing the two is worth doing — but an earlier version of this comment
+// called being inside that margin a NECESSARY condition for the sampled loop,
+// and that was wrong. Three reasons, all of which the comparison has to carry:
 //
-// It is NOT a sampled-loop margin and nothing here treats it as one. A
-// zero-order hold is not a pure delay — it also reshapes the loop between ticks
-// — so being inside the continuous delay margin is NECESSARY and not
-// SUFFICIENT. What this test establishes is that the necessary condition has
-// teeth: a faster design on the same plant at the same sample rate runs out of
-// it. Without this half, the shipped example's comfortable margin would be
-// indistinguishable from a condition nothing could fail.
+//   THE HOLD IS NOT A DELAY. A zero-order hold's low-frequency phase lag is
+//     approximately that of a half-period delay, and only well below the sample
+//     rate; it also reshapes the loop's magnitude. Adding half a period to the
+//     transport delay is an APPROXIMATION of the hold, not a model of it.
+//   A CONTINUOUS DELAY MARGIN BOUNDS A CONTINUOUS PERTURBATION. Applying it to
+//     a sampled loop compares a figure computed for one system against a lag
+//     appearing in a different one. Nothing here makes that a proof.
+//   SO IT IS NEITHER NECESSARY NOR SUFFICIENT. A sampled loop can be stable
+//     with an equivalent lag past the continuous margin, and unstable inside it.
+//
+// What the comparison IS: a warning sign in one direction. A design whose
+// continuous delay margin is a small multiple of its transport delay is one to
+// look at with discrete-time tools before flying, and galata has none. This
+// test establishes that the comparison has teeth — a faster design on this
+// plant at this rate falls the wrong side of it — so the shipped example's
+// comfortable figure is a measurement rather than a number nothing could fail.
+//
+// EVERY FIGURE BELOW IS A PROPERTY OF THIS LQR DESIGN AND THIS LOOP
+// CONSTRUCTION. It is not a property of the plant, of the sample rate, or of
+// any other controller that happens to run at the same rate.
 TEST_F(QuadrotorWorkflow, AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate) {
   // Unit state weights and the same control weight the shipped study uses. That
   // penalises the rotor-speed states as hard as position, which the shipped
@@ -869,9 +887,10 @@ TEST_F(QuadrotorWorkflow, AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate) 
   const auto& law = law_stage->payload_as<galata::synth::LqrDesign>("control_law");
 
   // The equivalent lag the shipped sampled study applies: two controller periods
-  // of transport delay at 250 Hz, plus about half a period for the hold. The
-  // hold's contribution is counted rather than dropped, because leaving it out
-  // would flatter the comparison.
+  // of transport delay at 250 Hz, plus about half a period AS AN APPROXIMATION
+  // of the hold. The hold's contribution is counted rather than dropped because
+  // leaving it out would flatter the comparison, and it is called an
+  // approximation because that is what it is.
   const double controller_period_s = 0.004;
   const double equivalent_lag_s = 2.0 * controller_period_s + 0.5 * controller_period_s;
   RecordProperty("equivalent_lag_s", std::to_string(equivalent_lag_s));
@@ -896,11 +915,12 @@ TEST_F(QuadrotorWorkflow, AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate) 
   // vehicle — and it is the reason the shipped study's weights are declared in
   // its own file rather than defaulted.
   EXPECT_LT(smallest, equivalent_lag_s)
-      << "a unit-weighted design on this plant is expected to run out of delay margin at "
-         "250 Hz with two periods of delay. If it no longer does, the shipped example's "
-         "comfortable margin has stopped being evidence of anything, because the condition "
-         "would then be one nothing can fail; find a faster design or delete this test and "
-         "say why";
+      << "a unit-weighted design on this plant is expected to fall the wrong side of this "
+         "comparison at 250 Hz with two periods of delay. If it no longer does, the shipped "
+         "example's comfortable figure has stopped being a measurement, because the "
+         "comparison would then be one nothing can fail; find a faster design, or delete this "
+         "test and say why. Note that falling the wrong side is not a proof of sampled "
+         "instability, any more than falling the right side is a proof of stability";
 }
 
 // A channel the plant does not have is refused by name, with the vocabulary

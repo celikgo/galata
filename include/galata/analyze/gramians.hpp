@@ -58,6 +58,13 @@
 //   does not transform the model, and it computes no Hankel singular values.
 // * NOT A STATEMENT ABOUT THE NONLINEAR PLANT. Reachability of a linearisation
 //   is reachability of the linearisation, valid where the linearisation is.
+// * NOT A STATEMENT ABOUT AN AIRCRAFT'S SENSORS. Observability here is a
+//   property of the DECLARED OUTPUT SET of the model handed in. A model whose
+//   outputs omit a heading reference is unobservable in yaw whether or not the
+//   airframe carries a magnetometer, and the right reading of such a result is
+//   "this observation model cannot see that direction" — never "the vehicle
+//   cannot". Making the model see it means adding the observation, which is a
+//   model extension and not a correction to this analysis.
 // * NOT A CONTROLLABILITY GUARANTEE UNDER LIMITS. Every actuator here is
 //   unbounded. A direction this reports as reachable may be reachable only with
 //   a rotor speed no motor can produce, and nothing in these figures says so.
