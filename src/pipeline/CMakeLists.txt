@@ -35,6 +35,7 @@ target_link_libraries(galata_pipeline
     galata::linearize
     galata::synth
     galata::data
+    galata::identify
     galata::simulation
     Eigen3::Eigen
   PRIVATE

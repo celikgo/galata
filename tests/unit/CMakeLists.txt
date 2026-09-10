@@ -15,6 +15,7 @@ add_executable(galata_unit_tests
   test_frequency_response.cpp
   test_csv_import.cpp
   test_greybox.cpp
+  test_validate.cpp
   test_static_fit.cpp
   test_margins.cpp
   test_disk_margin.cpp
