@@ -6,6 +6,7 @@ galata_find_eigen()
 
 add_library(galata_sim
   rigid_body.cpp
+  schedule.cpp
 )
 add_library(galata::sim ALIAS galata_sim)
 

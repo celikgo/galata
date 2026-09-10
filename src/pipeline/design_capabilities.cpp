@@ -467,11 +467,15 @@ Artifact csv(const StageContext& context) {
       // every row rather than left to a header comment, so one file is one
       // complete record of what was integrated. `sim.linear` writes its constant
       // input into the outputs for the same reason.
-      for (Eigen::Index j = 0; j < run.command_rad_s.size(); ++j) {
-        out << ',' << run.command_rad_s(j);
+      // Per sample, because a declared history makes the configured constant a
+      // half-truth: a reader who combines the recorded air-relative velocity
+      // with the wrong wind reconstructs a ground velocity that never happened.
+      const Eigen::VectorXd& command_now = run.command_samples_rad_s[i];
+      const Eigen::Vector3d& wind_now = run.wind_samples_ned_m_s[i];
+      for (Eigen::Index j = 0; j < command_now.size(); ++j) {
+        out << ',' << command_now(j);
       }
-      out << ',' << run.wind_ned_m_s.x() << ',' << run.wind_ned_m_s.y() << ','
-          << run.wind_ned_m_s.z() << '\n';
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
     }
   } else {
     throw std::invalid_argument("report.csv requires a linear, nonlinear or plant trajectory");
