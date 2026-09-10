@@ -15,6 +15,7 @@
 // capability implementations (docs/TESTING.md).
 
 #include "galata/data/record.hpp"
+#include "galata/identify/static_fit.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
@@ -27,6 +28,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <locale>
 #include <sstream>
 #include <string>
 
@@ -169,6 +172,130 @@ class IdentifyWorkflow : public ::testing::Test {
 };
 
 }  // namespace
+
+// --- identify.static_fit through the pipeline -------------------------------
+//
+// The bench-map capability had unit tests for the LIBRARY and none at all for
+// the CAPABILITY: its study-facing schema, its record wiring and its refusals
+// were reachable from a study file and exercised by nothing. That is the same
+// library-only gap the grey box and the validation had, one vertical along, and
+// it is closed here.
+//
+// The record is a synthetic thrust stand: thrust against rotor speed, generated
+// from a declared coefficient so the fit has a right answer to be compared with
+// rather than a previous run to be pinned against.
+
+namespace {
+
+// thrust = k * omega^2, in newtons against rad/s, at a declared coefficient.
+std::string bench_csv(double coefficient) {
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(17);
+  out << "sample,omega_rad_s,thrust_n\n";
+  for (int k = 0; k <= 20; ++k) {
+    const double omega = 100.0 * static_cast<double>(k);
+    out << k << "," << omega << "," << coefficient * omega * omega << "\n";
+  }
+  return out.str();
+}
+
+}  // namespace
+
+TEST_F(IdentifyWorkflow, ABenchMapIsFittedThroughTheCapabilityAndRecoversItsCoefficient) {
+  const double coefficient = 1.0e-5;
+  put(root / "bench.csv", bench_csv(coefficient));
+
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: bench\n    capability: data.import.csv\n    input:\n"
+          "      path: bench.csv\n      time_column: sample\n"
+          "      description: \"synthetic thrust stand\"\n"
+          "      channels:\n"
+          "        - {column: omega_rad_s, name: omega, unit: \"rad/s\", frame: none}\n"
+          "        - {column: thrust_n, name: thrust, unit: \"N\", frame: none}\n"
+          "  - id: map\n    capability: identify.static_fit\n    input:\n"
+          "      record: {from: bench}\n      response: thrust\n"
+          "      terms:\n"
+          "        - {channel: omega, power: 2.0, name: thrust_coefficient, "
+          "unit: \"N s^2\"}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* map = result.find("map");
+  ASSERT_NE(map, nullptr);
+  EXPECT_EQ(map->kind, "static_fit");
+  const auto& fit = map->payload_as<galata::identify::StaticFit>("static_fit");
+
+  ASSERT_EQ(fit.coefficients.size(), 1u);
+  const auto& term = fit.coefficients.front();
+  EXPECT_EQ(term.name, "thrust_coefficient");
+  // The unit is the study's declaration, carried through to the coefficient: a
+  // number without one is not a measurement.
+  EXPECT_EQ(term.unit, "N s^2");
+  EXPECT_NEAR(term.value, coefficient, 1e-12 * coefficient)
+      << "the fit must recover the coefficient the record was generated from";
+
+  // THE RANGE THE COEFFICIENT IS EVIDENCE ABOUT, which the capability carries so
+  // that a reader extrapolating past the bench has to ignore it to do so. It is
+  // the CHANNEL's span in the channel's own unit — 0 to 2000 rad/s — and not the
+  // span of the omega-squared column the term becomes, which would be 4e6. The
+  // fields were called `regressor_*` until this was written, which named the
+  // design column and invited a reader to be wrong by a square.
+  ASSERT_EQ(fit.term_channel_minimum.size(), 1u);
+  EXPECT_DOUBLE_EQ(fit.term_channel_minimum.front(), 0.0);
+  EXPECT_DOUBLE_EQ(fit.term_channel_maximum.front(), 2000.0);
+  EXPECT_EQ(fit.sample_count, 21);
+
+  // An exact record demonstrates no scatter, so no uncertainty is estimable —
+  // and the summary says so rather than reporting a zero a reader would take
+  // for a tight interval.
+  EXPECT_FALSE(fit.uncertainty_is_estimable);
+  EXPECT_NE(map->summary.find("NO uncertainty"), std::string::npos) << map->summary;
+}
+
+TEST_F(IdentifyWorkflow, ABenchMapRefusesATermTheRecordCannotSupport) {
+  put(root / "bench.csv", bench_csv(1.0e-5));
+  const std::string prefix =
+      "version: 1\nstages:\n"
+      "  - id: bench\n    capability: data.import.csv\n    input:\n"
+      "      path: bench.csv\n      time_column: sample\n"
+      "      channels:\n"
+      "        - {column: omega_rad_s, name: omega, unit: \"rad/s\", frame: none}\n"
+      "        - {column: thrust_n, name: thrust, unit: \"N\", frame: none}\n";
+
+  // A channel the record does not carry.
+  EXPECT_THROW((void)run(prefix
+                             + "  - id: map\n    capability: identify.static_fit\n    input:\n"
+                               "      record: {from: bench}\n      response: thrust\n"
+                               "      terms:\n        - {channel: current, power: 1.0, "
+                               "name: c, unit: A}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+
+  // `terms` omitted entirely: the capability will not choose a model for the
+  // caller, because a coefficient whose meaning software picked is not a
+  // measurement of anything.
+  try {
+    (void)run(prefix
+                  + "  - id: map\n    capability: identify.static_fit\n"
+                    "    input: {record: {from: bench}, response: thrust}\n",
+              {.overwrite = true, .write_manifest = false});
+    FAIL() << "a fit with no declared terms must be refused";
+  } catch (const std::runtime_error& error) {
+    EXPECT_NE(std::string(error.what()).find("`terms` is required"), std::string::npos)
+        << error.what();
+  }
+
+  // And an unknown key, so the study-facing vocabulary is closed here too.
+  EXPECT_THROW((void)run(prefix
+                             + "  - id: map\n    capability: identify.static_fit\n    input:\n"
+                               "      record: {from: bench}\n      response: thrust\n"
+                               "      weighting: uniform\n"
+                               "      terms:\n        - {channel: omega, power: 2.0, "
+                               "name: k, unit: \"N s^2\"}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+}
 
 // --- the strict schemas ----------------------------------------------------
 

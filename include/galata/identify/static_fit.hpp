@@ -72,11 +72,19 @@ struct StaticFit {
   double condition_number = 0.0;
   bool uncertainty_is_estimable = false;
   std::string uncertainty_note;
-  // The span of each regressor the fit actually saw. A coefficient is evidence
-  // about the range it was measured over and about nothing outside it, and a
-  // reader extrapolating from it should have to ignore this to do so.
-  std::vector<double> regressor_minimum;
-  std::vector<double> regressor_maximum;
+  // The span of each term's CHANNEL over the record, in that channel's own unit —
+  // NOT the span of the design-matrix column the term becomes. For a term
+  // `omega^2` over a record reaching 2000 rad/s these hold 0 and 2000, not 0 and
+  // 4e6. The channel's span is the more useful of the two, because it is the
+  // quantity a bench operator set and a reader recognises, and the fields were
+  // called `regressor_*` until 2026-09-10 — which named the design column and so
+  // invited a reader to be wrong by a square.
+  //
+  // A coefficient is evidence about the range it was measured over and about
+  // nothing outside it, and a reader extrapolating from it should have to ignore
+  // this to do so.
+  std::vector<double> term_channel_minimum;
+  std::vector<double> term_channel_maximum;
   double response_minimum = 0.0;
   double response_maximum = 0.0;
 };

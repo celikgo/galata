@@ -113,9 +113,9 @@ TEST(StaticFit, AnExactlyDeterminedFitReportsNoUncertainty) {
 
 TEST(StaticFit, TheRangeItWasMeasuredOverIsReported) {
   const auto fit = fit_static(bench(1.0e-5, 0.05), thrust_model());
-  ASSERT_EQ(fit.regressor_minimum.size(), 1u);
-  EXPECT_DOUBLE_EQ(fit.regressor_minimum.front(), 100.0);
-  EXPECT_DOUBLE_EQ(fit.regressor_maximum.front(), 100.0 + 40.0 * 23.0);
+  ASSERT_EQ(fit.term_channel_minimum.size(), 1u);
+  EXPECT_DOUBLE_EQ(fit.term_channel_minimum.front(), 100.0);
+  EXPECT_DOUBLE_EQ(fit.term_channel_maximum.front(), 100.0 + 40.0 * 23.0);
   // A coefficient is evidence about the range it was measured over and nothing
   // outside it; a reader extrapolating should have to ignore this to do so.
   EXPECT_GT(fit.response_maximum, fit.response_minimum);

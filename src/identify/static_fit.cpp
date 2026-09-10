@@ -63,8 +63,8 @@ StaticFit fit_static(const data::Record& record, const StaticFitRequest& request
   }
 
   StaticFit fit;
-  fit.regressor_minimum.assign(request.terms.size(), 0.0);
-  fit.regressor_maximum.assign(request.terms.size(), 0.0);
+  fit.term_channel_minimum.assign(request.terms.size(), 0.0);
+  fit.term_channel_maximum.assign(request.terms.size(), 0.0);
   for (std::size_t t = 0; t < request.terms.size(); ++t) {
     const Term& term = request.terms[t];
     const std::vector<double>& column = samples_of(record, term.channel);
@@ -95,8 +95,8 @@ StaticFit fit_static(const data::Record& record, const StaticFitRequest& request
           + "' does not vary across the record, so it carries no information about its own "
             "coefficient. The run never excited what it was meant to measure");
     }
-    fit.regressor_minimum[t] = lowest;
-    fit.regressor_maximum[t] = highest;
+    fit.term_channel_minimum[t] = lowest;
+    fit.term_channel_maximum[t] = highest;
   }
   if (request.intercept) {
     design.col(parameters - 1).setOnes();
