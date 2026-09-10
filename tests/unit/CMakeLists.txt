@@ -19,6 +19,7 @@ add_executable(galata_unit_tests
   test_singular_values.cpp
   test_sensitivity.cpp
   test_jacobian.cpp
+  test_input_schedule.cpp
   test_newton.cpp
   test_atmosphere.cpp
   test_flight_condition.cpp

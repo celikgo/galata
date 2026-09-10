@@ -10,10 +10,13 @@
 // Written from the capability schemas and the headers, not from the capability
 // implementations (docs/TESTING.md).
 
+#include "galata/core/state.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/modeling/linear_adapter.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/pipeline/pipeline.hpp"
+#include "galata/synth/control.hpp"
 
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
@@ -21,8 +24,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -279,6 +284,395 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   const galata::modeling::LinearGraph graph =
       galata::modeling::lower_linear_system(system, channels, adapter_options);
   EXPECT_EQ(graph.state_ids.size(), 17u);
+}
+
+// --- sim.plant -------------------------------------------------------------
+//
+// The nonlinear multirotor, integrated through a PUBLIC capability. Before this
+// existed the plant was reachable only from C++: this repository could integrate
+// a quadrotor in its own tests and a user could not integrate one at all.
+// `sim.nonlinear` is the fixed-wing path — it takes a `trim.level` point and
+// actuators named elevator, aileron, rudder and thrust — and is untouched.
+//
+// The strongest thing a trim and an integrator can be asked together is whether
+// the trim STAYS. A point that satisfies the residual gate but drifts under the
+// plant's own dynamics was never an equilibrium, and no gate on the residual
+// alone can tell the difference.
+TEST_F(QuadrotorWorkflow, IntegratingFromAHoverTrimLeavesItWhereItStarted) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input: "
+          "{trim: {from: hover}, step_s: 0.002, steps: 2500, sample_stride: 250}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_FALSE(run_data.trajectory.states.empty());
+
+  const Eigen::VectorXd& first = run_data.trajectory.states.front();
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  ASSERT_EQ(first.size(), last.size());
+  // Five seconds of RK4 at 2 ms. The budget is round-off accumulated over 2500
+  // steps on quantities of order 100, not a tolerance chosen to pass: an
+  // equilibrium that drifts by more than this is not one.
+  EXPECT_LT((last - first).norm(), 1e-9)
+      << "the hover trim did not stay put under the plant's own dynamics";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-9)
+      << "the declared altitude did not survive the integration";
+}
+
+// Cruise is a RELATIVE equilibrium: the dynamic accelerations vanish and the
+// position rate does not. An integrator that quietly held the position still
+// would satisfy every dynamic residual and be wrong about where the aircraft is.
+TEST_F(QuadrotorWorkflow, CruiseKeepsItsPositionRateUnderIntegration) {
+  const RunResult result = run(
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: cruise\n    capability: trim.hover\n    input: "
+      "{quadrotor: {from: plant}, altitude_m: 120.0, ground_velocity_ned_m_s: [8.0, 0.0, 0.0]}\n"
+      "  - id: fly\n    capability: sim.plant\n    input: "
+      "{trim: {from: cruise}, step_s: 0.002, steps: 2500, sample_stride: 2500}\n",
+      {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  // Five seconds north at 8 m/s is 40 m, exactly, by construction.
+  EXPECT_NEAR(last(galata::core::kPositionNorth), 40.0, 1e-6)
+      << "a relative equilibrium must keep travelling";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-6)
+      << "cruise must hold its altitude while it travels";
+}
+
+// The two ways in are exclusive, and a request that would do nothing is refused
+// rather than ignored — a caller who asks to freeze a battery that is not there
+// has misunderstood their own model.
+TEST_F(QuadrotorWorkflow, SimPlantRefusesAmbiguousAndVacuousRequests) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, quadrotor: {from: plant}, step_s: 0.002, "
+                         "steps: 10}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a trim and a model together leaves it unsaid which state was integrated";
+
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, step_s: 0.002, steps: 10, "
+                         "freeze_battery: true}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "freezing a battery the shipped model does not carry must be refused, not ignored";
+}
+
+// --- wind, and the coordinate the state actually holds ---------------------
+//
+// ADR-0002's velocity state is AIR-RELATIVE and `Quadrotor::derivative` takes
+// the wind as steady: it carries no -R^T dw/dt term. A wind that changes
+// therefore needs the simulator's help, in two different ways.
+//
+// A STEP is an event, not a large derivative. No force acts at the instant the
+// air mass changes speed, so the GROUND velocity is continuous and the
+// air-relative velocity must jump by exactly minus the wind change, rotated
+// into the body frame. Integrating through the step instead injects the entire
+// wind increment as a ground-velocity error — permanently, and with nothing to
+// show for it in any residual. This is WP1's first finding, and it is the one
+// property of time-varying wind that a plausible-looking trajectory will hide.
+//
+// The vehicle is level at hover, so the body-to-NED rotation is the identity
+// and the expected jump is exactly the negated wind, written down rather than
+// computed by the code under test.
+TEST_F(QuadrotorWorkflow, AWindStepMovesTheAirRelativeVelocityAndNotTheGroundVelocity) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 1000\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: zero_order\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 1.0, values: [3.0, 2.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.trajectory.states.size(), data.wind_samples_ned_m_s.size());
+
+  std::size_t at_step = 0;
+  for (std::size_t i = 0; i < data.trajectory.times_s.size(); ++i) {
+    if (std::fabs(data.trajectory.times_s[i] - 1.0) < 1e-9) {
+      at_step = i;
+      break;
+    }
+  }
+  ASSERT_GT(at_step, 0u) << "the wind step is not among the recorded samples";
+
+  const Eigen::VectorXd& before = data.trajectory.states[at_step - 1];
+  const Eigen::VectorXd& after = data.trajectory.states[at_step];
+  const Eigen::Vector3d air_before = before.segment<3>(galata::core::kVelocityU);
+  const Eigen::Vector3d air_after = after.segment<3>(galata::core::kVelocityU);
+
+  // Level hover: the rotation is the identity, so the air-relative velocity
+  // must jump by exactly -(3, 2, 0).
+  EXPECT_NEAR((air_after - air_before - Eigen::Vector3d(-3.0, -2.0, 0.0)).norm(), 0.0, 1e-9)
+      << "the air-relative velocity did not absorb the whole wind change";
+
+  // The property that matters: ground velocity, air-relative plus wind, does
+  // not move across the step.
+  const Eigen::Vector3d ground_before = air_before + data.wind_samples_ned_m_s[at_step - 1];
+  const Eigen::Vector3d ground_after = air_after + data.wind_samples_ned_m_s[at_step];
+  EXPECT_NEAR((ground_after - ground_before).norm(), 0.0, 1e-12)
+      << "a wind step moved the ground velocity, which no force did";
+}
+
+// A discontinuity strictly inside a step is not representable — RK4's stages
+// would straddle it and the re-basing has no instant to happen at — so it is
+// refused rather than rounded to the nearest step, which would move the event
+// and say nothing about having done so.
+TEST_F(QuadrotorWorkflow, AScheduleThatMissesTheStepLatticeIsRefused) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input:\n"
+                         "      trim: {from: hover}\n"
+                         "      step_s: 0.002\n"
+                         "      steps: 1000\n"
+                         "      wind_schedule:\n"
+                         "        hold: zero_order\n"
+                         "        extrapolation: hold\n"
+                         "        samples:\n"
+                         "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                         "          - {time_s: 0.9993, values: [3.0, 2.0, 0.0]}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+}
+
+// --- sim.sampled -----------------------------------------------------------
+
+namespace {
+
+// A study that designs a gain and then flies it. Everything here goes through
+// public capabilities; nothing reaches into C++ to build a controller.
+std::string sampled_chain(const std::string& trim_input,
+                          const std::string& sampled_extra,
+                          int steps = 400) {
+  std::ostringstream q;
+  q << "[";
+  for (int i = 0; i < 16; ++i) {
+    q << (i ? ", [" : "[");
+    for (int j = 0; j < 16; ++j) {
+      double value = 0.0;
+      if (i == j) {
+        value = (i < 3) ? 5.0 : (i >= 6 && i < 9) ? 20.0 : (i >= 12) ? 0.001 : 1.0;
+      }
+      q << (j ? ", " : "") << value;
+    }
+    q << "]";
+  }
+  q << "]";
+  std::ostringstream r;
+  r << "[";
+  for (int i = 0; i < 4; ++i) {
+    r << (i ? ", [" : "[");
+    for (int j = 0; j < 4; ++j) {
+      r << (j ? ", " : "") << (i == j ? 0.02 : 0.0);
+    }
+    r << "]";
+  }
+  r << "]";
+
+  std::ostringstream out;
+  out << "version: 1\nstages:\n"
+      << "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      << "  - id: hover\n    capability: trim.hover\n    input: " << trim_input << "\n"
+      << "  - id: linear\n    capability: linearize.extended\n    input: "
+         "{trim: {from: hover}, evidence_path: op.yaml}\n"
+      << "  - id: rotors\n    capability: model.channels\n    input:\n"
+         "      system: {from: linear}\n"
+         "      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]\n"
+         "      outputs: [position_north_m, position_east_m, altitude_m]\n"
+      << "  - id: lqr\n    capability: synth.lqr\n    input: {system: {from: rotors}, "
+         "break_at: plant_input, q: "
+      << q.str() << ", r: " << r.str() << "}\n"
+      << "  - id: closed\n    capability: sim.sampled\n    input:\n"
+         "      trim: {from: hover}\n      law: {from: lqr}\n"
+         "      step_s: 0.002\n      steps: "
+      << steps << "\n"
+      << sampled_extra;
+  return out.str();
+}
+
+}  // namespace
+
+// THE INDEPENDENT CHECK. The trajectory is not re-derived here — that would be
+// checking the integrator against itself. What is re-derived is the SAMPLED
+// LOGIC: from the states the run recorded at each tick, the law, the saturation
+// and the delay line are recomputed by hand and required to reproduce the
+// commands the run says it issued. A loop that sampled at the wrong instant,
+// fed back on the wrong coordinates, or shifted its delay by one tick passes
+// every stability check and fails this.
+TEST_F(QuadrotorWorkflow, TheSampledCommandSequenceIsReproducibleByHand) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                        "      controller_period_s: 0.004\n"
+                        "      delay_periods: 2\n"
+                        "      initial_chart_perturbation: "
+                        "[2.0, -1.0, 1.5, 0,0,0, 0.05,0.02,0.0, 0,0,0, 0,0,0,0]\n"),
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* closed = result.find("closed");
+  ASSERT_NE(closed, nullptr);
+  const auto& sampled = closed->payload_as<SampledRun>("sampled_trajectory");
+  const auto& control = sampled.control;
+  ASSERT_GT(control.tick_times_s.size(), 10u);
+  EXPECT_EQ(control.delay_periods, 2);
+
+  const Artifact* law_stage = result.find("lqr");
+  ASSERT_NE(law_stage, nullptr);
+  const auto& law = law_stage->payload_as<galata::synth::LqrDesign>("control_law");
+  const Artifact* trim_stage = result.find("hover");
+  ASSERT_NE(trim_stage, nullptr);
+  const auto& trimmed = trim_stage->payload_as<HoverTrimArtifact>("hover_trim");
+
+  for (std::size_t tick = 0; tick < control.tick_times_s.size(); ++tick) {
+    // The law, recomputed from the chart error the run recorded.
+    const Eigen::VectorXd expected_request =
+        trimmed.point.command_rad_s - law.riccati.k * control.chart_error[tick];
+    EXPECT_LT((expected_request - control.requested_rad_s[tick]).norm(), 1e-12)
+        << "the requested command at tick " << tick << " is not u_trim - K e";
+
+    // The delay line: what the plant received is what was computed
+    // `delay_periods` ticks ago, and the trim command before that.
+    const Eigen::VectorXd& applied = control.applied_rad_s[tick];
+    if (tick < static_cast<std::size_t>(control.delay_periods)) {
+      EXPECT_LT((applied - trimmed.point.command_rad_s).norm(), 1e-12)
+          << "before the delay line has filled, the plant must receive the TRIM command at "
+             "tick "
+          << tick << " — zero would be a multirotor switched off";
+    } else {
+      const std::size_t source = tick - static_cast<std::size_t>(control.delay_periods);
+      EXPECT_LT((applied - control.saturated_rad_s[source]).norm(), 1e-12)
+          << "tick " << tick << " did not receive the command computed at tick " << source;
+    }
+  }
+}
+
+// Zero delay is the degenerate case of the same schedule and must not be a
+// separate code path: what is applied is what was just computed.
+TEST_F(QuadrotorWorkflow, ZeroDelayAppliesTheCommandComputedAtThatTick) {
+  const RunResult result = run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                                             "      controller_period_s: 0.004\n"
+                                             "      delay_periods: 0\n"
+                                             "      initial_chart_perturbation: "
+                                             "[1.0, 0,0, 0,0,0, 0,0,0, 0,0,0, 0,0,0,0]\n"),
+                               {.overwrite = true, .write_manifest = false});
+  const auto& control = result.find("closed")->payload_as<SampledRun>("sampled_trajectory").control;
+  for (std::size_t tick = 0; tick < control.tick_times_s.size(); ++tick) {
+    EXPECT_LT((control.applied_rad_s[tick] - control.saturated_rad_s[tick]).norm(), 1e-12);
+  }
+}
+
+// A large displacement drives the law past what the rotors can deliver. The
+// commands must clamp at the model's own ceiling — not at a number this
+// capability chose — and the run must SAY it saturated rather than reporting a
+// trajectory that looks like ordinary flight.
+TEST_F(QuadrotorWorkflow, SaturationClampsAtTheModelsOwnCeilingAndIsReported) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                        "      controller_period_s: 0.004\n"
+                        "      delay_periods: 0\n"
+                        "      initial_chart_perturbation: "
+                        "[400.0, -300.0, 250.0, 0,0,0, 0,0,0, 0,0,0, 0,0,0,0]\n"),
+          {.overwrite = true, .write_manifest = false});
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  EXPECT_GT(sampled.control.saturated_tick_count, 0)
+      << "a 400 m displacement must ask for more than the rotors have";
+  EXPECT_GT(sampled.control.worst_saturation_residual_rad_s, 0.0);
+
+  const Artifact* plant_stage = result.find("plant");
+  ASSERT_NE(plant_stage, nullptr);
+  const auto& model = plant_stage->payload_as<galata::model::Quadrotor>("quadrotor");
+  for (const Eigen::VectorXd& applied : sampled.control.applied_rad_s) {
+    for (int rotor = 0; rotor < model.rotor_count(); ++rotor) {
+      const auto& description = model.rotors[static_cast<std::size_t>(rotor)];
+      EXPECT_GE(applied(rotor), description.minimum_speed_rad_s - 1e-12);
+      EXPECT_LE(applied(rotor), description.maximum_speed_rad_s + 1e-12)
+          << "an applied command exceeded the rotor's own ceiling";
+    }
+  }
+}
+
+// CRUISE IS NOT HOVER WITH A NUMBER CHANGED. At a relative equilibrium the
+// reference position moves; a reference held at the trim's starting point
+// becomes, a second later, a demand to fly back to where the aircraft began.
+// The capability refuses to guess which was meant.
+TEST_F(QuadrotorWorkflow, ACruiseTrimMustDeclareWhetherItsReferenceTravels) {
+  const std::string cruise =
+      "{quadrotor: {from: plant}, altitude_m: 120.0, ground_velocity_ned_m_s: [6.0, 0.0, 0.0]}";
+  EXPECT_THROW((void)run(sampled_chain(cruise,
+                                       "      controller_period_s: 0.004\n"
+                                       "      delay_periods: 0\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a moving equilibrium with no declared reference motion must be refused";
+
+  // Declared, and the aircraft holds the equilibrium rather than fighting it.
+  const RunResult result = run(sampled_chain(cruise,
+                                             "      controller_period_s: 0.004\n"
+                                             "      delay_periods: 0\n"
+                                             "      reference_motion: follow_trim_velocity\n",
+                                             2000),
+                               {.overwrite = true, .write_manifest = false});
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const Eigen::VectorXd& last = sampled.plant.trajectory.states.back();
+  // Four seconds north at 6 m/s is 24 m. Started at the trim, so the error is
+  // what the controller allowed, not what it was asked to remove.
+  EXPECT_NEAR(last(galata::core::kPositionNorth), 24.0, 0.5)
+      << "a followed reference must let the aircraft travel along its equilibrium";
+  EXPECT_LT(sampled.control.chart_error.back().segment<3>(0).norm(), 0.5)
+      << "the position error must stay bounded when the reference travels with the trim";
+}
+
+// Timing that the schedule cannot represent is refused rather than rounded.
+TEST_F(QuadrotorWorkflow, UnsupportedSampledTimingIsRefused) {
+  const std::string hover = "{quadrotor: {from: plant}, altitude_m: 120.0}";
+  // A period that the step does not divide.
+  EXPECT_THROW((void)run(sampled_chain(hover, "      controller_period_s: 0.003\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+  // A horizon that is not a whole number of periods.
+  EXPECT_THROW((void)run(sampled_chain(hover, "      controller_period_s: 0.006\n", 400),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+  // A delay that is not a whole number of periods.
+  EXPECT_THROW((void)run(sampled_chain(hover,
+                                       "      controller_period_s: 0.004\n"
+                                       "      delay_periods: 1.5\n"),
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {
