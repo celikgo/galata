@@ -91,7 +91,17 @@ Artifact analyze_modes_capability(const StageContext& context) {
   table.system_citation = system.citation;
 
   std::ostringstream summary;
-  summary << table.decomposition.modes.size() << " modes";
+  // A conjugate pair is ONE mode, so this count is below the state count
+  // whenever the system oscillates. Saying only "12 modes" about a
+  // sixteen-state model reads as though four states went missing; it is the
+  // first thing a reader asks, and the answer costs one clause. The states are
+  // all still there — an oscillation is reported once rather than twice.
+  const std::size_t mode_count = table.decomposition.modes.size();
+  const auto state_count = static_cast<std::size_t>(system.a.rows());
+  summary << mode_count << " modes";
+  if (mode_count != state_count) {
+    summary << " over " << state_count << " states (a conjugate pair is one mode)";
+  }
   int labelled = 0;
   for (const auto& mode : table.decomposition.modes) {
     if (mode.label != analyze::ModeLabel::Unclassified) {
