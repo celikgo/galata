@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Four rotors with four DIFFERENT thrust coefficients, trimmed and linearised.
+#
+#   galata run examples/quadrotor-heterogeneous-rotors/study.yaml
+#
+# This is the shape a bench-measured aircraft has: nobody measures four
+# identical motors. Until `trim.hover` took its starting point per rotor, a
+# model like this one was refused outright — not by the equilibrium equations,
+# which have always carried one unknown per rotor, but by the vehicle-wide hover
+# speed that built the initial guess, which mismatched rotors do not have.
+#
+# The coefficients in quad-heterogeneous.yaml are synthetic. See its header.
+
+version: 1
+
+stages:
+  - id: plant
+    capability: model.quadrotor
+    input:
+      path: quad-heterogeneous.yaml
+
+  # Still air, level, at a declared altitude. The solve carries roll, pitch and
+  # one speed per rotor against the six dynamic accelerations.
+  - id: hover
+    capability: trim.hover
+    input:
+      quadrotor: {from: plant}
+      altitude_m: 120.0
+
+  # The operating point travels with the matrices as its own evidence file: the
+  # residual, the per-rotor margins, the step sizes and the frozen coordinates.
+  - id: linear
+    capability: linearize.extended
+    input:
+      trim: {from: hover}
+      evidence_path: operating-point.yaml
+
+  - id: exported
+    capability: model.linear.export
+    input:
+      system: {from: linear}
+      path: hover-linear.yaml
+
+  # Classification is off: a multirotor has no phugoid, and the classical
+  # aircraft labels do not apply to it.
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: {from: linear}
+      classify: false
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Heterogeneous-rotor quadrotor at hover
+      # `hover_trim` has no report writer; the trim's own evidence file above is
+      # where its residual and margins are recorded.
+      sections: [{from: linear}, {from: modes}]
+      path: heterogeneous-hover.md

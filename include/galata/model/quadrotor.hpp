@@ -260,6 +260,22 @@ class Quadrotor {
   // because an "average" hover speed for mismatched rotors is not a hover.
   [[nodiscard]] double hover_speed_rad_s(double gravity_m_s2) const;
 
+  // The speed at which ONE rotor produces its equal share m g / n of the weight,
+  // sqrt(m g / (n k_T_i)). Unlike the whole-vehicle form above this is defined for
+  // every admissible model, because it asks a question about one rotor rather than
+  // about a vehicle-wide speed that mismatched rotors do not have.
+  //
+  // WHAT THIS IS NOT: it is not a trim. Equal thrust per rotor balances the force
+  // but not, in general, the moments — a vehicle whose rotors differ produces a
+  // residual couple at these speeds. It is the starting point a solver needs, not
+  // an equilibrium, and `trim::trim_hover` treats it as exactly that.
+  //
+  // For a model whose rotors DO share one coefficient this returns the same value
+  // as the whole-vehicle form, by the same expression, so a homogeneous vehicle
+  // starts its solve from bit-identical numbers to the ones it started from before
+  // this overload existed. ADR-0004 depends on that.
+  [[nodiscard]] double hover_speed_rad_s(int rotor_index, double gravity_m_s2) const;
+
   // Projection applied after every completed integrator step: renormalise the
   // attitude quaternion (ADR-0002) and clamp each rotor speed to its own
   // range and to the battery ceiling. Deterministic and branch-free in the
