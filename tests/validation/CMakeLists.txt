@@ -32,6 +32,7 @@ add_executable(galata_validation_tests
   test_sensitivity_bounds.cpp
   test_case_registry.cpp
   test_care_slicot.cpp
+  test_battery_sag.cpp
   test_quadrotor_plant.cpp
   test_quadrotor_hover_linearisation.cpp
 )
