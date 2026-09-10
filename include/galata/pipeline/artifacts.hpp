@@ -3,6 +3,8 @@
 #define GALATA_PIPELINE_ARTIFACTS_HPP
 
 #include "galata/data/record.hpp"
+#include "galata/identify/greybox.hpp"
+#include "galata/identify/validate.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/numerics/integrator.hpp"
@@ -11,8 +13,52 @@
 #include "galata/trim/level.hpp"
 
 #include <iosfwd>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace galata::pipeline {
+
+struct FittedModelProvenance;
+
+// WHERE A MODEL CAME FROM, travelling with the model.
+//
+// A `quadrotor` artefact used to be a bare `model::Quadrotor`, which is a
+// complete description of a plant and no description at all of its standing. It
+// stopped being enough the moment a capability could PRODUCE a model rather
+// than only load one: a fitted plant and a hand-written one are the same C++
+// object and the same YAML, and a study that mixes them must be able to say
+// which is which without the reader diffing files.
+//
+// `sha256` is of the model file's BYTES, never of its path, for the reason
+// `data::Record` gives about its own source: a path is not an identity, and two
+// runs citing one path can have read different files.
+struct ModelIdentity {
+  // "file" for a model read from YAML, "fit" for one an identification
+  // produced. Closed vocabulary; a third value means a third way for a model to
+  // exist and needs its own record.
+  std::string origin = "file";
+  std::string path;    // as the study wrote it; empty for a fit
+  std::string sha256;  // of the file's bytes; empty for a fit
+  std::string summary;
+
+  // Present exactly when `origin == "fit"`. Shared rather than copied for the
+  // reason `Artifact::linearization_evidence` is: it is immutable evidence that
+  // passes through several stages and must stay one object, so that two
+  // artefacts claiming the same fit are claiming the same fit.
+  std::shared_ptr<const FittedModelProvenance> fit;
+
+  [[nodiscard]] bool is_fitted() const noexcept {
+    return origin == "fit";
+  }
+};
+
+// What every `quadrotor` artefact carries: the plant, and its standing.
+struct QuadrotorArtifact {
+  model::Quadrotor model;
+  ModelIdentity identity;
+};
+
 struct TrimArtifact {
   trim::TrimPoint point;
   model::Aircraft aircraft;
@@ -25,9 +71,100 @@ struct TrimArtifact {
 struct HoverTrimArtifact {
   trim::HoverTrim point;
   model::Quadrotor model;
+  // Carried through unchanged from the plant this is an equilibrium of, so a
+  // chain that trims and then linearises has not lost the identity of the model
+  // it did that to. See `ModelIdentity`.
+  ModelIdentity model_identity;
+};
+
+// One estimated parameter, with everything a reader needs to judge the number
+// beside the number itself. The bounds are here because an estimate resting on
+// one is not an interior estimate and the value alone does not say so; the unit
+// is here because a coefficient without one is not a measurement; the standard
+// error is here with its own flag because "no uncertainty could be estimated"
+// and "the uncertainty is zero" are different statements and a bare 0.0 reads
+// as the second.
+struct FittedParameter {
+  std::string path;
+  std::string unit;
+  double lower = 0.0;
+  double upper = 0.0;
+  double initial = 0.0;
+  double value = 0.0;
+  double standard_error = 0.0;
+  bool standard_error_is_estimable = false;
+  bool at_bound = false;
+};
+
+// The record of what an identification did, travelling with the model it
+// produced.
+//
+// WHY THIS IS NOT OPTIONAL. A model file written from a fit is byte-for-byte
+// the same KIND of object as a model file written from a bench measurement, and
+// nothing in the format distinguishes them (see `model::serialize_quadrotor`).
+// The only thing that can is a record kept beside it, so this is carried by the
+// artefact, written to a file by `model.quadrotor.export`, and refused rather
+// than defaulted where it is required.
+struct FittedModelProvenance {
+  // WHAT IT STARTED FROM. The base model is not modified and is not replaced:
+  // the fit produces a NEW model whose unnamed parameters are the base's, and
+  // this says which base that was, by its bytes.
+  std::string base_model_path;
+  std::string base_model_sha256;
+  std::string base_model_description;
+
+  // WHAT IT WAS FITTED TO. `identify.validate` reads this rather than trusting
+  // a digest the caller types in beside it.
+  std::string estimation_record_path;
+  std::string estimation_record_sha256;
+  bool estimation_record_is_window = false;
+  double estimation_window_start_s = 0.0;
+  double estimation_window_end_s = 0.0;
+  double estimation_first_sample_s = 0.0;
+  double estimation_last_sample_s = 0.0;
+  int estimation_sample_count = 0;
+
+  // WHAT MOVED, AND WHAT DID NOT. `preserved_parameter_paths` is written out in
+  // full rather than left as "everything else": a reader asking which numbers in
+  // the exported file are measurements and which are inherited must be able to
+  // answer it from this record alone, without diffing two YAML files.
+  std::vector<FittedParameter> fitted;
+  std::vector<std::string> preserved_parameter_paths;
+
+  // WHAT WAS MINIMISED. Stated in words because every residual below is
+  // relative to it, and a weighted sum whose weights are unstated is a
+  // weighting decision made by accident.
+  std::string objective_definition;
+  std::vector<std::string> output_matches;  // "channel -> state (scale unit)"
+  std::vector<std::string> command_channels;
+
+  // THREE THINGS THAT ARE NOT THE SAME, kept apart here as
+  // `include/galata/identify/greybox.hpp` keeps them apart: the optimiser
+  // finished, the parameters are identifiable, the fit is acceptable. This
+  // record carries the first two and never the third.
+  double objective = 0.0;
+  double residual_rms = 0.0;
+  int iterations = 0;
+  int residual_count = 0;
+  double last_step_norm = 0.0;
+  double jacobian_condition_number = 0.0;
+  double identifiability_ratio = 0.0;
+  bool optimiser_finished = false;
+  bool uncertainty_is_estimable = false;
+  std::string uncertainty_assumptions;
+  double step_s = 0.0;
 };
 
 void register_data_capabilities(Registry& registry);
+void register_identify_capabilities(Registry& registry);
+
+// What `identify.validate` produces. The model's identity travels with the
+// verdict so a report can say WHICH plant was scored, and whether that plant was
+// itself fitted, without re-walking the study graph.
+struct ValidationArtifact {
+  identify::ValidationResult result;
+  ModelIdentity model_identity;
+};
 
 // What `sim.plant` produces. The state NAMES travel with the samples because the
 // appended block's width is the model's — four rotors, or six, with or without a

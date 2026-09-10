@@ -639,7 +639,7 @@ TEST_F(QuadrotorWorkflow, SaturationClampsAtTheModelsOwnCeilingAndIsReported) {
 
   const Artifact* plant_stage = result.find("plant");
   ASSERT_NE(plant_stage, nullptr);
-  const auto& model = plant_stage->payload_as<galata::model::Quadrotor>("quadrotor");
+  const auto& model = plant_stage->payload_as<QuadrotorArtifact>("quadrotor").model;
   for (const Eigen::VectorXd& applied : sampled.control.applied_rad_s) {
     for (int rotor = 0; rotor < model.rotor_count(); ++rotor) {
       const auto& description = model.rotors[static_cast<std::size_t>(rotor)];

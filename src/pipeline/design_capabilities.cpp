@@ -2,6 +2,7 @@
 // File-driven control design and simulation adapters. All numeric algorithms
 // live in synth/sim; this layer validates wiring, preserves names and renders.
 #include "galata/analyze/hinfinity.hpp"
+#include "galata/identify/validate.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/charts.hpp"
 #include "galata/sim/linear.hpp"
@@ -676,6 +677,94 @@ std::vector<TimeSeriesChart> design_charts(const Artifact& artifact) {
 }
 
 bool write_design_section(std::ostream& out, const Artifact& artifact) {
+  // A fitted plant reaching a report must arrive with the account of how it was
+  // fitted, and a loaded one must arrive saying it was loaded. A report that
+  // showed only the coefficients would be a table of numbers with no way to tell
+  // a measurement from an estimate.
+  if (artifact.kind == "quadrotor") {
+    const auto& subject = artifact.payload_as<QuadrotorArtifact>("quadrotor");
+    if (!subject.identity.is_fitted() || !subject.identity.fit) {
+      out << "Loaded from `" << subject.identity.path << "` (sha256 " << subject.identity.sha256
+          << "). No parameter was fitted.\n\n";
+      return true;
+    }
+    const FittedModelProvenance& fit = *subject.identity.fit;
+    out << "### Identified parameters\n\n";
+    out << "| Parameter | Unit | Value | Standard error | Bounds | At bound |\n";
+    out << "|---|---|---|---|---|---|\n";
+    for (const FittedParameter& parameter : fit.fitted) {
+      out << "| `" << parameter.path << "` | " << parameter.unit << " | " << parameter.value
+          << " | ";
+      if (parameter.standard_error_is_estimable) {
+        out << parameter.standard_error;
+      } else {
+        out << "none estimable";
+      }
+      out << " | [" << parameter.lower << ", " << parameter.upper << "] | "
+          << (parameter.at_bound ? "**yes**" : "no") << " |\n";
+    }
+    out << "\n"
+        << fit.preserved_parameter_paths.size()
+        << " further parameter(s) were NOT fitted and carry the base model's values "
+           "unchanged.\n\n";
+    out << "**Fitted against** `" << fit.estimation_record_path << "` (sha256 "
+        << fit.estimation_record_sha256 << "), " << fit.estimation_sample_count
+        << " sample(s) over [" << fit.estimation_first_sample_s << ", "
+        << fit.estimation_last_sample_s << "] s, from base model `" << fit.base_model_path
+        << "` (sha256 " << fit.base_model_sha256 << ").\n\n";
+    out << "| Diagnostic | Value |\n|---|---|\n"
+        << "| Objective (scaled) | " << fit.objective << " |\n"
+        << "| Residual RMS (scaled) | " << fit.residual_rms << " |\n"
+        << "| Residuals | " << fit.residual_count << " |\n"
+        << "| Iterations declared | " << fit.iterations << " |\n"
+        << "| Sensitivity condition number | " << fit.jacobian_condition_number << " |\n\n";
+    out << "_Objective:_ " << fit.objective_definition << "\n\n";
+    out << "_Uncertainty:_ "
+        << (fit.uncertainty_is_estimable ? fit.uncertainty_assumptions
+                                         : "none reported — " + fit.uncertainty_assumptions)
+        << "\n\n";
+    out << "A completed fit is not a validation, and these coefficients are not measured "
+           "aircraft data. Whether the residual is small enough for any use is an engineering "
+           "judgement nothing here makes.\n\n";
+    return true;
+  }
+  if (artifact.kind == "validation") {
+    const auto& validation = artifact.payload_as<ValidationArtifact>("validation");
+    const identify::ValidationResult& result = validation.result;
+    // The label first and in words. It is the difference between a diagnostic
+    // and a claim, and a reader skimming a report must meet it before the
+    // numbers rather than after them.
+    out << "**Independence: " << identify::to_string(result.independence) << "** — "
+        << result.independence_basis << "\n\n";
+    if (result.caller_declaration_was_contradicted) {
+      out << "> The study declared these records independent and a check contradicted it. The "
+             "numbers below are a diagnostic, not a validation.\n\n";
+    }
+    out << "| Output | State | RMSE | Max abs error | Mean error | Fit fraction | Residual "
+           "lag-1 autocorrelation |\n";
+    out << "|---|---|---|---|---|---|---|\n";
+    for (const identify::ValidationOutput& output : result.outputs) {
+      out << "| `" << output.channel << "` | `" << output.state_name << "` | " << output.rmse
+          << " | " << output.max_absolute_error << " | " << output.mean_error << " | ";
+      if (output.fit_fraction_is_defined) {
+        out << output.fit_fraction;
+      } else {
+        out << "undefined — " << output.undefined_reason;
+      }
+      out << " | ";
+      if (output.autocorrelation_is_defined) {
+        out << output.residual_lag_one_autocorrelation;
+      } else {
+        out << "undefined";
+      }
+      out << " |\n";
+    }
+    out << "\nScored over " << result.sample_count << " sample(s). Validation record sha256 "
+        << result.validation_record_sha256 << "; estimation record sha256 "
+        << result.estimation_record_sha256 << ".\n\n";
+    out << "_Assumptions:_ " << result.assumptions << "\n\n";
+    return true;
+  }
   if (artifact.kind == "robust_bounds") {
     const auto& bounds = artifact.payload_as<RobustBounds>("robust_bounds");
     out << "### Sensitivity S = (I + L)^-1\n\n";
@@ -727,6 +816,39 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
     out << "Completed " << run.trajectory.step_count << " steps at " << run.trajectory.step_s
         << " s. Fixed-step RK4; compare with a smaller step to assess integration error.\n\n";
     matrix_table(out, "Final state", run.trajectory.states.back(), run.system.state_names);
+    return true;
+  }
+  // A sampled run's report is about the CONTROLLER as much as the trajectory:
+  // what the law asked for, how much of it the vehicle was allowed, and at what
+  // rate and delay it asked. A report showing only the final state would
+  // describe a flight without saying it was flown by a loop that samples.
+  if (artifact.kind == "sampled_trajectory") {
+    const auto& sampled = artifact.payload_as<SampledRun>("sampled_trajectory");
+    const SampledControlRecord& control = sampled.control;
+    out << "| Quantity | Value |\n|---|---|\n"
+        << "| Controller period | " << control.controller_period_s << " s |\n"
+        << "| Ticks executed | " << control.tick_times_s.size() << " |\n"
+        << "| Delay | " << control.delay_periods << " period(s) |\n"
+        << "| Integration step | " << sampled.plant.step_s << " s |\n"
+        << "| Integration steps | " << sampled.plant.step_count << " |\n"
+        << "| Reference translates with the trim velocity | "
+        << (control.reference_follows_trim_velocity ? "yes" : "no") << " |\n"
+        << "| Ticks at which saturation changed the command | " << control.saturated_tick_count
+        << " |\n"
+        << "| Worst single-channel saturation residual | "
+        << control.worst_saturation_residual_rad_s << " rad/s |\n\n";
+    if (control.saturated_tick_count > 0) {
+      out << "The law asked for authority it did not get at " << control.saturated_tick_count
+          << " tick(s). The residual above is the honest measure of how much: a run reported "
+             "only through its applied commands would not show it.\n\n";
+    }
+    matrix_table(
+        out, "Final state", sampled.plant.trajectory.states.back(), sampled.plant.state_names);
+    out << "This is the NONLINEAR plant, executed with zero-order hold and a whole-period "
+           "delay. Gain and phase margins computed from the continuous linearisation describe "
+           "the continuous loop and not this one; the sampled loop's own robustness is a "
+           "separate question no capability here answers. Use report.csv for the requested and "
+           "applied commands at every tick.\n\n";
     return true;
   }
   if (artifact.kind == "nonlinear_trajectory") {

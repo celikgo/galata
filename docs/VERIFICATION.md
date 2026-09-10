@@ -151,7 +151,10 @@ against.
 | `analyze.sigma` | implemented and validated | `analyze.sigma`, `analyze.sigma.grid_bound` |
 | `data.import.csv` | implemented, unvalidated | — |
 | `data.import.ulog` | implemented, unvalidated | — |
+| `data.window` | implemented, unvalidated | — |
+| `identify.greybox` | implemented, unvalidated | — |
 | `identify.static_fit` | implemented, unvalidated | — |
+| `identify.validate` | implemented, unvalidated | — |
 | `linearize.extended` | implemented, unvalidated | `quadrotor.hover_linearisation` |
 | `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
@@ -163,6 +166,7 @@ against.
 | `model.linear.statespace` | implemented, unvalidated | — |
 | `model.linear_graph` | implemented, unvalidated | — |
 | `model.quadrotor` | implemented, unvalidated | — |
+| `model.quadrotor.export` | implemented, unvalidated | — |
 | `model.series` | implemented, unvalidated | — |
 | `report.csv` | implemented, unvalidated | — |
 | `report.html` | implemented, unvalidated | — |

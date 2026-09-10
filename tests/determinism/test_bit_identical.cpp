@@ -17,6 +17,9 @@
 #include "galata/core/constants.hpp"
 #include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
+#include "galata/data/csv.hpp"
+#include "galata/data/window.hpp"
+#include "galata/identify/greybox.hpp"
 #include "galata/linearize/extended.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/model/quadrotor.hpp"
@@ -27,6 +30,8 @@
 #include "fingerprint.hpp"
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -383,4 +388,89 @@ TEST(Determinism, HoverTrimAndItsLinearisationAreBitIdenticalAcrossRuns) {
   // matrices are not enough: the text of them must be identical too.
   EXPECT_EQ(galata::model::serialize_linear_system(a.to_linear_system("d", "c")),
             galata::model::serialize_linear_system(b.to_linear_system("d", "c")));
+}
+
+// ADR-0004 tier 1 over the identification path. A fit is the longest chain of
+// floating-point work in the tree — an optimiser wrapped around an integrator
+// wrapped around the plant — and it is the easiest place for a
+// tolerance-based exit or an unordered reduction to make two runs disagree.
+// `fit_greybox` runs a DECLARED number of iterations for exactly this reason,
+// and this is the test that says so.
+TEST(Determinism, AGreyboxFitIsBitIdenticalAcrossRuns) {
+  const galata::model::Quadrotor base = galata::model::load_quadrotor(
+      std::string(GALATA_EXAMPLES_DIR) + "/quadrotor-identification/quad-base.yaml");
+
+  std::ifstream file(std::string(GALATA_EXAMPLES_DIR) + "/quadrotor-identification/flight.csv",
+                     std::ios::binary);
+  std::ostringstream bytes;
+  bytes << file.rdbuf();
+  ASSERT_FALSE(bytes.str().empty());
+
+  galata::data::CsvImportRequest import;
+  import.time_column = "time_s";
+  const char* states[] = {"p_n",
+                          "p_e",
+                          "p_d",
+                          "u",
+                          "v",
+                          "w",
+                          "q_w",
+                          "q_x",
+                          "q_y",
+                          "q_z",
+                          "p",
+                          "q",
+                          "r",
+                          "omega_0",
+                          "omega_1",
+                          "omega_2",
+                          "omega_3"};
+  for (const char* name : states) {
+    import.channels.push_back({std::string("state:") + name, name, "si", "none", 1.0, 0.0});
+  }
+  for (int r = 0; r < 4; ++r) {
+    const std::string index = std::to_string(r);
+    import.channels.push_back(
+        {"command:omega_command_" + index + "_rad_s", "cmd_" + index, "rad/s", "none", 1.0, 0.0});
+  }
+  import.ignore_columns = {"wind:north_m_s", "wind:east_m_s", "wind:down_m_s"};
+  const galata::data::Record record = galata::data::window_record(
+      galata::data::read_csv(bytes.str(), "flight.csv", import), 0.0, 1.2);
+
+  galata::identify::GreyboxRequest request;
+  request.step_s = 0.004;
+  request.iterations = 20;
+  request.parameters = {{"mass.mass_kg", 1.0, 3.0, 1.45},
+                        {"drag.angular_n_m_s[1]", 0.0005, 0.02, 0.004}};
+  request.outputs = {{"p_d", "p_d", 0.1}, {"w", "w", 0.1}, {"q", "q", 0.05}};
+  request.command_channels = {"cmd_0", "cmd_1", "cmd_2", "cmd_3"};
+  request.initial_extended_state = Eigen::VectorXd::Zero(base.extended_state_size());
+  const std::vector<std::string> names = base.extended_state_names();
+  for (std::size_t k = 0; k < names.size(); ++k) {
+    request.initial_extended_state(static_cast<Eigen::Index>(k)) =
+        record.find(names[k])->samples.front();
+  }
+  base.project(request.initial_extended_state);
+
+  const auto first = galata::identify::fit_greybox(base, record, request);
+  const auto second = galata::identify::fit_greybox(base, record, request);
+
+  ASSERT_EQ(first.value.size(), second.value.size());
+  for (Eigen::Index k = 0; k < first.value.size(); ++k) {
+    EXPECT_EQ(first.value(k), second.value(k))
+        << "parameter " << first.names[static_cast<std::size_t>(k)];
+    EXPECT_EQ(first.standard_error(k), second.standard_error(k))
+        << "standard error " << first.names[static_cast<std::size_t>(k)];
+  }
+  EXPECT_EQ(first.objective, second.objective);
+  EXPECT_EQ(first.initial_objective, second.initial_objective);
+  EXPECT_EQ(first.residual_rms, second.residual_rms);
+  EXPECT_EQ(first.last_step_norm, second.last_step_norm);
+  EXPECT_EQ(first.accepted_steps, second.accepted_steps);
+  EXPECT_EQ(first.jacobian_condition_number, second.jacobian_condition_number);
+
+  // The exported bytes are the artefact a user actually diffs, so identical
+  // parameters are not enough: the text of the fitted model must match too.
+  EXPECT_EQ(galata::model::serialize_quadrotor(first.fitted_model),
+            galata::model::serialize_quadrotor(second.fitted_model));
 }

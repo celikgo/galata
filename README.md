@@ -182,7 +182,10 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
 | `data.import.csv` | Read a measured record from delimited text under a declared unit, frame and timebase mapping, refusing anything the study has not accounted for | `measured_record` | implemented, unvalidated |
 | `data.import.ulog` | Read a measured record from a PX4 ULog under a declared channel, unit and frame mapping, resampled onto one timebase by zero-order hold | `measured_record` | implemented, unvalidated |
+| `data.window` | Cut a measured record to a half-open time window of itself, keeping the source identity so that two windows of one import are provably disjoint | `measured_record` | implemented, unvalidated |
+| `identify.greybox` | Fit a declared subset of a multirotor's parameters to a measured record by simulating the nonlinear plant, refusing a parameter the data does not constrain | `quadrotor` | implemented, unvalidated |
 | `identify.static_fit` | Fit a response that is linear in declared terms — a bench map — reporting the range it was measured over and an uncertainty only where the data supports one | `static_fit` | implemented, unvalidated |
+| `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with independence from the training data classified rather than assumed | `validation` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
@@ -194,6 +197,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
 | `model.linear_graph` | Lower a typed linear system or LQR plant and feedback into an executable graph with origin evidence | `executable_model` | implemented, unvalidated |
 | `model.quadrotor` | Load a nonlinear multirotor plant — rotors with first-order speed lag, per-axis drag and an optional battery | `quadrotor` | implemented, unvalidated |
+| `model.quadrotor.export` | Write a multirotor as the YAML model.quadrotor reads, with a required record of where its numbers came from — which parameters were fitted, from what, and which were carried over untouched | `quadrotor` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |

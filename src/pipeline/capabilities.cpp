@@ -13,6 +13,7 @@
 #include "galata/analyze/modes.hpp"
 #include "galata/analyze/sensitivity.hpp"
 #include "galata/analyze/singular_values.hpp"
+#include "galata/core/sha256.hpp"
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
@@ -145,9 +146,10 @@ Artifact load_aircraft_model(const StageContext& context) {
 // --- model.quadrotor -------------------------------------------------------
 
 Artifact load_quadrotor_model(const StageContext& context) {
-  const std::string path = context.resolve_input_path(context.input->string_at("path"));
-  const model::Quadrotor quadrotor =
-      model::parse_quadrotor(context.read_input(context.input->string_at("path")), path);
+  const std::string declared = context.input->string_at("path");
+  const std::string path = context.resolve_input_path(declared);
+  const std::string bytes = context.read_input(declared);
+  const model::Quadrotor quadrotor = model::parse_quadrotor(bytes, path);
 
   std::ostringstream summary;
   summary << quadrotor.rotor_count() << " rotors, " << quadrotor.extended_state_size() << " states";
@@ -158,10 +160,20 @@ Artifact load_quadrotor_model(const StageContext& context) {
     summary << " — " << quadrotor.description;
   }
 
+  QuadrotorArtifact payload;
+  payload.model = quadrotor;
+  payload.identity.origin = "file";
+  payload.identity.path = declared;
+  // The bytes, not the path. Computed here rather than taken from the run
+  // manifest so that the identity travels with the artefact through every
+  // downstream stage, including into a fitted model's provenance.
+  payload.identity.sha256 = core::sha256(bytes);
+  payload.identity.summary = quadrotor.description;
+
   Artifact artifact;
   artifact.kind = "quadrotor";
   artifact.summary = summary.str();
-  artifact.payload = quadrotor;
+  artifact.payload = payload;
   return artifact;
 }
 
@@ -1082,6 +1094,7 @@ Registry build_registry() {
 
   register_data_capabilities(registry);
   register_design_capabilities(registry);
+  register_identify_capabilities(registry);
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);
   return registry;

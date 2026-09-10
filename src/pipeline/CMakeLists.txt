@@ -12,6 +12,7 @@ add_library(galata_pipeline
   pipeline.cpp
   capabilities.cpp
   data_capabilities.cpp
+  identify_capabilities.cpp
   design_capabilities.cpp
   model_capabilities.cpp
   quadrotor_capabilities.cpp

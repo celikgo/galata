@@ -20,14 +20,17 @@
 #include "galata/synth/control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/units.hpp"
+#include "galata/version.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace galata::pipeline {
 namespace {
@@ -255,7 +258,7 @@ Artifact simulate_plant_capability(const StageContext& context) {
     command = trimmed.point.command_rad_s;
     wind = trimmed.point.wind_ned_m_s;
   } else {
-    model = &context.upstream_at("quadrotor").payload_as<model::Quadrotor>("quadrotor");
+    model = &context.upstream_at("quadrotor").payload_as<QuadrotorArtifact>("quadrotor").model;
     initial = vector_at(context, "initial_extended_state", model->extended_state_size());
     command = vector_at(context, "command_rad_s", model->rotor_count());
   }
@@ -732,7 +735,8 @@ Artifact simulate_sampled_capability(const StageContext& context) {
 
 Artifact trim_hover_capability(const StageContext& context) {
   const Artifact& upstream = context.upstream_at("quadrotor");
-  const auto& model = upstream.payload_as<model::Quadrotor>("quadrotor");
+  const auto& quadrotor_artifact = upstream.payload_as<QuadrotorArtifact>("quadrotor");
+  const auto& model = quadrotor_artifact.model;
 
   trim::HoverTrimRequest request;
   request.altitude_m = context.input->number_at("altitude_m", 0.0);
@@ -745,7 +749,7 @@ Artifact trim_hover_capability(const StageContext& context) {
   request.residual_tolerance = context.input->number_at("tolerance", 1e-10);
   request.iterations = positive_integer_at(context, "iterations", 40);
 
-  HoverTrimArtifact trimmed{trim::trim_hover(model, request), model};
+  HoverTrimArtifact trimmed{trim::trim_hover(model, request), model, quadrotor_artifact.identity};
 
   std::ostringstream summary;
   summary << std::fixed << std::setprecision(3) << "roll "
@@ -972,6 +976,176 @@ Artifact export_state_space(const StageContext& context) {
   return artifact;
 }
 
+// --- model.quadrotor.export ------------------------------------------------
+//
+// A model leaving galata as a file the loader reads back, with the record of
+// where it came from beside it.
+//
+// THE EVIDENCE FILE IS NOT OPTIONAL, and that is the decision ADR-0018 records.
+// `model::serialize_quadrotor` writes a file that is byte-for-byte the same KIND
+// of object whether the numbers in it were measured on a bench or estimated by
+// an optimiser, and nothing in the format can distinguish them. The repository
+// already answers this for hand-written models — every directory under `models/`
+// ships a `PROVENANCE.md` beside its YAML — and a model this tool writes is held
+// to the same rule rather than a weaker one. So both paths are required, for a
+// fitted model and for a loaded one alike: a uniform rule has no branch for a
+// caller to take, and "no parameter was fitted; these are the bytes it came
+// from" is itself worth recording.
+
+void write_yaml_text(std::ostream& out, const std::string& key, std::string_view text) {
+  if (text.empty()) {
+    return;
+  }
+  out << key << ": \"";
+  for (const char character : text) {
+    if (character == '"' || character == '\\') {
+      out << '\\';
+    }
+    // A control character cannot appear in a provenance field; the serialiser
+    // refuses the same thing for the model file itself.
+    out << (static_cast<unsigned char>(character) < 0x20 ? ' ' : character);
+  }
+  out << "\"\n";
+}
+
+std::string fitted_model_evidence(const QuadrotorArtifact& subject, const std::string& model_path) {
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10);
+
+  out << "# SPDX-License-Identifier: Apache-2.0\n";
+  out << "#\n";
+  out << "# Written by `model.quadrotor.export`. This is the record that says what the model\n";
+  out << "# file beside it is; the file itself cannot say, because a fitted model and a\n";
+  out << "# measured one are the same kind of document. Not a study input: no capability\n";
+  out << "# reads this back, and nothing downstream depends on its shape.\n\n";
+
+  out << "model_file: \"" << model_path << "\"\n";
+  out << "origin: \"" << subject.identity.origin << "\"\n";
+  write_yaml_text(out, "produced_by", galata::build_identification());
+
+  if (!subject.identity.is_fitted()) {
+    out << "\n# Loaded from a file and not modified. Recorded so that an exported model always\n";
+    out << "# carries an account of itself, whether or not anything was estimated.\n";
+    out << "source:\n";
+    write_yaml_text(out, "  path", subject.identity.path);
+    write_yaml_text(out, "  sha256", subject.identity.sha256);
+    out << "fitted_parameter_count: 0\n";
+    return out.str();
+  }
+
+  const FittedModelProvenance& fit = *subject.identity.fit;
+  out << "\nbase_model:\n";
+  write_yaml_text(out, "  path", fit.base_model_path);
+  write_yaml_text(out, "  sha256", fit.base_model_sha256);
+  write_yaml_text(out, "  description", fit.base_model_description);
+  out << "  # Not modified and not replaced. The file above is still what it was; the model\n";
+  out << "  # beside this record is a new one whose unnamed parameters are that file's.\n";
+
+  out << "\nestimation_record:\n";
+  write_yaml_text(out, "  path", fit.estimation_record_path);
+  write_yaml_text(out, "  sha256", fit.estimation_record_sha256);
+  out << "  sample_count: " << fit.estimation_sample_count << "\n";
+  out << "  first_sample_s: " << fit.estimation_first_sample_s << "\n";
+  out << "  last_sample_s: " << fit.estimation_last_sample_s << "\n";
+  out << "  is_window: " << (fit.estimation_record_is_window ? "true" : "false") << "\n";
+  if (fit.estimation_record_is_window) {
+    out << "  window_start_s: " << fit.estimation_window_start_s << "\n";
+    out << "  window_end_s: " << fit.estimation_window_end_s << "\n";
+  }
+
+  out << "\nobjective:\n";
+  write_yaml_text(out, "  definition", fit.objective_definition);
+  out << "  step_s: " << fit.step_s << "\n";
+  out << "  outputs:\n";
+  for (const std::string& match : fit.output_matches) {
+    out << "    - \"" << match << "\"\n";
+  }
+  out << "  command_channels: [";
+  for (std::size_t k = 0; k < fit.command_channels.size(); ++k) {
+    out << (k == 0 ? "" : ", ") << "\"" << fit.command_channels[k] << "\"";
+  }
+  out << "]\n";
+
+  out << "\nfitted_parameters:\n";
+  for (const FittedParameter& parameter : fit.fitted) {
+    out << "  - path: \"" << parameter.path << "\"\n";
+    out << "    unit: \"" << parameter.unit << "\"\n";
+    out << "    value: " << parameter.value << "\n";
+    out << "    initial: " << parameter.initial << "\n";
+    out << "    lower: " << parameter.lower << "\n";
+    out << "    upper: " << parameter.upper << "\n";
+    if (parameter.standard_error_is_estimable) {
+      out << "    standard_error: " << parameter.standard_error << "\n";
+    } else {
+      out << "    standard_error: null   # none could be estimated; see uncertainty below\n";
+    }
+    out << "    at_bound: " << (parameter.at_bound ? "true" : "false");
+    if (parameter.at_bound) {
+      out << "   # resting on a declared limit, which is not an interior estimate";
+    }
+    out << "\n";
+  }
+
+  // Written out in full rather than as "everything else": a reader asking which
+  // numbers in the model file are measurements and which are inherited must be
+  // able to answer it from this record alone.
+  out << "\npreserved_parameters:   # carried from the base model, untouched by the fit\n";
+  for (const std::string& path : fit.preserved_parameter_paths) {
+    out << "  - \"" << path << "\"\n";
+  }
+
+  out << "\ndiagnostics:\n";
+  out << "  objective: " << fit.objective << "\n";
+  out << "  residual_rms_scaled: " << fit.residual_rms << "\n";
+  out << "  residual_count: " << fit.residual_count << "\n";
+  out << "  iterations_declared: " << fit.iterations << "\n";
+  out << "  last_step_norm: " << fit.last_step_norm << "\n";
+  out << "  optimiser_finished: " << (fit.optimiser_finished ? "true" : "false") << "\n";
+  out << "  jacobian_condition_number: " << fit.jacobian_condition_number << "\n";
+  out << "  identifiability_ratio: " << fit.identifiability_ratio << "\n";
+
+  out << "\nuncertainty:\n";
+  out << "  estimable: " << (fit.uncertainty_is_estimable ? "true" : "false") << "\n";
+  write_yaml_text(out, "  assumptions", fit.uncertainty_assumptions);
+
+  out << "\nwhat_this_is_not: \"A completed fit is not a validation and this model is not "
+         "measured aircraft data. Whether the residual is small enough for any use is an "
+         "engineering judgement nothing here makes. Run identify.validate against a record "
+         "this model was not fitted to before treating it as predictive.\"\n";
+  return out.str();
+}
+
+Artifact export_quadrotor(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("model");
+  const auto& subject = upstream.payload_as<QuadrotorArtifact>("quadrotor");
+
+  const std::string path = context.input->string_at("path");
+  const std::string evidence_path = context.input->string_at("evidence_path");
+  if (path == evidence_path) {
+    throw std::invalid_argument(
+        "model.quadrotor.export: `path` and `evidence_path` name the same file. The model and "
+        "the record of where it came from are two documents and one would overwrite the other");
+  }
+  context.write_output(path, model::serialize_quadrotor(subject.model));
+  context.write_output(evidence_path, fitted_model_evidence(subject, path));
+
+  std::ostringstream summary;
+  summary << "wrote " << subject.model.rotor_count() << " rotors, "
+          << subject.model.extended_state_size() << " states to " << path << ", with its "
+          << (subject.identity.is_fitted() ? "fit record" : "source record") << " in "
+          << evidence_path;
+
+  Artifact artifact;
+  artifact.kind = "quadrotor";
+  artifact.summary = summary.str();
+  // The model itself, unchanged and with its identity intact, so an export can
+  // sit mid-chain rather than only at the end of one. `model.linear.export`
+  // passes its system through for the same reason.
+  artifact.payload = subject;
+  return artifact;
+}
+
 }  // namespace
 
 void register_quadrotor_capabilities(Registry& registry) {
@@ -1057,6 +1231,18 @@ void register_quadrotor_capabilities(Registry& registry) {
                  {"system", "path"},
                  {},
                  {"path"}});
+
+  registry.add(Capability{
+      "model.quadrotor.export",
+      "Write a multirotor as the YAML model.quadrotor reads, with a required record of where "
+      "its numbers came from — which parameters were fitted, from what, and which were "
+      "carried over untouched",
+      "quadrotor",
+      Capability::State::ImplementedUnvalidated,
+      export_quadrotor,
+      {"model", "path", "evidence_path"},
+      {},
+      {"path", "evidence_path"}});
 }
 
 }  // namespace galata::pipeline

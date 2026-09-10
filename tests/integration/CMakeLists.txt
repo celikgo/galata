@@ -23,6 +23,7 @@ add_executable(galata_integration_tests
   test_design_workflow.cpp
   test_model_workflow.cpp
   test_quadrotor_workflow.cpp
+  test_identify_workflow.cpp
   test_linear_graph_workflow.cpp
   test_model_input_limits.cpp
   test_pipeline_cancellation.cpp

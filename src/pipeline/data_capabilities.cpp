@@ -4,7 +4,7 @@
 
 #include "galata/data/csv.hpp"
 #include "galata/data/ulog.hpp"
-#include "galata/identify/static_fit.hpp"
+#include "galata/data/window.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 
@@ -116,50 +116,28 @@ Artifact import_ulog(const StageContext& context) {
   return artifact;
 }
 
-// --- identify.static_fit ----------------------------------------------------
+// --- data.window -----------------------------------------------------------
 //
-// The library API does the work; this is the study-facing shape of it. Every
-// term, its power, its name and its unit are declared, because a coefficient
-// whose meaning was chosen by software is not a measurement of anything.
-Artifact static_fit_capability(const StageContext& context) {
+// The estimation/validation split, done where it can be CHECKED. See
+// include/galata/data/window.hpp for why this is a capability rather than an
+// option on the readers: two windows of one import keep one source identity and
+// gain an interval, and that is the only shape in which `identify.validate` can
+// prove a split rather than accept a claim about one.
+Artifact window_capability(const StageContext& context) {
   const auto& record = context.upstream_at("record").payload_as<data::Record>("measured_record");
-
-  identify::StaticFitRequest request;
-  request.response_channel = context.input->string_at("response");
-  request.intercept = context.input->bool_at("intercept", false);
-  request.intercept_name = context.input->string_at("intercept_name", "intercept");
-  request.intercept_unit = context.input->string_at("intercept_unit", "");
-  request.maximum_condition_number = context.input->number_at("maximum_condition_number", 1e8);
-
-  const ValuePtr terms = context.input->get("terms");
-  if (!terms) {
-    throw std::invalid_argument("identify.static_fit: `terms` is required");
-  }
-  for (const ValuePtr& entry : terms->as_list()) {
-    identify::Term term;
-    term.channel = entry->string_at("channel");
-    term.power = entry->number_at("power");
-    term.name = entry->string_at("name");
-    term.unit = entry->string_at("unit");
-    request.terms.push_back(std::move(term));
-  }
-
-  const identify::StaticFit fit = identify::fit_static(record, request);
+  const double start_s = context.input->number_at("start_time_s");
+  const double end_s = context.input->number_at("end_time_s");
+  const data::Record cut = data::window_record(record, start_s, end_s);
 
   std::ostringstream summary;
-  summary << fit.coefficients.size() << " coefficient(s) from " << fit.sample_count
-          << " sample(s); residual RMS " << std::scientific << std::setprecision(3)
-          << fit.residual_rms;
-  // Whether an uncertainty exists is part of the headline, not a detail: a
-  // reader who skims the summary must not come away thinking one was reported
-  // when none could be.
-  summary << (fit.uncertainty_is_estimable ? "; standard errors reported"
-                                           : "; NO uncertainty (" + fit.uncertainty_note + ")");
+  summary << cut.sample_count() << " of " << record.sample_count() << " sample(s) in ["
+          << std::fixed << std::setprecision(3) << start_s << ", " << end_s << ") s; "
+          << cut.samples_outside_window << " outside";
 
   Artifact artifact;
-  artifact.kind = "static_fit";
+  artifact.kind = "measured_record";
   artifact.summary = summary.str();
-  artifact.payload = fit;
+  artifact.payload = cut;
   return artifact;
 }
 
@@ -192,20 +170,14 @@ void register_data_capabilities(Registry& registry) {
       {"path", "channels", "resample_hz", "description"},
       {"path"}});
 
-  registry.add(Capability{
-      "identify.static_fit",
-      "Fit a response that is linear in declared terms — a bench map — reporting the range it "
-      "was measured over and an uncertainty only where the data supports one",
-      "static_fit",
-      Capability::State::ImplementedUnvalidated,
-      static_fit_capability,
-      {"record",
-       "response",
-       "terms",
-       "intercept",
-       "intercept_name",
-       "intercept_unit",
-       "maximum_condition_number"}});
+  registry.add(
+      Capability{"data.window",
+                 "Cut a measured record to a half-open time window of itself, keeping the source "
+                 "identity so that two windows of one import are provably disjoint",
+                 "measured_record",
+                 Capability::State::ImplementedUnvalidated,
+                 window_capability,
+                 {"record", "start_time_s", "end_time_s"}});
 }
 
 }  // namespace galata::pipeline
