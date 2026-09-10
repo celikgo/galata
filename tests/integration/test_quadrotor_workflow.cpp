@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -373,6 +374,98 @@ TEST_F(QuadrotorWorkflow, SimPlantRefusesAmbiguousAndVacuousRequests) {
                          {.overwrite = true, .write_manifest = false}),
                std::runtime_error)
       << "freezing a battery the shipped model does not carry must be refused, not ignored";
+}
+
+// --- wind, and the coordinate the state actually holds ---------------------
+//
+// ADR-0002's velocity state is AIR-RELATIVE and `Quadrotor::derivative` takes
+// the wind as steady: it carries no -R^T dw/dt term. A wind that changes
+// therefore needs the simulator's help, in two different ways.
+//
+// A STEP is an event, not a large derivative. No force acts at the instant the
+// air mass changes speed, so the GROUND velocity is continuous and the
+// air-relative velocity must jump by exactly minus the wind change, rotated
+// into the body frame. Integrating through the step instead injects the entire
+// wind increment as a ground-velocity error — permanently, and with nothing to
+// show for it in any residual. This is WP1's first finding, and it is the one
+// property of time-varying wind that a plausible-looking trajectory will hide.
+//
+// The vehicle is level at hover, so the body-to-NED rotation is the identity
+// and the expected jump is exactly the negated wind, written down rather than
+// computed by the code under test.
+TEST_F(QuadrotorWorkflow, AWindStepMovesTheAirRelativeVelocityAndNotTheGroundVelocity) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 1000\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: zero_order\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 1.0, values: [3.0, 2.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.trajectory.states.size(), data.wind_samples_ned_m_s.size());
+
+  std::size_t at_step = 0;
+  for (std::size_t i = 0; i < data.trajectory.times_s.size(); ++i) {
+    if (std::fabs(data.trajectory.times_s[i] - 1.0) < 1e-9) {
+      at_step = i;
+      break;
+    }
+  }
+  ASSERT_GT(at_step, 0u) << "the wind step is not among the recorded samples";
+
+  const Eigen::VectorXd& before = data.trajectory.states[at_step - 1];
+  const Eigen::VectorXd& after = data.trajectory.states[at_step];
+  const Eigen::Vector3d air_before = before.segment<3>(galata::core::kVelocityU);
+  const Eigen::Vector3d air_after = after.segment<3>(galata::core::kVelocityU);
+
+  // Level hover: the rotation is the identity, so the air-relative velocity
+  // must jump by exactly -(3, 2, 0).
+  EXPECT_NEAR((air_after - air_before - Eigen::Vector3d(-3.0, -2.0, 0.0)).norm(), 0.0, 1e-9)
+      << "the air-relative velocity did not absorb the whole wind change";
+
+  // The property that matters: ground velocity, air-relative plus wind, does
+  // not move across the step.
+  const Eigen::Vector3d ground_before = air_before + data.wind_samples_ned_m_s[at_step - 1];
+  const Eigen::Vector3d ground_after = air_after + data.wind_samples_ned_m_s[at_step];
+  EXPECT_NEAR((ground_after - ground_before).norm(), 0.0, 1e-12)
+      << "a wind step moved the ground velocity, which no force did";
+}
+
+// A discontinuity strictly inside a step is not representable — RK4's stages
+// would straddle it and the re-basing has no instant to happen at — so it is
+// refused rather than rounded to the nearest step, which would move the event
+// and say nothing about having done so.
+TEST_F(QuadrotorWorkflow, AScheduleThatMissesTheStepLatticeIsRefused) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input:\n"
+                         "      trim: {from: hover}\n"
+                         "      step_s: 0.002\n"
+                         "      steps: 1000\n"
+                         "      wind_schedule:\n"
+                         "        hold: zero_order\n"
+                         "        extrapolation: hold\n"
+                         "        samples:\n"
+                         "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                         "          - {time_s: 0.9993, values: [3.0, 2.0, 0.0]}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {

@@ -32,6 +32,14 @@ struct HoverTrimArtifact {
 struct PlantRun {
   std::vector<std::string> state_names;
   numerics::Trajectory trajectory;
+  // The command and wind AT EACH RECORDED SAMPLE, not the constants the run was
+  // configured with. A schedule makes those constants a half-truth: writing
+  // them beside a trajectory they did not drive is how a reader reconstructs a
+  // ground velocity that never happened.
+  std::vector<Eigen::VectorXd> command_samples_rad_s;
+  std::vector<Eigen::Vector3d> wind_samples_ned_m_s;
+  // What the run was configured with, kept for the constant case and for
+  // provenance. Equal to every entry above when no schedule was given.
   Eigen::VectorXd command_rad_s;
   Eigen::Vector3d wind_ned_m_s = Eigen::Vector3d::Zero();
   bool battery_present = false;
