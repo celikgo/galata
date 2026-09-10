@@ -19,6 +19,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("GALATA_PROJECT_CLI", ROOT / "build/dev/src/cli/galata")).resolve()
+# Wall-clock deadline for ONE CLI invocation: a hang guard, so a wedged worker
+# fails here naming its own command rather than arriving as an opaque ctest kill
+# of the whole module. 45 s is the uninstrumented default and is unchanged;
+# tests/CMakeLists.txt scales it for the sanitizer build and records why.
+TIMEOUT_S = float(os.environ.get("GALATA_PROJECT_TIMEOUT_S", "45"))
 
 
 @unittest.skipUnless(os.name == "posix" and CLI.is_file(), "requires the POSIX project CLI")
@@ -32,7 +37,7 @@ class ProjectRecovery(unittest.TestCase):
 
     def invoke(self, *arguments):
         return subprocess.run([str(CLI), "project", *map(str, arguments)], cwd=self.scratch,
-                              capture_output=True, text=True, timeout=45)
+                              capture_output=True, text=True, timeout=TIMEOUT_S)
 
     def command(self, *arguments):
         result = self.invoke(*arguments)
