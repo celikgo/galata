@@ -22,8 +22,15 @@ on:
       source_sha:
         description: Commit accepted by every required check.
         value: ${{ jobs.ci-ok.outputs.source_sha }}
+  # EVERY pull request, whatever its base. The `branches: [main, master]` filter
+  # that used to sit here meant a PR based on another feature branch never fired
+  # this workflow, and GitHub then reported ZERO checks rather than a failure —
+  # which reads on the PR page as "nothing to see" instead of "never tested".
+  # Measured on 2026-09-10: of the fifteen open quadrotor-programme PRs, the
+  # seven stacked ones had no checks at all, and those seven were the
+  # identification and sampled-control verticals. ADR-0019 records the decision
+  # and its cost.
   pull_request:
-    branches: [main, master]
   push:
     branches: [main, master]
   merge_group:
