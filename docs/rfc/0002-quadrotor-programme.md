@@ -6,13 +6,15 @@
   are at the foot of this document. Every capability is registered as
   implemented-unvalidated: none of them is anchored to a published reference, for the reason
   the acceptance section gives, and a completed run of any of them is not a validation.
-  What is NOT delivered is named in each record rather than left to be inferred — chiefly the
-  Gramians the WP5 companion asked for, and any evidence at all from real hardware, which does
-  not exist. This line has been wrong twice: it said "nothing below is implemented" after WP1
-  landed, and "WP3, WP4 and WP5 are not started" after all three had. The README's Status
+  What is NOT delivered is named in each record rather than left to be inferred — chiefly
+  discrete-time synthesis, the sampled loop's own robustness, and any evidence at all from real
+  hardware, which does not exist. This line has been wrong three times: it said "nothing below
+  is implemented" after WP1 landed, "WP3, WP4 and WP5 are not started" after all three had, and
+  it named the Gramians as outstanding after `analyze.gramians` registered. The README's Status
   table, generated from the capability registry, remains the authority on what exists, and it
   is the authority precisely because a hand-maintained status line drifts; nothing here is a
-  release commitment.
+  release commitment. The per-item evidence, and the four statuses kept apart, are in
+  [the acceptance record](../reports/quadrotor-programme-acceptance.md).
 - **Date:** 2026-09-08
 - **Requested by:** the Souxmar forest-ISR quadrotor programme (GitLab `souxmar`, a Python repository; not the CAE project of the same name that ADR-0001 cites)
 - **Affects:** `src/model/`, `src/trim/`, `src/linearize/`, `src/sim/`, `src/pipeline/capabilities.cpp`, `docs/product/FEATURES.md`, `docs/ROADMAP.md`, `docs/VERIFICATION.md`, ADR-0002, ADR-0006

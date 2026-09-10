@@ -393,6 +393,10 @@ no content that is not in the repository.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
 - [`docs/rfc/`](docs/rfc/README.md) — design records with implementation status;
   [RFC-0001](docs/rfc/0001-control-synthesis.md) covers control synthesis
+- [The quadrotor programme's acceptance record](docs/reports/quadrotor-programme-acceptance.md)
+  — thirteen work items against their evidence, with *implemented*, *locally verified*,
+  *CI-verified* and *merged* kept apart, the commands to reproduce every acceptance run, and
+  the outstanding limitation for each item
 - [The NT-33A flight-condition report](https://celikgo.github.io/galata/reports/nt33a-fc1.html)
   — the trim point, the modal table, the pole map and the margins for the reference case, drawn
   from a run and diffed by CI. Committed at
