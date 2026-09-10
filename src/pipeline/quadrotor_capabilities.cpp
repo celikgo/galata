@@ -12,6 +12,7 @@
 
 #include "galata/linearize/extended.hpp"
 #include "galata/model/quadrotor.hpp"
+#include "galata/numerics/integrator.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/trim/hover.hpp"
@@ -52,6 +53,30 @@ Eigen::Vector3d vector3_at(const StageContext& context, const std::string& key) 
   return out;
 }
 
+// A vector of a DECLARED length. The length is the model's, so a caller who
+// gives four rotor commands to a six-rotor model is told so here rather than
+// having the shorter list padded into a plausible trajectory.
+Eigen::VectorXd vector_at(const StageContext& context, const std::string& key, int expected) {
+  const ValuePtr value = context.input->get(key);
+  if (!value || value->kind() == Value::Kind::Null) {
+    std::ostringstream message;
+    message << "'" << key << "' is required and must be a list of " << expected << " numbers";
+    throw std::invalid_argument(message.str());
+  }
+  const std::vector<ValuePtr>& items = value->as_list();
+  if (static_cast<int>(items.size()) != expected) {
+    std::ostringstream message;
+    message << "'" << key << "' must be a list of exactly " << expected << " numbers; "
+            << items.size() << " were given";
+    throw std::invalid_argument(message.str());
+  }
+  Eigen::VectorXd out(expected);
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    out(static_cast<Eigen::Index>(i)) = items[i]->as_number();
+  }
+  return out;
+}
+
 int positive_integer_at(const StageContext& context, const std::string& key, int fallback) {
   const double number = context.input->number_at(key, static_cast<double>(fallback));
   if (!std::isfinite(number) || number < 1.0 || number > std::numeric_limits<int>::max()
@@ -80,6 +105,126 @@ void write_vector(std::ostream& out, const std::string& key, const Eigen::Vector
     out << values(i);
   }
   out << "]\n";
+}
+
+// --- sim.plant -------------------------------------------------------------
+//
+// The nonlinear plant, integrated, through a public capability.
+//
+// WHY THIS EXISTS. `sim.nonlinear` takes a `trim.level` point and actuators
+// named elevator, aileron, rudder and thrust: it is the fixed-wing path and a
+// multirotor cannot enter it. The multirotor plant was reachable only from C++,
+// which meant the repository could integrate a quadrotor in its own tests and a
+// user could not integrate one at all. This closes that, and the fixed-wing
+// path is untouched.
+//
+// NO SECOND DYNAMICS. The derivative is `Quadrotor::derivative` and the
+// integrator is `numerics::integrate_fixed_step` — the same pair the
+// cross-implementation validation case has always used. Nothing here integrates
+// anything; it assembles the call a caller could not otherwise make.
+//
+// THE NAME IS VEHICLE-NEUTRAL on purpose. What varies between vehicles is the
+// MODEL, which is why the model-class name lives at `model.quadrotor`. A second
+// simulation capability per airframe would be a taxonomy, not a contract.
+
+Artifact simulate_plant_capability(const StageContext& context) {
+  // Two ways in, and exactly one must be taken. A trim carries its own model and
+  // its own equilibrium state; a bare model needs both declared. Accepting both
+  // at once would leave it ambiguous which state was integrated.
+  const bool from_trim = context.input->get("trim") != nullptr;
+  const bool from_model = context.input->get("quadrotor") != nullptr;
+  if (from_trim == from_model) {
+    throw std::invalid_argument(
+        "sim.plant: give exactly one of `trim` (an operating point, which carries its own "
+        "model and state) or `quadrotor` (a model, whose initial state you then declare). "
+        "Both together leaves it unsaid which state was integrated");
+  }
+
+  const model::Quadrotor* model = nullptr;
+  Eigen::VectorXd initial;
+  Eigen::VectorXd command;
+  Eigen::Vector3d wind = Eigen::Vector3d::Zero();
+
+  if (from_trim) {
+    const auto& trimmed = context.upstream_at("trim").payload_as<HoverTrimArtifact>("hover_trim");
+    model = &trimmed.model;
+    initial = trimmed.point.extended_state;
+    command = trimmed.point.command_rad_s;
+    wind = trimmed.point.wind_ned_m_s;
+  } else {
+    model = &context.upstream_at("quadrotor").payload_as<model::Quadrotor>("quadrotor");
+    initial = vector_at(context, "initial_extended_state", model->extended_state_size());
+    command = vector_at(context, "command_rad_s", model->rotor_count());
+  }
+
+  // A declared value overrides what the trim carried, so a caller can hold the
+  // trim's equilibrium and blow a different wind across it. Silence keeps the
+  // trim's own.
+  if (context.input->get("wind_ned_m_s") != nullptr) {
+    wind = vector3_at(context, "wind_ned_m_s");
+  }
+  if (from_trim && context.input->get("command_rad_s") != nullptr) {
+    command = vector_at(context, "command_rad_s", model->rotor_count());
+  }
+  if (from_trim && context.input->get("initial_extended_state") != nullptr) {
+    initial = vector_at(context, "initial_extended_state", model->extended_state_size());
+  }
+
+  const double step_s = context.input->number_at("step_s");
+  if (!(step_s > 0.0) || !std::isfinite(step_s)) {
+    throw std::invalid_argument("sim.plant: step_s must be a positive finite number of seconds");
+  }
+  const int steps = positive_integer_at(context, "steps", 0);
+  const int stride = positive_integer_at(context, "sample_stride", 1);
+
+  // The battery, declared rather than discovered. A powered pack is always
+  // discharging, so "frozen" is a statement about the run and not a property of
+  // the model, and a reader of the trajectory must be able to see which was
+  // chosen. The default EVOLVES, because that is what the plant does; the trim
+  // and the linearisation freeze it for reasons that do not apply to an
+  // integration over a declared horizon.
+  const bool freeze_battery = context.input->bool_at("freeze_battery", false);
+  if (freeze_battery && !model->has_battery()) {
+    throw std::invalid_argument(
+        "sim.plant: freeze_battery was asked for on a model that carries no battery; there is "
+        "no state to freeze, and a request that does nothing is refused rather than ignored");
+  }
+
+  const int battery_index = model->has_battery() ? model->battery_state_index() : -1;
+  const numerics::DerivativeFunction derivative = [&](double,
+                                                      const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    Eigen::VectorXd rate = model->derivative(x, command, wind);
+    if (freeze_battery) {
+      rate(battery_index) = 0.0;
+    }
+    return rate;
+  };
+  const numerics::ProjectionFunction projection = [&](Eigen::VectorXd& x) { model->project(x); };
+
+  PlantRun run;
+  run.state_names = model->extended_state_names();
+  run.command_rad_s = command;
+  run.wind_ned_m_s = wind;
+  run.battery_present = model->has_battery();
+  run.battery_frozen = freeze_battery;
+  run.step_s = step_s;
+  run.step_count = steps;
+  run.trajectory =
+      numerics::integrate_fixed_step(derivative, initial, 0.0, step_s, steps, stride, projection);
+
+  std::ostringstream summary;
+  summary << run.trajectory.states.size() << " samples over " << std::fixed << std::setprecision(3)
+          << (static_cast<double>(steps) * step_s) << " s at " << std::scientific
+          << std::setprecision(1) << step_s << " s";
+  if (run.battery_present) {
+    summary << "; battery " << (freeze_battery ? "frozen" : "evolving");
+  }
+
+  Artifact artifact;
+  artifact.kind = "plant_trajectory";
+  artifact.summary = summary.str();
+  artifact.payload = std::move(run);
+  return artifact;
 }
 
 // --- trim.hover ------------------------------------------------------------
@@ -332,6 +477,23 @@ void register_quadrotor_capabilities(Registry& registry) {
   // ImplementedUnvalidated, for the reason `model.quadrotor` carries: the cases
   // behind these are exact invariants of the equations and a cross-check
   // against an independent implementation. Neither is a published reference.
+  registry.add(Capability{
+      "sim.plant",
+      "Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, "
+      "carrying its appended rotor and battery states",
+      "plant_trajectory",
+      Capability::State::ImplementedUnvalidated,
+      simulate_plant_capability,
+      {"quadrotor",
+       "trim",
+       "initial_extended_state",
+       "command_rad_s",
+       "wind_ned_m_s",
+       "step_s",
+       "steps",
+       "sample_stride",
+       "freeze_battery"}});
+
   registry.add(Capability{
       "trim.hover",
       "Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a "

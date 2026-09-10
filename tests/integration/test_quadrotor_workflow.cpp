@@ -10,8 +10,10 @@
 // Written from the capability schemas and the headers, not from the capability
 // implementations (docs/TESTING.md).
 
+#include "galata/core/state.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/modeling/linear_adapter.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/pipeline/pipeline.hpp"
 
@@ -279,6 +281,98 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   const galata::modeling::LinearGraph graph =
       galata::modeling::lower_linear_system(system, channels, adapter_options);
   EXPECT_EQ(graph.state_ids.size(), 17u);
+}
+
+// --- sim.plant -------------------------------------------------------------
+//
+// The nonlinear multirotor, integrated through a PUBLIC capability. Before this
+// existed the plant was reachable only from C++: this repository could integrate
+// a quadrotor in its own tests and a user could not integrate one at all.
+// `sim.nonlinear` is the fixed-wing path — it takes a `trim.level` point and
+// actuators named elevator, aileron, rudder and thrust — and is untouched.
+//
+// The strongest thing a trim and an integrator can be asked together is whether
+// the trim STAYS. A point that satisfies the residual gate but drifts under the
+// plant's own dynamics was never an equilibrium, and no gate on the residual
+// alone can tell the difference.
+TEST_F(QuadrotorWorkflow, IntegratingFromAHoverTrimLeavesItWhereItStarted) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input: "
+          "{trim: {from: hover}, step_s: 0.002, steps: 2500, sample_stride: 250}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_FALSE(run_data.trajectory.states.empty());
+
+  const Eigen::VectorXd& first = run_data.trajectory.states.front();
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  ASSERT_EQ(first.size(), last.size());
+  // Five seconds of RK4 at 2 ms. The budget is round-off accumulated over 2500
+  // steps on quantities of order 100, not a tolerance chosen to pass: an
+  // equilibrium that drifts by more than this is not one.
+  EXPECT_LT((last - first).norm(), 1e-9)
+      << "the hover trim did not stay put under the plant's own dynamics";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-9)
+      << "the declared altitude did not survive the integration";
+}
+
+// Cruise is a RELATIVE equilibrium: the dynamic accelerations vanish and the
+// position rate does not. An integrator that quietly held the position still
+// would satisfy every dynamic residual and be wrong about where the aircraft is.
+TEST_F(QuadrotorWorkflow, CruiseKeepsItsPositionRateUnderIntegration) {
+  const RunResult result = run(
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: cruise\n    capability: trim.hover\n    input: "
+      "{quadrotor: {from: plant}, altitude_m: 120.0, ground_velocity_ned_m_s: [8.0, 0.0, 0.0]}\n"
+      "  - id: fly\n    capability: sim.plant\n    input: "
+      "{trim: {from: cruise}, step_s: 0.002, steps: 2500, sample_stride: 2500}\n",
+      {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  // Five seconds north at 8 m/s is 40 m, exactly, by construction.
+  EXPECT_NEAR(last(galata::core::kPositionNorth), 40.0, 1e-6)
+      << "a relative equilibrium must keep travelling";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-6)
+      << "cruise must hold its altitude while it travels";
+}
+
+// The two ways in are exclusive, and a request that would do nothing is refused
+// rather than ignored — a caller who asks to freeze a battery that is not there
+// has misunderstood their own model.
+TEST_F(QuadrotorWorkflow, SimPlantRefusesAmbiguousAndVacuousRequests) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, quadrotor: {from: plant}, step_s: 0.002, "
+                         "steps: 10}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a trim and a model together leaves it unsaid which state was integrated";
+
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, step_s: 0.002, steps: 10, "
+                         "freeze_battery: true}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "freezing a battery the shipped model does not carry must be refused, not ignored";
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {
