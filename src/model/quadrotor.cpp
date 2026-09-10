@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -631,6 +633,121 @@ Quadrotor parse_quadrotor(const std::string& bytes, const std::string& source_na
 
   model.validate();
   return model;
+}
+
+namespace {
+
+// A double written so the reader gets the same bits back. Shared by every number
+// below rather than set once on the stream, because the stream also carries the
+// integer rotor count and the quoted text.
+std::string number(double value) {
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+  return out.str();
+}
+
+// Refused rather than encoded, for the reason `serialize_linear_system` gives:
+// a description carrying a control character is a sign the caller has handed us
+// bytes from somewhere it should not have.
+std::string quote(const std::string& text) {
+  std::string out = "\"";
+  for (const char character : text) {
+    if (static_cast<unsigned char>(character) < 0x20) {
+      throw std::invalid_argument(
+          "serialize_quadrotor: a control character in a description or citation cannot be "
+          "written to this file format");
+    }
+    if (character == '"' || character == '\\') {
+      out.push_back('\\');
+    }
+    out.push_back(character);
+  }
+  out.push_back('"');
+  return out;
+}
+
+std::string vector3_text(const Eigen::Vector3d& value) {
+  return "[" + number(value.x()) + ", " + number(value.y()) + ", " + number(value.z()) + "]";
+}
+
+}  // namespace
+
+std::string serialize_quadrotor(const Quadrotor& model) {
+  // Refuse to write something the reader would refuse, so a malformed model is a
+  // failure here rather than a file that only fails when somebody loads it.
+  model.validate();
+
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+
+  if (!model.description.empty()) {
+    out << "description: " << quote(model.description) << "\n";
+  }
+  if (!model.citation.empty()) {
+    out << "citation: " << quote(model.citation) << "\n";
+  }
+  if (!model.description.empty() || !model.citation.empty()) {
+    out << "\n";
+  }
+
+  const Eigen::Matrix3d& inertia = model.mass.inertia_cg_body_kg_m2;
+  out << "mass:\n";
+  out << "  mass_kg: " << number(model.mass.mass_kg) << "\n";
+  out << "  inertia_xx_kg_m2: " << number(inertia(0, 0)) << "\n";
+  out << "  inertia_yy_kg_m2: " << number(inertia(1, 1)) << "\n";
+  out << "  inertia_zz_kg_m2: " << number(inertia(2, 2)) << "\n";
+  // The tensor's off-diagonal entries are the NEGATIVE products of inertia, per
+  // sim::MassProperties, so the negation the parser applies is undone here and
+  // exactly once. Written only when nonzero: a diagonal-inertia model must round
+  // trip to the file it came from, not to one carrying three explicit zeros.
+  if (inertia(0, 1) != 0.0) {
+    out << "  product_of_inertia_xy_kg_m2: " << number(-inertia(0, 1)) << "\n";
+  }
+  if (inertia(0, 2) != 0.0) {
+    out << "  product_of_inertia_xz_kg_m2: " << number(-inertia(0, 2)) << "\n";
+  }
+  if (inertia(1, 2) != 0.0) {
+    out << "  product_of_inertia_yz_kg_m2: " << number(-inertia(1, 2)) << "\n";
+  }
+
+  out << "\nrotors:\n";
+  for (const Rotor& rotor : model.rotors) {
+    out << "  - position_cg_to_hub_body_m: " << vector3_text(rotor.position_cg_to_hub_body_m)
+        << "\n";
+    out << "    spin_about_body_z: " << rotor.spin_about_body_z << "\n";
+    out << "    thrust_coefficient_n_s2: " << number(rotor.thrust_coefficient_n_s2) << "\n";
+    out << "    torque_coefficient_n_m_s2: " << number(rotor.torque_coefficient_n_m_s2) << "\n";
+    out << "    speed_time_constant_s: " << number(rotor.speed_time_constant_s) << "\n";
+    out << "    minimum_speed_rad_s: " << number(rotor.minimum_speed_rad_s) << "\n";
+    out << "    maximum_speed_rad_s: " << number(rotor.maximum_speed_rad_s) << "\n";
+  }
+
+  out << "\ndrag:\n";
+  out << "  linear_n_s_m: " << vector3_text(model.drag_linear_n_s_m) << "\n";
+  out << "  quadratic_n_s2_m2: " << vector3_text(model.drag_quadratic_n_s2_m2) << "\n";
+  out << "  angular_n_m_s: " << vector3_text(model.angular_drag_n_m_s) << "\n";
+
+  if (model.battery.has_value()) {
+    const Battery& cell = *model.battery;
+    out << "\nbattery:\n";
+    out << "  energy_j: " << number(cell.energy_j) << "\n";
+    out << "  full_voltage_v: " << number(cell.full_voltage_v) << "\n";
+    out << "  empty_voltage_v: " << number(cell.empty_voltage_v) << "\n";
+    out << "  internal_resistance_ohm: " << number(cell.internal_resistance_ohm) << "\n";
+    out << "  speed_at_full_voltage_rad_s: " << number(cell.speed_at_full_voltage_rad_s) << "\n";
+    // Always written, unlike the parser's optional read. The parser's default
+    // exists so a file predating the resistive option keeps its behaviour; a file
+    // this routine writes has no history to preserve, and leaving the sag model
+    // implicit in a file a fit produced is exactly the silence the round trip is
+    // supposed to remove.
+    out << "  sag: " << (cell.sag == Battery::SagModel::Resistive ? "resistive" : "open_circuit")
+        << "\n";
+    out << "  motor_and_esc_efficiency: " << number(cell.motor_and_esc_efficiency) << "\n";
+    out << "  auxiliary_load_w: " << number(cell.auxiliary_load_w) << "\n";
+  }
+
+  return out.str();
 }
 
 Quadrotor load_quadrotor(const std::string& path) {

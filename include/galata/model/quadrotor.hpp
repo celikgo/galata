@@ -378,6 +378,29 @@ class Quadrotor {
 [[nodiscard]] Quadrotor parse_quadrotor(const std::string& bytes,
                                         const std::string& source_name = "model");
 
+// Writes the model as the YAML `parse_quadrotor` reads, so that a model galata
+// computed — an identified one — and a model galata was given are the same kind
+// of object, and the round trip is a testable property rather than a claim.
+//
+// Every number is written at `max_digits10`, the shortest precision at which a
+// binary64 survives a text round trip exactly, in the classic locale so a
+// comma-decimal machine cannot emit a file only it can read (ADR-0004). The
+// products of inertia are recovered from the tensor's off-diagonal entries by
+// undoing the negation `parse_quadrotor` applies, and are written only when
+// nonzero, so a diagonal-inertia model round-trips to the file it came from
+// rather than acquiring three explicit zeros.
+//
+// WHAT THIS IS NOT: not a provenance record, and this matters more here than it
+// does for a linear system. A model file written from a FIT looks exactly like a
+// model file written from a bench measurement, and nothing in the format
+// distinguishes them. `description` and `citation` are carried because the
+// format has them and a caller is expected to put the fit's own account there;
+// the machine-readable record of which parameters were estimated, from what, to
+// what uncertainty and which were carried over untouched belongs in the evidence
+// file the pipeline writes beside it. A reader who has only this file knows what
+// the model is and not how far to trust it.
+[[nodiscard]] std::string serialize_quadrotor(const Quadrotor& model);
+
 }  // namespace galata::model
 
 #endif  // GALATA_MODEL_QUADROTOR_HPP

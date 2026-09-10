@@ -60,6 +60,29 @@ struct Record {
   std::string source_sha256;  // the bytes, not the path — a path is not an identity
   std::string description;
 
+  // WHEN THIS RECORD IS A CUT OF ANOTHER. `source_path` and `source_sha256`
+  // still name the FILE, unchanged, so two windows of one import agree about
+  // where their observations came from; these three say which stretch of it
+  // this record is.
+  //
+  // This exists so that "held out" can be a checked statement rather than a
+  // hopeful one. Two records with different file digests may hold the same
+  // observations — a file reformatted, a segment copied, two exports of one
+  // flight — and unequal hashes prove nothing about the DATA. Two windows of
+  // ONE file whose intervals do not overlap are disjoint by construction, and
+  // that is the one case an estimation/validation split can be VERIFIED rather
+  // than declared. See `include/galata/identify/validate.hpp`.
+  //
+  // The interval is half-open, [start, end): a sample exactly at `window_end_s`
+  // belongs to the next window and to no other, so adjacent windows share
+  // nothing and no sample is lost between them.
+  bool is_window = false;
+  double window_start_s = 0.0;
+  double window_end_s = 0.0;
+  // Samples the parent held that fell outside the window. Reported rather than
+  // absorbed, for the reason every other count here is.
+  std::int64_t samples_outside_window = 0;
+
   std::vector<double> times_s;  // strictly increasing, seconds
   std::vector<Channel> channels;
 
@@ -80,6 +103,13 @@ struct Record {
 
   [[nodiscard]] const Channel* find(const std::string& name) const;
   [[nodiscard]] double duration_s() const;
+
+  // The stretch of time the samples actually cover, which is what a reader
+  // comparing two records for overlap needs. Not the declared window: a window
+  // may be wider than the samples that fell inside it, and a claim about
+  // independence must rest on the observations, not on the request.
+  [[nodiscard]] double first_time_s() const;
+  [[nodiscard]] double last_time_s() const;
 };
 
 }  // namespace galata::data

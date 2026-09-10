@@ -15,6 +15,14 @@ const Channel* Record::find(const std::string& name) const {
   return nullptr;
 }
 
+double Record::first_time_s() const {
+  return times_s.empty() ? 0.0 : times_s.front();
+}
+
+double Record::last_time_s() const {
+  return times_s.empty() ? 0.0 : times_s.back();
+}
+
 double Record::duration_s() const {
   if (times_s.size() < 2) {
     return 0.0;
