@@ -174,6 +174,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 |---|---|---|---|
 | `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with estimated gain and phase ranges and a candidate boundary perturbation | `disk_margin` | implemented and validated |
 | `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
+| `analyze.gramians` | Reachability and observability of a linear model for a declared input and output set — the subspace ranks, the directions that fall outside them by state name, and finite-horizon Gramians over a declared horizon | `gramians` | implemented, unvalidated |
 | `analyze.hinfnorm` | Bound a stable continuous-time H-infinity norm using Hamiltonian level tests | `hinfinity_norm` | implemented, unvalidated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
@@ -185,13 +186,13 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `data.window` | Cut a measured record to a half-open time window of itself, keeping the source identity so that two windows of one import are provably disjoint | `measured_record` | implemented, unvalidated |
 | `identify.greybox` | Fit a declared subset of a multirotor's parameters to a measured record by simulating the nonlinear plant, refusing a parameter the data does not constrain | `quadrotor` | implemented, unvalidated |
 | `identify.static_fit` | Fit a response that is linear in declared terms — a bench map — reporting the range it was measured over and an uncertainty only where the data supports one | `static_fit` | implemented, unvalidated |
-| `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with independence from the training data classified rather than assumed | `validation` | implemented, unvalidated |
+| `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with separation from the training data classified on stated grounds rather than inferred from a digest | `validation` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
 | `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
-| `model.control_system` | Extract the closed loop or plant-input return ratio of an LQR design | `linear_system` | implemented, unvalidated |
+| `model.control_system` | Extract an LQR design's closed loop, its plant-input return ratio, or the single loop at one input with the other loops still closed | `linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
 | `model.linear.export` | Write a linear model as the named-matrix YAML that model.linear.statespace reads | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |

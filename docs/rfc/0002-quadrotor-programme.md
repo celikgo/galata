@@ -1019,13 +1019,60 @@ delay by one tick fails there rather than passing on a plausible trajectory;
 `ExampleQuadrotorSampledControl.*` runs the shipped example and requires the closed loop to
 remove at least nine tenths of the displacement it was started from.
 
-**What WP5 does not deliver.** The controllability and observability Gramians the companion
-paragraph asked for are NOT implemented; an exported model's defective integrator chains and
-any unobservable direction are still discovered from a failed synthesis rather than reported in
-advance. `c2d`-style discretisation of a continuous design and a sampled DARE are also absent:
+**The companion the request asked for, delivered.** `analyze.gramians` reports the reachable
+and observable subspaces of a linear model for a declared input and output set, and names the
+directions that fall outside them by state — which is what the request asked for in one
+sentence: "so that an exported model's defective integrator chains and any unobservable
+direction are reported rather than discovered from a failed synthesis". On the hover
+linearisation it finds the heading unobservable, because the observation model carries body
+rates, position, altitude, ground velocity and specific force and none of them measures an
+absolute yaw angle.
+
+Two things about it are worth recording rather than leaving in the header.
+*The infinite-horizon Gramians do not exist for this class of model at all.* Six eigenvalues
+sit at the origin, so the T-to-infinity limit diverges and the matrix a Lyapunov solve would
+return for it is not a Gramian of anything. The capability integrates over a DECLARED finite
+horizon instead, refuses to default that horizon, and says in its own summary and report which
+quantity it computed. *The rank is taken from an orthogonal staircase and not from a Krylov
+matrix.* `[B, AB, ..., A^15 B]` on a model with rotor-lag poles near -1/tau and integrators at
+zero spans the fifteenth power of that spread, which no floating-point rank test can resolve;
+re-orthonormalising at each step forms no power of A at all. `Gramians.*` in the `unit` tier
+holds the arithmetic against closed forms — a first-order system's exponential integral, a
+double integrator's `[T^3/3, T^2/2; T^2/2, T]` — rather than against a previous run.
+
+**And the frequency-domain margins the audit found unavailable are now available, without
+widening anything.** The audit recorded `analyze.margins` and `analyze.diskmargin` refusing on
+this plant with "internal stability unresolved: eigenvectors are ill-conditioned", and the
+refusal was CORRECT. Handing one channel of the MIMO return ratio `L(s) = K(sI-A)^-1 B` to a
+SISO margin routine breaks that channel and leaves the other three OPEN — a vehicle flying with
+most of its controller disconnected. A multirotor at hover needs all four, so that closure
+leaves four modes at the origin, its Nyquist encirclement count means nothing, and refusing was
+the only honest answer. Nothing about the check was wrong and nothing in it was relaxed.
+
+What was missing was the OTHER reading. `model.control_system` gains `use: single_loop` with a
+required `channel`, which builds the loop seen at one plant input with the other loops still
+CLOSED: `A_k = A - BK + b_k k_k^T`, so that closing unit negative feedback around it returns
+exactly `A - BK`, the design's own closed loop. Internal stability of the Nyquist test is then
+the stability of the design, which an LQR solution guarantees, and the margin is well posed.
+`synth::single_loop_others_closed` checks that identity to round-off rather than asserting it,
+because if it ever stopped holding then every margin read from that system would be a margin of
+a different aircraft. `channel` is required and not defaulted: there is one such loop per input,
+they are different loops with different margins, and picking one for the caller would be
+choosing which number to report.
+
+`QuadrotorWorkflow.SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefused` holds both halves —
+the other-loops-open reading refused with its cause named, and the loop-at-a-time reading
+yielding a margin — and `examples/quadrotor-sampled-control` now runs both analyses in the
+shipped study.
+
+**What WP5 still does not deliver.** A set of loop-at-a-time margins does NOT bound simultaneous
+variation: each can be generous while a small perturbation applied to two channels at once
+destabilises the loop, and no loop-at-a-time figure sees it. `analyze.diskmargin` is the
+capability for that question and the headers say so where the confusion would occur.
+`c2d`-style discretisation of a continuous design and a sampled DARE remain absent:
 `sim.sampled` executes a continuously-designed law at a discrete rate, which is the honest
 description of what it does and is not the same thing as designing in discrete time. And the
-sampled loop's own robustness is unanswered — gain, phase and disk margins here describe the
-continuous loop, and no capability computes the sampled loop's margins. Per
+SAMPLED loop's own robustness is unanswered — every margin in this repository describes the
+continuous loop, and no claim of sampled-loop robustness is made anywhere from one. Per
 `docs/product/FEATURES.md`, this implements the proposed work of F14 and part of F17 and
 delivers neither row; both stay open.
