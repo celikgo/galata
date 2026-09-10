@@ -46,9 +46,11 @@ about galata's own behaviour is measured at render time and referred to by name:
 `{placeholders}`, and the generator **refuses to run** if a case note contains a value it also
 computes. `docs/assets/modal-map.json` and `docs/assets/nt33a-fc1-run.json` are emitted by
 `tools/social/` and `tools/report/`; the pictures and the report page are drawn from them.
-CI regenerates all four and fails on drift. If you find yourself typing a number you just read
-off a run, that is the mistake this rule exists for. See the
-`validating-against-a-published-source` skill.
+CI regenerates every one of them and fails on drift — six artefacts, counting the README
+capability table that rule 5 governs and the social-preview card, whose SVG was ungated
+until issue #14 and drifted a version behind while every job stayed green. If you find
+yourself typing a number you just read off a run, that is the mistake this rule exists
+for. See the `validating-against-a-published-source` skill.
 
 **3. Never widen a gate to make a number pass.** A deviation larger than its budget is
 localised, published, and held by a *labelled* regression lock — it is not absorbed by a
@@ -102,7 +104,9 @@ scripts/gen-report.sh      build/dev/tools/report/galata-report-data            
 python3 scripts/gen-report-page.py                                                # docs/reports/nt33a-fc1.html
 ```
 
-Add `--check` to any of the shell ones to get exactly what CI runs.
+Add `--check` to any of them — the shell ones and both Python ones — to get exactly what CI
+runs. `gen-social-preview.py --check` compares the SVG only and needs no rsvg-convert; the
+PNG is a rasterisation of a checked SVG and diffing it would gate on the runner's librsvg.
 
 ## Skills
 
