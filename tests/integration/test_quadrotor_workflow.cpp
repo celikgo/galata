@@ -281,6 +281,31 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   EXPECT_EQ(graph.state_ids.size(), 17u);
 }
 
+// A conjugate pair is one mode, so a sixteen-state model that oscillates
+// reports fewer modes than it has states. That is the intended convention —
+// src/analyze/modes.cpp consumes the partner deliberately — but a bare "12
+// modes" about a sixteen-state system reads as though four states went missing,
+// and a reader who believes that has been told something false about what was
+// analysed. The summary now carries the reconciliation, and this pins it.
+//
+// The hover model is the case that makes the count differ from the state count
+// only once a loop is closed around it; open-loop hover is entirely real, so it
+// reports sixteen modes over sixteen states and must NOT carry the clause.
+TEST_F(QuadrotorWorkflow, TheModeCountReconcilesItselfWithTheStateCount) {
+  const RunResult result = run(chain()
+                               + "  - id: modes\n    capability: analyze.modes\n    input: "
+                                 "{system: {from: linear}, classify: false}\n",
+                               {.overwrite = true, .write_manifest = false});
+  const Artifact* modes = result.find("modes");
+  ASSERT_NE(modes, nullptr);
+  // Open-loop hover: sixteen real eigenvalues, sixteen modes, no clause needed.
+  EXPECT_NE(modes->summary.find("16 modes"), std::string::npos) << modes->summary;
+  EXPECT_EQ(modes->summary.find("over 16 states"), std::string::npos)
+      << "a count that already equals the state count must not be padded with the "
+         "reconciliation: "
+      << modes->summary;
+}
+
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {
   // The file contract did not move. `serialize_linear_system` was added beside
   // the reader, not in place of it, and every model file already in the tree
