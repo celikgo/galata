@@ -33,12 +33,12 @@ add_executable(galata_unit_tests
   test_integrator.cpp
   test_modes.cpp
   test_frequency_response.cpp
-<<<<<<< HEAD
   test_csv_import.cpp
   test_ulog_import.cpp
-=======
   test_chart_mapping.cpp
->>>>>>> feat/sampled-control
+  test_greybox.cpp
+  test_validate.cpp
+  test_static_fit.cpp
   test_margins.cpp
   test_disk_margin.cpp
   test_singular_values.cpp
@@ -61,6 +61,7 @@ target_link_libraries(galata_unit_tests
   PRIVATE
     galata::core
     galata::data
+    galata::identify
     galata::numerics
     galata::analyze
     galata::model

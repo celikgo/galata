@@ -182,6 +182,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
 | `data.import.csv` | Read a measured record from delimited text under a declared unit, frame and timebase mapping, refusing anything the study has not accounted for | `measured_record` | implemented, unvalidated |
 | `data.import.ulog` | Read a measured record from a PX4 ULog under a declared channel, unit and frame mapping, resampled onto one timebase by zero-order hold | `measured_record` | implemented, unvalidated |
+| `identify.static_fit` | Fit a response that is linear in declared terms — a bench map — reporting the range it was measured over and an uncertainty only where the data supports one | `static_fit` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |

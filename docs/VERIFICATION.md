@@ -151,6 +151,7 @@ against.
 | `analyze.sigma` | implemented and validated | `analyze.sigma`, `analyze.sigma.grid_bound` |
 | `data.import.csv` | implemented, unvalidated | — |
 | `data.import.ulog` | implemented, unvalidated | — |
+| `identify.static_fit` | implemented, unvalidated | — |
 | `linearize.extended` | implemented, unvalidated | `quadrotor.hover_linearisation` |
 | `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
 | `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
