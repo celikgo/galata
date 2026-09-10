@@ -10,8 +10,10 @@
 // Written from the capability schemas and the headers, not from the capability
 // implementations (docs/TESTING.md).
 
+#include "galata/core/state.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/modeling/linear_adapter.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/pipeline/pipeline.hpp"
 
@@ -21,6 +23,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -279,6 +282,190 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   const galata::modeling::LinearGraph graph =
       galata::modeling::lower_linear_system(system, channels, adapter_options);
   EXPECT_EQ(graph.state_ids.size(), 17u);
+}
+
+// --- sim.plant -------------------------------------------------------------
+//
+// The nonlinear multirotor, integrated through a PUBLIC capability. Before this
+// existed the plant was reachable only from C++: this repository could integrate
+// a quadrotor in its own tests and a user could not integrate one at all.
+// `sim.nonlinear` is the fixed-wing path — it takes a `trim.level` point and
+// actuators named elevator, aileron, rudder and thrust — and is untouched.
+//
+// The strongest thing a trim and an integrator can be asked together is whether
+// the trim STAYS. A point that satisfies the residual gate but drifts under the
+// plant's own dynamics was never an equilibrium, and no gate on the residual
+// alone can tell the difference.
+TEST_F(QuadrotorWorkflow, IntegratingFromAHoverTrimLeavesItWhereItStarted) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input: "
+          "{trim: {from: hover}, step_s: 0.002, steps: 2500, sample_stride: 250}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_FALSE(run_data.trajectory.states.empty());
+
+  const Eigen::VectorXd& first = run_data.trajectory.states.front();
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  ASSERT_EQ(first.size(), last.size());
+  // Five seconds of RK4 at 2 ms. The budget is round-off accumulated over 2500
+  // steps on quantities of order 100, not a tolerance chosen to pass: an
+  // equilibrium that drifts by more than this is not one.
+  EXPECT_LT((last - first).norm(), 1e-9)
+      << "the hover trim did not stay put under the plant's own dynamics";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-9)
+      << "the declared altitude did not survive the integration";
+}
+
+// Cruise is a RELATIVE equilibrium: the dynamic accelerations vanish and the
+// position rate does not. An integrator that quietly held the position still
+// would satisfy every dynamic residual and be wrong about where the aircraft is.
+TEST_F(QuadrotorWorkflow, CruiseKeepsItsPositionRateUnderIntegration) {
+  const RunResult result = run(
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: cruise\n    capability: trim.hover\n    input: "
+      "{quadrotor: {from: plant}, altitude_m: 120.0, ground_velocity_ned_m_s: [8.0, 0.0, 0.0]}\n"
+      "  - id: fly\n    capability: sim.plant\n    input: "
+      "{trim: {from: cruise}, step_s: 0.002, steps: 2500, sample_stride: 2500}\n",
+      {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& run_data = flown->payload_as<PlantRun>("plant_trajectory");
+  const Eigen::VectorXd& last = run_data.trajectory.states.back();
+  // Five seconds north at 8 m/s is 40 m, exactly, by construction.
+  EXPECT_NEAR(last(galata::core::kPositionNorth), 40.0, 1e-6)
+      << "a relative equilibrium must keep travelling";
+  EXPECT_NEAR(last(galata::core::kPositionDown), -120.0, 1e-6)
+      << "cruise must hold its altitude while it travels";
+}
+
+// The two ways in are exclusive, and a request that would do nothing is refused
+// rather than ignored — a caller who asks to freeze a battery that is not there
+// has misunderstood their own model.
+TEST_F(QuadrotorWorkflow, SimPlantRefusesAmbiguousAndVacuousRequests) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, quadrotor: {from: plant}, step_s: 0.002, "
+                         "steps: 10}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "a trim and a model together leaves it unsaid which state was integrated";
+
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input: "
+                         "{trim: {from: hover}, step_s: 0.002, steps: 10, "
+                         "freeze_battery: true}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error)
+      << "freezing a battery the shipped model does not carry must be refused, not ignored";
+}
+
+// --- wind, and the coordinate the state actually holds ---------------------
+//
+// ADR-0002's velocity state is AIR-RELATIVE and `Quadrotor::derivative` takes
+// the wind as steady: it carries no -R^T dw/dt term. A wind that changes
+// therefore needs the simulator's help, in two different ways.
+//
+// A STEP is an event, not a large derivative. No force acts at the instant the
+// air mass changes speed, so the GROUND velocity is continuous and the
+// air-relative velocity must jump by exactly minus the wind change, rotated
+// into the body frame. Integrating through the step instead injects the entire
+// wind increment as a ground-velocity error — permanently, and with nothing to
+// show for it in any residual. This is WP1's first finding, and it is the one
+// property of time-varying wind that a plausible-looking trajectory will hide.
+//
+// The vehicle is level at hover, so the body-to-NED rotation is the identity
+// and the expected jump is exactly the negated wind, written down rather than
+// computed by the code under test.
+TEST_F(QuadrotorWorkflow, AWindStepMovesTheAirRelativeVelocityAndNotTheGroundVelocity) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 1000\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: zero_order\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 1.0, values: [3.0, 2.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* flown = result.find("fly");
+  ASSERT_NE(flown, nullptr);
+  const auto& data = flown->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.trajectory.states.size(), data.wind_samples_ned_m_s.size());
+
+  std::size_t at_step = 0;
+  for (std::size_t i = 0; i < data.trajectory.times_s.size(); ++i) {
+    if (std::fabs(data.trajectory.times_s[i] - 1.0) < 1e-9) {
+      at_step = i;
+      break;
+    }
+  }
+  ASSERT_GT(at_step, 0u) << "the wind step is not among the recorded samples";
+
+  const Eigen::VectorXd& before = data.trajectory.states[at_step - 1];
+  const Eigen::VectorXd& after = data.trajectory.states[at_step];
+  const Eigen::Vector3d air_before = before.segment<3>(galata::core::kVelocityU);
+  const Eigen::Vector3d air_after = after.segment<3>(galata::core::kVelocityU);
+
+  // Level hover: the rotation is the identity, so the air-relative velocity
+  // must jump by exactly -(3, 2, 0).
+  EXPECT_NEAR((air_after - air_before - Eigen::Vector3d(-3.0, -2.0, 0.0)).norm(), 0.0, 1e-9)
+      << "the air-relative velocity did not absorb the whole wind change";
+
+  // The property that matters: ground velocity, air-relative plus wind, does
+  // not move across the step.
+  const Eigen::Vector3d ground_before = air_before + data.wind_samples_ned_m_s[at_step - 1];
+  const Eigen::Vector3d ground_after = air_after + data.wind_samples_ned_m_s[at_step];
+  EXPECT_NEAR((ground_after - ground_before).norm(), 0.0, 1e-12)
+      << "a wind step moved the ground velocity, which no force did";
+}
+
+// A discontinuity strictly inside a step is not representable — RK4's stages
+// would straddle it and the re-basing has no instant to happen at — so it is
+// refused rather than rounded to the nearest step, which would move the event
+// and say nothing about having done so.
+TEST_F(QuadrotorWorkflow, AScheduleThatMissesTheStepLatticeIsRefused) {
+  EXPECT_THROW((void)run("version: 1\nstages:\n"
+                         "  - id: plant\n    capability: model.quadrotor\n"
+                         "    input: {path: quad.yaml}\n"
+                         "  - id: hover\n    capability: trim.hover\n"
+                         "    input: {quadrotor: {from: plant}}\n"
+                         "  - id: fly\n    capability: sim.plant\n    input:\n"
+                         "      trim: {from: hover}\n"
+                         "      step_s: 0.002\n"
+                         "      steps: 1000\n"
+                         "      wind_schedule:\n"
+                         "        hold: zero_order\n"
+                         "        extrapolation: hold\n"
+                         "        samples:\n"
+                         "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                         "          - {time_s: 0.9993, values: [3.0, 2.0, 0.0]}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {
