@@ -412,7 +412,7 @@ TEST_F(IdentifyWorkflow, ValidationTakesTheEstimationIdentityFromTheModelRatherT
   // The study states no digest anywhere. The identity came from the model.
   EXPECT_EQ(validation.result.estimation_record_sha256,
             fitted.identity.fit->estimation_record_sha256);
-  EXPECT_EQ(validation.result.independence, galata::identify::Independence::VerifiedDisjoint);
+  EXPECT_EQ(validation.result.separation, galata::identify::RecordSeparation::VerifiedDisjoint);
   EXPECT_TRUE(validation.model_identity.is_fitted());
 }
 

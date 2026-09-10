@@ -370,7 +370,7 @@ Artifact validate_capability(const StageContext& context) {
   request.step_s = context.input->number_at("step_s");
   request.initial_extended_state =
       initial_state_for(context, subject.model, record, "identify.validate");
-  request.caller_declares_independent = context.input->bool_at("declare_independent", false);
+  request.caller_declares_different_data = context.input->bool_at("declare_different_data", false);
 
   const ValuePtr outputs = context.input->get("outputs");
   if (!outputs) {
@@ -462,9 +462,9 @@ Artifact validate_capability(const StageContext& context) {
   summary << result.outputs.size() << " output(s) over " << result.sample_count << " sample(s); ";
   // The label first, in words, because it is the difference between a
   // diagnostic and a claim and a reader skimming must not have to hunt for it.
-  summary << "independence: " << identify::to_string(result.independence);
+  summary << "separation: " << identify::to_string(result.separation);
   if (result.caller_declaration_was_contradicted) {
-    summary << " (THE STUDY'S OWN DECLARATION OF INDEPENDENCE WAS CONTRADICTED)";
+    summary << " (THE STUDY'S OWN DECLARATION WAS CONTRADICTED)";
   }
   for (const identify::ValidationOutput& out : result.outputs) {
     summary << "; " << out.channel << " RMSE " << scientific(out.rmse);
@@ -569,8 +569,8 @@ void register_identify_capabilities(Registry& registry) {
   registry.add(Capability{
       "identify.validate",
       "Run an identified model on another record and report per-output error, fit fraction and "
-      "residual structure, with independence from the training data classified rather than "
-      "assumed",
+      "residual structure, with separation from the training data classified on stated grounds "
+      "rather than inferred from a digest",
       "validation",
       Capability::State::ImplementedUnvalidated,
       validate_capability,
@@ -578,7 +578,7 @@ void register_identify_capabilities(Registry& registry) {
        "record",
        "estimation_record",
        "estimation_record_sha256",
-       "declare_independent",
+       "declare_different_data",
        "outputs",
        "command_channels",
        "trim",

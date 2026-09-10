@@ -209,6 +209,54 @@ const std::vector<Case>& validation_cases() {
        "torque-signs case earns its keep on the axes that must stay SILENT — a transposed "
        "cross product leaves the driven axis looking healthy."},
 
+      {
+          "identify.recovery_under_noise",
+          "Grey-box identification against a record carrying declared Gaussian noise",
+          {"identify.greybox", "identify.validate"},
+          "Exact invariants of the identification arithmetic, on records this repository "
+          "generated; no published source and no measured data",
+          Status::SelfConsistent,
+          {E{kValidation,
+             "IdentificationRecovery."
+             "RecoversDeclaredParametersFromANoisyRecordWithinItsOwnIntervals"},
+           E{kValidation,
+             "IdentificationRecovery.TheReportedIntervalWidensWithTheNoiseTheRecordCarries"},
+           E{kValidation,
+             "IdentificationRecovery.TheSameParameterSetIsRefusedOnARecordThatCannotSeparateIt"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AWeaklyExcitedParameterIsReportedAsRestingOnItsBoundNotRefused"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AWrongModelIsCaughtByTheShapeOfItsHeldOutResidualNotOnlyItsSize"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AFitFromOneWindowIsScoredOnAnotherAndTheLabelIsNotIndependence"}},
+          "RFC-0002's WP4 verification, and self-consistent rather than validated because the "
+          "records are galata's own output with a declared pseudo-random sequence added — the "
+          "reference is the arithmetic of the estimator, not a document. THE ACCEPTANCE CRITERION "
+          "IS THE FIT'S OWN REPORTED INTERVAL rather than a tolerance chosen by the test: three "
+          "standard errors, fixed before any number was read, with a ceiling on the interval's "
+          "width so a fit cannot widen its way to passing. A fit can be accurate and overconfident "
+          "at once, and only the first case catches that. The second case is what makes the "
+          "interval worth quoting at all: an estimator reporting a constant would pass the first "
+          "whenever it happened to be accurate, so the interval is required to track a four-fold "
+          "noise increase to within a factor of two either way. The third and fourth separate the "
+          "two ways a parameter can be poorly determined, on ONE parameter set: refused outright "
+          "on a purely vertical record whose body rates are identically zero, so the sensitivity "
+          "column is exactly zero rather than merely small; and reported as resting on a declared "
+          "bound when a rotor-lag transient makes the same coefficient barely visible. "
+          "Identifiability is a property of the record and not of the model, and showing both "
+          "halves is what makes the refusal informative. The fifth is wrong-model detection by the "
+          "SHAPE of the held-out residual and not its size — a large residual could be a noisy "
+          "sensor; a residual correlated with itself is a missing dynamic effect, and the correct "
+          "model on the same window is required to leave a residual that is not. What none of this "
+          "establishes: the noise is independent and Gaussian because that is what the reported "
+          "covariance assumes, and real sensor error is coloured, quantised, occasionally missing "
+          "and correlated with the manoeuvre. There is no aircraft, no bench run and no flight "
+          "log.",
+      },
+
       {"quadrotor.cross_implementation",
        "Multirotor plant against an independent implementation, open loop with wind",
        {"model.quadrotor"},

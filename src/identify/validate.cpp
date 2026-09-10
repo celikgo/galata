@@ -110,15 +110,15 @@ std::string interval_text(const data::Record& record) {
 
 }  // namespace
 
-std::string to_string(Independence independence) {
-  switch (independence) {
-    case Independence::NotHeldOut:
+std::string to_string(RecordSeparation separation) {
+  switch (separation) {
+    case RecordSeparation::NotHeldOut:
       return "not held out";
-    case Independence::VerifiedDisjoint:
+    case RecordSeparation::VerifiedDisjoint:
       return "verified disjoint";
-    case Independence::CallerDeclared:
+    case RecordSeparation::CallerDeclared:
       return "caller-declared";
-    case Independence::Unknown:
+    case RecordSeparation::Unknown:
       return "unknown";
   }
   return "unknown";
@@ -129,17 +129,17 @@ namespace {
 // THE CLASSIFICATION. Ordered so that a proof of overlap always beats a claim
 // of independence: every branch that can establish NotHeldOut is taken before
 // any branch that can grant it.
-void classify_independence(const data::Record& record,
-                           const ValidationRequest& request,
-                           ValidationResult& result) {
+void classify_separation(const data::Record& record,
+                         const ValidationRequest& request,
+                         ValidationResult& result) {
   const std::string& estimation_digest = result.estimation_record_sha256;
 
   // 1. The same bytes. Nothing else needs checking, and nothing else could
   //    overturn it.
   if (!estimation_digest.empty() && record.source_sha256 == estimation_digest
       && request.estimation_record == nullptr) {
-    result.independence = Independence::NotHeldOut;
-    result.independence_basis =
+    result.separation = RecordSeparation::NotHeldOut;
+    result.separation_basis =
         "the validation record and the estimation record are the same bytes (sha256 "
         + estimation_digest.substr(0, 16)
         + "...), so this is the model scored on its own training data — a legitimate "
@@ -152,17 +152,17 @@ void classify_independence(const data::Record& record,
     // hashes is an inequality of BYTES: the same observations reformatted, or a
     // segment copied between files, would pass it. So the verdict is the
     // caller's claim or silence, and it says which.
-    if (request.caller_declares_independent) {
-      result.independence = Independence::CallerDeclared;
-      result.independence_basis =
+    if (request.caller_declares_different_data) {
+      result.separation = RecordSeparation::CallerDeclared;
+      result.separation_basis =
           "the study declared these to be different data and the estimation record was not "
           "supplied, so nothing here checked the claim. Digest inequality alone was NOT "
           "treated as evidence: the same observations reformatted, exported twice, or copied "
           "between files carry different digests. Supply the estimation record to have the "
           "claim verified";
     } else {
-      result.independence = Independence::Unknown;
-      result.independence_basis =
+      result.separation = RecordSeparation::Unknown;
+      result.separation_basis =
           "only the estimation record's digest was given, and a digest identifies bytes rather "
           "than observations. Nothing here establishes that these are different data, and "
           "nothing here establishes that they are not";
@@ -188,29 +188,29 @@ void classify_independence(const data::Record& record,
   //    two exports of one segment at two rates share no tuple and every
   //    measurement.
   if (same_source && result.intervals_overlap) {
-    result.independence = Independence::NotHeldOut;
+    result.separation = RecordSeparation::NotHeldOut;
     std::ostringstream basis;
     basis << "both records are cut from one imported file (sha256 "
           << record.source_sha256.substr(0, 16) << "...) and their sample intervals overlap — "
           << "validation " << interval_text(record) << " against estimation "
           << interval_text(estimation)
           << ". The same stretch of one run is the same observations however it was resampled";
-    result.independence_basis = basis.str();
-    result.caller_declaration_was_contradicted = request.caller_declares_independent;
+    result.separation_basis = basis.str();
+    result.caller_declaration_was_contradicted = request.caller_declares_different_data;
     return;
   }
 
   // 3. Observations found in both, whatever the files were called.
   if (result.shared_sample_count > 0) {
-    result.independence = Independence::NotHeldOut;
+    result.separation = RecordSeparation::NotHeldOut;
     std::ostringstream basis;
     basis << result.shared_sample_count << " of the validation record's " << record.sample_count()
           << " sample(s) occur in the estimation record too, matching exactly on all "
           << shared.size() << " shared channel(s)"
           << (same_source ? "" : " despite the two files having different digests")
           << ". A model scored on samples it was fitted to is not being validated on them";
-    result.independence_basis = basis.str();
-    result.caller_declaration_was_contradicted = request.caller_declares_independent;
+    result.separation_basis = basis.str();
+    result.caller_declaration_was_contradicted = request.caller_declares_different_data;
     return;
   }
 
@@ -218,23 +218,26 @@ void classify_independence(const data::Record& record,
   //    not meet. Nothing outside those stretches is in either record, so no
   //    observation can be in both — and the scan above confirms none is.
   if (same_source && !result.intervals_overlap && record.is_window && estimation.is_window) {
-    result.independence = Independence::VerifiedDisjoint;
+    result.separation = RecordSeparation::VerifiedDisjoint;
     std::ostringstream basis;
     basis << "both records are windows of one imported file (sha256 "
           << record.source_sha256.substr(0, 16) << "...) over intervals that do not meet — "
           << "validation " << interval_text(record) << " against estimation "
           << interval_text(estimation) << " — and no sample instant occurs in both across the "
           << shared.size()
-          << " shared channel(s). Disjoint by construction, not by an inequality of hashes";
-    result.independence_basis = basis.str();
+          << " shared channel(s). Disjoint by construction, not by an inequality of hashes. "
+             "This is SAMPLE separation and not statistical independence: the two stretches "
+             "share the aircraft, its trim, the air mass and every unmodelled effect that "
+             "persists across the cut";
+    result.separation_basis = basis.str();
     return;
   }
 
   // 5. Two different files, no shared sample found. That is the absence of a
   //    contradiction and not a proof: exact equality cannot see the same flight
   //    rescaled or resampled into a second file.
-  if (request.caller_declares_independent) {
-    result.independence = Independence::CallerDeclared;
+  if (request.caller_declares_different_data) {
+    result.separation = RecordSeparation::CallerDeclared;
     std::ostringstream basis;
     basis << "the study declared these to be different data, and the checks that were possible "
              "did not contradict it: no sample instant occurs in both across the "
@@ -243,18 +246,18 @@ void classify_independence(const data::Record& record,
                                        : ", and their intervals do not overlap")
           << ". This is not a proof — exact comparison cannot see the same run rescaled or "
              "resampled into a second file — so it stands as the caller's claim, unrefuted";
-    result.independence_basis = basis.str();
+    result.separation_basis = basis.str();
     return;
   }
 
-  result.independence = Independence::Unknown;
+  result.separation = RecordSeparation::Unknown;
   std::ostringstream basis;
   basis << "the two records come from different files and share no sample instant across the "
         << shared.size()
         << " shared channel(s), but nothing here proves they hold different observations and "
            "the study claimed nothing. Cut both from one import with `data.window` to have the "
            "split verified, or declare the claim to have it recorded as yours";
-  result.independence_basis = basis.str();
+  result.separation_basis = basis.str();
 }
 
 }  // namespace
@@ -350,9 +353,11 @@ ValidationResult validate_model(const model::Quadrotor& model,
                                         : request.estimation_record_sha256;
   result.validation_record_sha256 = record.source_sha256;
   result.validation_lineage = lineage_of(record);
-  classify_independence(record, request, result);
+  classify_separation(record, request, result);
   result.assumptions =
-      "errors are compared sample by sample against the record's own values; the fit fraction "
+      "the separation label bounds what the fit could have seen and is not a claim of "
+      "statistical independence; errors are compared sample by sample against the record's "
+      "own values; the fit fraction "
       "is 1 - ||y - yhat|| / ||y - mean(y)||, so zero means no better than predicting the "
       "channel's mean and negative means worse than that; the lag-one autocorrelation assumes "
       "uniformly spaced samples, which the record's timebase must have provided";

@@ -30,16 +30,30 @@
 // inequality of hashes, and each is a model being scored on its own training
 // data with a label saying otherwise.
 //
-// So independence is now classified, and the classification says on what
-// grounds. `Independence::VerifiedDisjoint` is reserved for the one case this
-// code can actually prove: two windows of ONE imported file whose intervals do
-// not overlap, cut by `data.window`, which keeps the file's identity and adds
-// an interval to it. `CallerDeclared` is what an honest study gets when it
-// knows two files are different flights and galata cannot check that —
-// recorded as the caller's claim, in the caller's name, and downgraded to
-// `NotHeldOut` the moment a check contradicts it. `Unknown` is what silence
-// gets. The one thing that no longer happens is a claim of independence
-// manufactured out of an inequality.
+// So the relationship between the two records is now CLASSIFIED, and the
+// classification says on what grounds. `RecordSeparation::VerifiedDisjoint` is
+// reserved for the one case this code can actually prove: two windows of ONE
+// imported file whose intervals do not overlap, cut by `data.window`, which
+// keeps the file's identity and adds an interval to it. `CallerDeclared` is
+// what an honest study gets when it knows two files are different flights and
+// galata cannot check that — recorded as the caller's claim, in the caller's
+// name, and downgraded to `NotHeldOut` the moment a check contradicts it.
+// `Unknown` is what silence gets. The one thing that no longer happens is a
+// claim manufactured out of an inequality.
+//
+// AND THE TYPE IS CALLED `RecordSeparation`, NOT `Independence`, BECAUSE THAT
+// IS ALL IT MEASURES. It was called `Independence` in a first draft, which
+// overclaimed in a way the values themselves do not. What `VerifiedDisjoint`
+// establishes is that no observation the fit saw appears in the validation
+// record — a statement about SAMPLE SEPARATION, and a bound on what the fit
+// could have memorised. It is not statistical independence and must never be
+// read as it: two windows of one flight share the aircraft, its mass and trim,
+// the air mass and its gusts, the sensor calibration, and every unmodelled
+// effect that persists across the cut. A model fitted on the first half of a
+// manoeuvre and scored on the second half has been scored on data it did not
+// see, and on data that is not an independent draw from anything. The stronger
+// claim needs a different flight, a different day, or a different airframe, and
+// no digest, window or scan in this file can supply it.
 #pragma once
 
 #include "galata/model/quadrotor.hpp"
@@ -84,28 +98,35 @@ struct ValidationOutput {
   bool autocorrelation_is_defined = false;
 };
 
-// On what grounds, if any, the validation record is independent of the record
-// the model was fitted to. Ordered from the strongest negative to the weakest
-// positive, and never inferred from a digest inequality alone.
-enum class Independence {
+// On what grounds, if any, the validation record's observations are separate
+// from those the model was fitted to. Ordered from the strongest negative to
+// the weakest positive, and never inferred from a digest inequality alone.
+//
+// SEPARATION, NOT INDEPENDENCE. See the header block: the strongest value here
+// bounds what the fit could have seen and says nothing about whether the two
+// stretches are independent draws.
+enum class RecordSeparation {
   // The two records demonstrably share observations: the same record, the same
   // file over overlapping intervals, or samples found in both. Not a refusal —
   // the numbers are still computed and returned — but not validation either.
   NotHeldOut,
-  // Proven. Both records are windows of ONE imported file and their intervals
-  // do not overlap, so no observation can be in both, and a scan of the shared
-  // channels confirms none is.
+  // Proven, and proven about SAMPLES. Both records are windows of ONE imported
+  // file and their intervals do not overlap, so no observation can be in both,
+  // and a scan of the shared channels confirms none is. This bounds what the
+  // fit could have memorised. It is not statistical independence: the two
+  // stretches share the aircraft, the trim, the air mass, the calibration and
+  // any unmodelled effect that persists across the cut.
   VerifiedDisjoint,
-  // The study asserted independence, and every check that could be made was
-  // made and did not contradict it. This is a claim in the caller's name, not
-  // a finding in galata's.
+  // The study asserted these are different data, and every check that could be
+  // made was made and did not contradict it. This is a claim in the caller's
+  // name, not a finding in galata's.
   CallerDeclared,
   // Nothing establishes it. No claim was made, or the records share no channel
   // by which a claim could be checked.
   Unknown,
 };
 
-[[nodiscard]] std::string to_string(Independence independence);
+[[nodiscard]] std::string to_string(RecordSeparation separation);
 
 // Where a record came from, kept so a reader can see why the classification
 // above came out as it did rather than taking it on trust.
@@ -127,11 +148,11 @@ struct ValidationResult {
   std::string estimation_record_sha256;
   std::string validation_record_sha256;
 
-  Independence independence = Independence::Unknown;
+  RecordSeparation separation = RecordSeparation::Unknown;
   // One sentence naming what established the classification, including what it
   // could NOT check. Written for a reader who will quote it, so it must be
   // true standing alone.
-  std::string independence_basis;
+  std::string separation_basis;
   // Preserved where available, and empty where it is not: the estimation
   // record's lineage is only known when the record itself was supplied.
   RecordLineage validation_lineage;
@@ -170,7 +191,7 @@ struct ValidationRequest {
   // What the study asserts when it cannot supply the record — that these are
   // different data. Recorded as the caller's claim and checked as far as it can
   // be; a check that contradicts it wins.
-  bool caller_declares_independent = false;
+  bool caller_declares_different_data = false;
 
   std::vector<std::string> command_channels;
 

@@ -749,11 +749,11 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
     // The label first and in words. It is the difference between a diagnostic
     // and a claim, and a reader skimming a report must meet it before the
     // numbers rather than after them.
-    out << "**Independence: " << identify::to_string(result.independence) << "** — "
-        << result.independence_basis << "\n\n";
+    out << "**Record separation: " << identify::to_string(result.separation) << "** — "
+        << result.separation_basis << "\n\n";
     if (result.caller_declaration_was_contradicted) {
-      out << "> The study declared these records independent and a check contradicted it. The "
-             "numbers below are a diagnostic, not a validation.\n\n";
+      out << "> The study declared these records to hold different data and a check "
+             "contradicted it. The numbers below are a diagnostic, not a validation.\n\n";
     }
     out << "| Output | State | RMSE | Max abs error | Mean error | Fit fraction | Residual "
            "lag-1 autocorrelation |\n";
@@ -774,7 +774,11 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
       }
       out << " |\n";
     }
-    out << "\nScored over " << result.sample_count << " sample(s). Validation record sha256 "
+    out << "\nThe label above is about SAMPLE separation. It bounds what the fit could have "
+           "seen; it is not a claim of statistical independence, and two windows of one flight "
+           "share the aircraft, the trim, the air mass and every unmodelled effect that "
+           "persists across the cut.\n\n";
+    out << "Scored over " << result.sample_count << " sample(s). Validation record sha256 "
         << result.validation_record_sha256 << "; estimation record sha256 "
         << result.estimation_record_sha256 << ".\n\n";
     out << "_Assumptions:_ " << result.assumptions << "\n\n";

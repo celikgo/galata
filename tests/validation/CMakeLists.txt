@@ -33,6 +33,7 @@ add_executable(galata_validation_tests
   test_case_registry.cpp
   test_care_slicot.cpp
   test_battery_sag.cpp
+  test_identification_recovery.cpp
   test_quadrotor_plant.cpp
   test_quadrotor_hover_linearisation.cpp
 )
@@ -53,6 +54,8 @@ target_link_libraries(galata_validation_tests
     galata::linearize
     galata::model
     galata::synth
+    galata::data
+    galata::identify
     galata::validation_reference
     galata::pipeline
     galata::warnings

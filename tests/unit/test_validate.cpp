@@ -26,7 +26,7 @@ namespace {
 
 using galata::data::Channel;
 using galata::data::Record;
-using galata::identify::Independence;
+using galata::identify::RecordSeparation;
 using galata::identify::validate_model;
 using galata::identify::ValidationRequest;
 using galata::model::Quadrotor;
@@ -132,7 +132,7 @@ TEST(Validate, TheRightModelPredictsARecordItNeverSaw) {
   const Record held_out = synthesise(truth, kValidation, 30.0);
   const auto result = validate_model(truth, held_out, request_for(truth, kEstimation));
 
-  EXPECT_EQ(result.independence, Independence::Unknown)
+  EXPECT_EQ(result.separation, RecordSeparation::Unknown)
       << "a digest inequality is an inequality of bytes and must not be read as independence";
   ASSERT_EQ(result.outputs.size(), 1u);
   const auto& down = result.outputs.front();
@@ -175,10 +175,10 @@ TEST(Validate, ReusingTheEstimationRecordIsLabelledNotHeldOut) {
   const Record estimation = synthesise(truth, kEstimation, 30.0);
 
   const auto result = validate_model(truth, estimation, request_for(truth, kEstimation));
-  EXPECT_EQ(result.independence, Independence::NotHeldOut)
+  EXPECT_EQ(result.separation, RecordSeparation::NotHeldOut)
       << "the same record cannot be both what a model was fitted to and what it was validated on";
-  EXPECT_NE(result.independence_basis.find("same bytes"), std::string::npos)
-      << result.independence_basis;
+  EXPECT_NE(result.separation_basis.find("same bytes"), std::string::npos)
+      << result.separation_basis;
   EXPECT_EQ(result.validation_record_sha256, kEstimation);
   EXPECT_EQ(result.estimation_record_sha256, kEstimation);
   // The numbers are still computed and still excellent — which is exactly why
@@ -237,13 +237,13 @@ ValidationRequest request_with(const Quadrotor& model,
                                bool declared) {
   ValidationRequest request = request_for(model, digest);
   request.estimation_record = estimation;
-  request.caller_declares_independent = declared;
+  request.caller_declares_different_data = declared;
   return request;
 }
 
 }  // namespace
 
-TEST(Independence, TwoWindowsOfOneImportOverDisjointIntervalsAreVerifiedDisjoint) {
+TEST(RecordSeparation, TwoWindowsOfOneImportOverDisjointIntervalsAreVerifiedDisjoint) {
   const Quadrotor truth = shipped();
   const Record flight = whole_flight();
   const Record estimation = window_record(flight, 0.0, 0.5);
@@ -251,11 +251,11 @@ TEST(Independence, TwoWindowsOfOneImportOverDisjointIntervalsAreVerifiedDisjoint
 
   const auto result =
       validate_model(truth, validation, request_with(truth, &estimation, "", false));
-  EXPECT_EQ(result.independence, Independence::VerifiedDisjoint);
-  EXPECT_NE(result.independence_basis.find("windows of one imported file"), std::string::npos)
-      << result.independence_basis;
-  EXPECT_NE(result.independence_basis.find("not by an inequality of hashes"), std::string::npos)
-      << result.independence_basis;
+  EXPECT_EQ(result.separation, RecordSeparation::VerifiedDisjoint);
+  EXPECT_NE(result.separation_basis.find("windows of one imported file"), std::string::npos)
+      << result.separation_basis;
+  EXPECT_NE(result.separation_basis.find("not by an inequality of hashes"), std::string::npos)
+      << result.separation_basis;
   EXPECT_FALSE(result.intervals_overlap);
   EXPECT_EQ(result.shared_sample_count, 0);
   EXPECT_GT(result.shared_channel_count, 0);
@@ -271,25 +271,25 @@ TEST(Independence, TwoWindowsOfOneImportOverDisjointIntervalsAreVerifiedDisjoint
 // intervals overlap hold the same seconds of the same run. Their digests are
 // equal here, so the old rule happens to get this one right; the next test is
 // the one it gets wrong.
-TEST(Independence, OverlappingWindowsOfOneImportAreNotHeldOut) {
+TEST(RecordSeparation, OverlappingWindowsOfOneImportAreNotHeldOut) {
   const Quadrotor truth = shipped();
   const Record flight = whole_flight();
   const Record estimation = window_record(flight, 0.0, 0.6);
   const Record validation = window_record(flight, 0.4, 1.01);
 
   const auto result = validate_model(truth, validation, request_with(truth, &estimation, "", true));
-  EXPECT_EQ(result.independence, Independence::NotHeldOut);
+  EXPECT_EQ(result.separation, RecordSeparation::NotHeldOut);
   EXPECT_TRUE(result.intervals_overlap);
   // The study declared independence and was overruled, and it is told so
   // without having to parse the sentence.
   EXPECT_TRUE(result.caller_declaration_was_contradicted);
-  EXPECT_NE(result.independence_basis.find("intervals overlap"), std::string::npos)
-      << result.independence_basis;
+  EXPECT_NE(result.separation_basis.find("intervals overlap"), std::string::npos)
+      << result.separation_basis;
 }
 
 // THE CASE THE OLD RULE GOT WRONG. A segment copied from one file into another:
 // different digests, shared observations. `a != b` called this held out.
-TEST(Independence, SamplesCopiedIntoAFileWithADifferentDigestAreFoundAndRefuseTheClaim) {
+TEST(RecordSeparation, SamplesCopiedIntoAFileWithADifferentDigestAreFoundAndRefuseTheClaim) {
   const Quadrotor truth = shipped();
   const Record flight = whole_flight();
   const Record estimation = window_record(flight, 0.0, 0.5);
@@ -302,63 +302,63 @@ TEST(Independence, SamplesCopiedIntoAFileWithADifferentDigestAreFoundAndRefuseTh
   reissued.is_window = false;
 
   const auto result = validate_model(truth, reissued, request_with(truth, &estimation, "", true));
-  EXPECT_EQ(result.independence, Independence::NotHeldOut)
+  EXPECT_EQ(result.separation, RecordSeparation::NotHeldOut)
       << "unequal digests must not be allowed to launder shared observations";
   EXPECT_EQ(result.shared_sample_count, static_cast<int>(estimation.sample_count()));
   EXPECT_TRUE(result.caller_declaration_was_contradicted);
-  EXPECT_NE(result.independence_basis.find("different digests"), std::string::npos)
-      << result.independence_basis;
+  EXPECT_NE(result.separation_basis.find("different digests"), std::string::npos)
+      << result.separation_basis;
 }
 
 // Two genuinely different files. galata cannot prove this either way — exact
 // comparison cannot see the same run resampled into a second file — so the
 // caller's claim is recorded AS the caller's claim.
-TEST(Independence, TwoDifferentFilesWithAClaimAreCallerDeclaredAndNotVerified) {
+TEST(RecordSeparation, TwoDifferentFilesWithAClaimAreCallerDeclaredAndNotVerified) {
   const Quadrotor truth = shipped();
   const Record estimation = synthesise(truth, kEstimation, 30.0);
   Record other = synthesise(truth, kValidation, 12.0);
   other.source_path = "second-flight.csv";
 
   const auto result = validate_model(truth, other, request_with(truth, &estimation, "", true));
-  EXPECT_EQ(result.independence, Independence::CallerDeclared);
+  EXPECT_EQ(result.separation, RecordSeparation::CallerDeclared);
   EXPECT_FALSE(result.caller_declaration_was_contradicted);
-  EXPECT_NE(result.independence_basis.find("the study declared"), std::string::npos)
-      << result.independence_basis;
-  EXPECT_NE(result.independence_basis.find("not a proof"), std::string::npos)
-      << result.independence_basis;
+  EXPECT_NE(result.separation_basis.find("the study declared"), std::string::npos)
+      << result.separation_basis;
+  EXPECT_NE(result.separation_basis.find("not a proof"), std::string::npos)
+      << result.separation_basis;
 }
 
-TEST(Independence, TwoDifferentFilesWithNoClaimAreUnknown) {
+TEST(RecordSeparation, TwoDifferentFilesWithNoClaimAreUnknown) {
   const Quadrotor truth = shipped();
   const Record estimation = synthesise(truth, kEstimation, 30.0);
   Record other = synthesise(truth, kValidation, 12.0);
 
   const auto result = validate_model(truth, other, request_with(truth, &estimation, "", false));
-  EXPECT_EQ(result.independence, Independence::Unknown);
-  EXPECT_NE(result.independence_basis.find("data.window"), std::string::npos)
-      << "the refusal should say how to make the split checkable: " << result.independence_basis;
+  EXPECT_EQ(result.separation, RecordSeparation::Unknown);
+  EXPECT_NE(result.separation_basis.find("data.window"), std::string::npos)
+      << "the refusal should say how to make the split checkable: " << result.separation_basis;
 }
 
 // A digest alone, with no record to compare against, can establish nothing
 // positive — and the two silences are told apart.
-TEST(Independence, ADigestAloneYieldsUnknownOrCallerDeclaredAndNeverVerified) {
+TEST(RecordSeparation, ADigestAloneYieldsUnknownOrCallerDeclaredAndNeverVerified) {
   const Quadrotor truth = shipped();
   const Record validation = synthesise(truth, kValidation, 12.0);
 
   const auto silent = validate_model(truth, validation, request_for(truth, kEstimation));
-  EXPECT_EQ(silent.independence, Independence::Unknown);
+  EXPECT_EQ(silent.separation, RecordSeparation::Unknown);
   EXPECT_FALSE(silent.estimation_lineage_is_known);
 
   const auto claimed =
       validate_model(truth, validation, request_with(truth, nullptr, kEstimation, true));
-  EXPECT_EQ(claimed.independence, Independence::CallerDeclared);
-  EXPECT_NE(claimed.independence_basis.find("was NOT treated as evidence"), std::string::npos)
-      << claimed.independence_basis;
+  EXPECT_EQ(claimed.separation, RecordSeparation::CallerDeclared);
+  EXPECT_NE(claimed.separation_basis.find("was NOT treated as evidence"), std::string::npos)
+      << claimed.separation_basis;
 }
 
 // Two identities that disagree cannot both be the training data, and choosing
 // between them is not this routine's to do.
-TEST(Independence, ADeclaredDigestThatContradictsTheSuppliedRecordIsRefused) {
+TEST(RecordSeparation, ADeclaredDigestThatContradictsTheSuppliedRecordIsRefused) {
   const Quadrotor truth = shipped();
   const Record estimation = synthesise(truth, kEstimation, 30.0);
   const Record validation = synthesise(truth, kValidation, 12.0);
@@ -371,7 +371,7 @@ TEST(Independence, ADeclaredDigestThatContradictsTheSuppliedRecordIsRefused) {
       (void)validate_model(truth, validation, request_with(truth, &estimation, kEstimation, true)));
 }
 
-TEST(Independence, NeitherARecordNorADigestIsRefused) {
+TEST(RecordSeparation, NeitherARecordNorADigestIsRefused) {
   const Quadrotor truth = shipped();
   const Record validation = synthesise(truth, kValidation, 12.0);
   EXPECT_THROW((void)validate_model(truth, validation, request_with(truth, nullptr, "", true)),
