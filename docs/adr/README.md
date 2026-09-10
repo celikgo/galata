@@ -23,3 +23,4 @@ The format is in [0000-template.md](0000-template.md).
 | [0013](0013-typed-linear-graph-adapter.md) | Typed linear rows and an explicit state-space graph adapter | experimental M2 contract; verification and external acceptance pending |
 | [0014](0014-project-revision-recovery.md) | Review and restore retained project revisions | experimental M2 contract; local verification and external acceptance pending |
 | [0015](0015-supported-platforms.md) | Supported platforms are Linux and macOS | accepted |
+| [0017](0017-attitude-error-chart-has-a-public-inverse.md) | The attitude-error chart has a public inverse | accepted |
