@@ -33,13 +33,18 @@ add_executable(galata_unit_tests
   test_integrator.cpp
   test_modes.cpp
   test_frequency_response.cpp
+<<<<<<< HEAD
   test_csv_import.cpp
   test_ulog_import.cpp
+=======
+  test_chart_mapping.cpp
+>>>>>>> feat/sampled-control
   test_margins.cpp
   test_disk_margin.cpp
   test_singular_values.cpp
   test_sensitivity.cpp
   test_jacobian.cpp
+  test_input_schedule.cpp
   test_newton.cpp
   test_atmosphere.cpp
   test_flight_condition.cpp

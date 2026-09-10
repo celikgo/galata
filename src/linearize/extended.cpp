@@ -17,21 +17,6 @@
 namespace galata::linearize {
 namespace {
 
-// q0 * exp(e/2), the chart's parameterisation of a perturbed attitude.
-core::Quaternion perturbed_attitude(const core::Quaternion& nominal,
-                                    const Eigen::Vector3d& error_rad) {
-  const double angle = error_rad.norm();
-  core::Quaternion delta(1.0, 0.0, 0.0, 0.0);
-  if (angle > 0.0) {
-    // Half-angle, because a quaternion rotates by twice its own angle.
-    const Eigen::Vector3d axis = error_rad / angle;
-    const double half = 0.5 * angle;
-    const double sine = std::sin(half);
-    delta = core::Quaternion(std::cos(half), axis.x() * sine, axis.y() * sine, axis.z() * sine);
-  }
-  return (nominal * delta).normalized();
-}
-
 int output_width(OutputKind kind) {
   return kind == OutputKind::Altitude ? 1 : 3;
 }
@@ -53,6 +38,82 @@ std::vector<std::string> names_for(OutputKind kind) {
 }
 
 }  // namespace
+
+Eigen::VectorXd extended_from_chart(const Eigen::VectorXd& chart,
+                                    const Eigen::VectorXd& reference_state) {
+  if (reference_state.size() < core::kStateSize) {
+    throw std::invalid_argument(
+        "extended_from_chart: the reference state is shorter than the thirteen ADR-0002 "
+        "components");
+  }
+  const auto appended = static_cast<int>(reference_state.size()) - core::kStateSize;
+  if (chart.size() != kRigidChartSize + appended) {
+    std::ostringstream message;
+    message << "extended_from_chart: the chart carries " << chart.size()
+            << " coordinate(s); this reference has " << appended << " appended state(s) and so "
+            << "needs " << (kRigidChartSize + appended);
+    throw std::invalid_argument(message.str());
+  }
+  const core::Quaternion nominal(reference_state(core::kQuaternionW),
+                                 reference_state(core::kQuaternionX),
+                                 reference_state(core::kQuaternionY),
+                                 reference_state(core::kQuaternionZ));
+  Eigen::VectorXd full = reference_state;
+  full.segment<3>(core::kPositionNorth) += chart.segment<3>(kChartPositionNorth);
+  full.segment<3>(core::kVelocityU) += chart.segment<3>(kChartVelocityU);
+  full.segment<3>(core::kRateP) += chart.segment<3>(kChartRateP);
+  const core::Quaternion attitude = core::normalised(
+      nominal * core::quaternion_from_rotation_vector(chart.segment<3>(kChartAttitudeErrorX)));
+  full(core::kQuaternionW) = attitude.w();
+  full(core::kQuaternionX) = attitude.x();
+  full(core::kQuaternionY) = attitude.y();
+  full(core::kQuaternionZ) = attitude.z();
+  for (int i = 0; i < appended; ++i) {
+    full(core::kStateSize + i) += chart(kRigidChartSize + i);
+  }
+  return full;
+}
+
+Eigen::VectorXd chart_from_extended(const Eigen::VectorXd& extended_state,
+                                    const Eigen::VectorXd& reference_state) {
+  if (reference_state.size() < core::kStateSize) {
+    throw std::invalid_argument(
+        "chart_from_extended: the reference state is shorter than the thirteen ADR-0002 "
+        "components");
+  }
+  if (extended_state.size() != reference_state.size()) {
+    std::ostringstream message;
+    message << "chart_from_extended: the state carries " << extended_state.size()
+            << " component(s) and the reference " << reference_state.size()
+            << "; a displacement between states of different width is not defined";
+    throw std::invalid_argument(message.str());
+  }
+  const auto appended = static_cast<int>(reference_state.size()) - core::kStateSize;
+  const core::Quaternion nominal(reference_state(core::kQuaternionW),
+                                 reference_state(core::kQuaternionX),
+                                 reference_state(core::kQuaternionY),
+                                 reference_state(core::kQuaternionZ));
+  const core::Quaternion actual(extended_state(core::kQuaternionW),
+                                extended_state(core::kQuaternionX),
+                                extended_state(core::kQuaternionY),
+                                extended_state(core::kQuaternionZ));
+
+  Eigen::VectorXd chart = Eigen::VectorXd::Zero(kRigidChartSize + appended);
+  chart.segment<3>(kChartPositionNorth) = extended_state.segment<3>(core::kPositionNorth)
+                                          - reference_state.segment<3>(core::kPositionNorth);
+  chart.segment<3>(kChartVelocityU) =
+      extended_state.segment<3>(core::kVelocityU) - reference_state.segment<3>(core::kVelocityU);
+  chart.segment<3>(kChartRateP) =
+      extended_state.segment<3>(core::kRateP) - reference_state.segment<3>(core::kRateP);
+  // The multiplicative one: q = q0 * exp(e/2), so exp(e/2) = q0^-1 * q.
+  chart.segment<3>(kChartAttitudeErrorX) = core::rotation_vector_from_quaternion(
+      core::normalised(nominal).conjugate() * core::normalised(actual));
+  for (int i = 0; i < appended; ++i) {
+    chart(kRigidChartSize + i) =
+        extended_state(core::kStateSize + i) - reference_state(core::kStateSize + i);
+  }
+  return chart;
+}
 
 model::LinearSystem ExtendedLinearisation::to_linear_system(const std::string& description,
                                                             const std::string& citation) const {
@@ -128,21 +189,12 @@ ExtendedLinearisation linearize_extended(const ExtendedDynamics& dynamics,
                                           extended_state(core::kQuaternionZ));
 
   // Chart -> full state.
+  // One implementation, called from here rather than repeated. The map used by
+  // a controller and the map the matrices were built on must be the same map;
+  // two copies that must agree about a half-angle convention and a sign are a
+  // drift waiting to happen, and ADR-0017 rejects that explicitly.
   const auto unpack = [&](const Eigen::VectorXd& delta) {
-    Eigen::VectorXd full = extended_state;
-    full.segment<3>(core::kPositionNorth) += delta.segment<3>(kChartPositionNorth);
-    full.segment<3>(core::kVelocityU) += delta.segment<3>(kChartVelocityU);
-    full.segment<3>(core::kRateP) += delta.segment<3>(kChartRateP);
-    const core::Quaternion attitude =
-        perturbed_attitude(nominal_attitude, delta.segment<3>(kChartAttitudeErrorX));
-    full(core::kQuaternionW) = attitude.w();
-    full(core::kQuaternionX) = attitude.x();
-    full(core::kQuaternionY) = attitude.y();
-    full(core::kQuaternionZ) = attitude.z();
-    for (int i = 0; i < appended; ++i) {
-      full(core::kStateSize + i) += delta(kRigidChartSize + i);
-    }
-    return full;
+    return extended_from_chart(delta, extended_state);
   };
 
   // Full-state derivative -> chart derivative. The attitude rows are the chart's
