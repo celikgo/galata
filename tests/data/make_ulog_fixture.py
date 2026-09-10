@@ -107,6 +107,16 @@ TOPICS = {
 
 IDS = {name: index for index, name in enumerate(TOPICS)}
 
+# A SECOND INSTANCE of one topic, which is how PX4 logs a duplicated sensor: the
+# same message format, a new message id, and multi_id 1 in ADD_LOGGED_MSG. It is
+# here because a reader that ignored multi_id would merge the two instances and
+# produce a channel that is neither — and would pass every single-instance test.
+# The values below are deliberately far from instance 0's so a merge is obvious
+# rather than plausible.
+SECOND_INSTANCE_TOPIC = "sensor_combined"
+SECOND_INSTANCE_ID = len(TOPICS)
+SECOND_INSTANCE_MULTI_ID = 1
+
 
 def build(samples: int = 20, period_us: int = 4000, with_dropout: bool = False) -> bytes:
     out = [MAGIC, struct.pack("<BQ", VERSION, 0), flag_bits()]
@@ -116,6 +126,8 @@ def build(samples: int = 20, period_us: int = 4000, with_dropout: bool = False) 
     out.append(parameter("BAT_N_CELLS", 6.0))
     for name in TOPICS:
         out.append(add_logged(IDS[name], name))
+    out.append(add_logged(SECOND_INSTANCE_ID, SECOND_INSTANCE_TOPIC,
+                          multi_id=SECOND_INSTANCE_MULTI_ID))
 
     for k in range(samples):
         t = k * period_us
@@ -141,6 +153,12 @@ def build(samples: int = 20, period_us: int = 4000, with_dropout: bool = False) 
         out.append(data(IDS["actuator_motors"], struct.pack("<Q12f", t, *motors)))
         out.append(data(IDS["battery_status"],
                         struct.pack("<Q3f", t, 24.0 - 0.01 * k, 20.0 + 0.1 * k, 1.0 - 0.01 * k)))
+        # The second IMU. Every component is offset by 100 from instance 0's, so
+        # a reader that confused the instances reports a value out by exactly
+        # that and cannot be mistaken for a rounding difference.
+        out.append(data(SECOND_INSTANCE_ID,
+                        struct.pack("<Q3fI3fI", t, 100.01 + k, -100.02 - k, 100.03 + k, 4000,
+                                    100.11 + k, -100.22 - k, 90.19 - k, 4000)))
         if with_dropout and k == samples // 2:
             out.append(dropout(17))
     return b"".join(out)
@@ -164,7 +182,17 @@ def verify_with_pyulog(path: str) -> None:
     first_q1 = attitude.data["q[1]"][0]
     if abs(first_q1 - 0.1 * 0.02) > 1e-6:
         raise SystemExit(f"pyulog read q[1]={first_q1}, expected {0.1 * 0.02}")
-    print(f"pyulog agrees: {len(found)} topics, {len(attitude.data['timestamp'])} attitude samples")
+    # And that pyulog sees BOTH instances of the duplicated topic as separate
+    # series. If it merged them, the fixture is not exercising instances and the
+    # reader comparison below would be checking nothing.
+    instances = sorted(d.multi_id for d in log.data_list
+                       if d.name == SECOND_INSTANCE_TOPIC)
+    if instances != [0, SECOND_INSTANCE_MULTI_ID]:
+        raise SystemExit(f"pyulog saw {SECOND_INSTANCE_TOPIC} instances {instances}, "
+                         f"expected [0, {SECOND_INSTANCE_MULTI_ID}]")
+    print(f"pyulog agrees: {len(found)} topics, "
+          f"{len(attitude.data['timestamp'])} attitude samples, "
+          f"{SECOND_INSTANCE_TOPIC} instances {instances}")
 
 
 def main() -> int:

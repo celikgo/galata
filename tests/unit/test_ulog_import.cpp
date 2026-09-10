@@ -87,6 +87,63 @@ TEST(UlogImport, TheQuaternionIsScalarFirstAndInOrder) {
   EXPECT_LT(y->samples.front(), z->samples.front());
 }
 
+// A DUPLICATED TOPIC IS TWO SERIES, NOT ONE. PX4 logs a second sensor as the
+// same message format with a new message id and multi_id 1. A reader that
+// ignored multi_id would merge the two into a channel that is neither — and
+// would pass every other test in this file, because every other test reads
+// instance 0 of a topic logged once.
+//
+// The fixture's second `sensor_combined` is offset by 100 in every component,
+// so a merge or a wrong selection is out by exactly that and cannot be mistaken
+// for a rounding difference.
+TEST(UlogImport, ASecondInstanceOfATopicIsItsOwnSeries) {
+  UlogImportRequest request;
+  request.resample_hz = 250.0;
+  request.channels = {
+      {"sensor_combined", "gyro_rad[0]", "gyro_x_0", "rad/s", "frd", 1.0, 0.0, 0},
+      {"sensor_combined", "gyro_rad[0]", "gyro_x_1", "rad/s", "frd", 1.0, 0.0, 1},
+      {"sensor_combined", "accelerometer_m_s2[2]", "accel_z_0", "m/s^2", "frd", 1.0, 0.0, 0},
+      {"sensor_combined", "accelerometer_m_s2[2]", "accel_z_1", "m/s^2", "frd", 1.0, 0.0, 1},
+  };
+  const auto record = read_ulog(galata::test::ulog_fixture(), "sample.ulg", request);
+
+  const auto* gyro0 = record.find("gyro_x_0");
+  const auto* gyro1 = record.find("gyro_x_1");
+  const auto* accel0 = record.find("accel_z_0");
+  const auto* accel1 = record.find("accel_z_1");
+  ASSERT_NE(gyro0, nullptr);
+  ASSERT_NE(gyro1, nullptr);
+  ASSERT_NE(accel0, nullptr);
+  ASSERT_NE(accel1, nullptr);
+
+  // The values the fixture wrote: instance 0 at 0.01 + k, instance 1 offset by
+  // exactly 100. Asserted against the generator rather than against each other,
+  // so a reader that returned instance 0 twice fails on the second channel.
+  ASSERT_FALSE(gyro0->samples.empty());
+  EXPECT_NEAR(gyro0->samples.front(), 0.01, 1e-6);
+  EXPECT_NEAR(gyro1->samples.front(), 100.01, 1e-4);
+  EXPECT_NEAR(accel0->samples.front(), -9.81, 1e-4);
+  EXPECT_NEAR(accel1->samples.front(), 90.19, 1e-4);
+  for (std::size_t k = 0; k < gyro0->samples.size(); ++k) {
+    EXPECT_NEAR(gyro1->samples[k] - gyro0->samples[k], 100.0, 1e-3)
+        << "instance 1 must stay exactly 100 from instance 0 at sample " << k
+        << "; a merged or misselected instance breaks this";
+  }
+}
+
+// And an instance the log does not carry is refused by name rather than
+// silently falling back to instance 0, which would return a channel of the
+// wrong sensor under the name the study chose.
+TEST(UlogImport, AnInstanceTheLogDoesNotCarryIsRefused) {
+  UlogImportRequest request;
+  request.resample_hz = 250.0;
+  request.channels = {
+      {"sensor_combined", "gyro_rad[0]", "gyro", "rad/s", "frd", 1.0, 0.0, 7},
+  };
+  EXPECT_THROW((void)read_ulog(galata::test::ulog_fixture(), "sample.ulg", request),
+               std::invalid_argument);
+}
+
 TEST(UlogImport, ProvenanceAndTimebaseAreRecorded) {
   const auto record = read_ulog(galata::test::ulog_fixture(), "sample.ulg", rates_and_attitude());
   EXPECT_EQ(record.source_sha256.size(), 64u);

@@ -174,6 +174,7 @@ against.
 | `report.csv` | implemented, unvalidated | — |
 | `report.html` | implemented, unvalidated | — |
 | `report.markdown` | implemented, unvalidated | — |
+| `report.record` | implemented, unvalidated | — |
 | `sim.linear` | implemented, unvalidated | — |
 | `sim.model` | implemented, unvalidated | — |
 | `sim.nonlinear` | implemented, unvalidated | — |

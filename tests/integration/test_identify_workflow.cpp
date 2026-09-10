@@ -24,6 +24,7 @@
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -172,6 +173,58 @@ class IdentifyWorkflow : public ::testing::Test {
 };
 
 }  // namespace
+
+// --- report.record ---------------------------------------------------------
+//
+// The counterpart to `data.import.*`, and covered here from the start rather
+// than a vertical later: three capabilities in this programme reached a study
+// file with no pipeline test, and that is the pattern this test exists not to
+// continue.
+
+TEST_F(IdentifyWorkflow, AnImportedRecordIsWrittenBackWithItsUnitsAndFrames) {
+  const RunResult result =
+      run("version: 1\nstages:\n" + import_and_split()
+              + "  - id: out\n    capability: report.record\n    input:\n"
+                "      record: {from: estimation}\n      path: record.csv\n"
+                "      evidence_path: record.yaml\n",
+          {.overwrite = true, .write_manifest = false});
+  ASSERT_NE(result.find("out"), nullptr);
+
+  const std::string csv = read_file_bytes((output / "record.csv").string());
+  const std::string evidence = read_file_bytes((output / "record.yaml").string());
+
+  // The samples, with the timebase first and one column per channel.
+  EXPECT_EQ(csv.compare(0, 7, "time_s,"), 0) << csv.substr(0, 40);
+  EXPECT_NE(csv.find(",p_d,"), std::string::npos) << csv.substr(0, 200);
+  // One header row plus one row per sample, and the window kept 60.
+  EXPECT_EQ(static_cast<std::size_t>(std::count(csv.begin(), csv.end(), '\n')), 61u);
+
+  // THE EVIDENCE FILE IS WHERE THE NUMBERS BECOME MEASUREMENTS. Without the
+  // unit and the frame beside each channel, the CSV is a table of doubles.
+  EXPECT_NE(evidence.find("source_sha256:"), std::string::npos) << evidence;
+  EXPECT_NE(evidence.find("unit:"), std::string::npos) << evidence;
+  EXPECT_NE(evidence.find("frame:"), std::string::npos) << evidence;
+  EXPECT_NE(evidence.find("scale_applied:"), std::string::npos) << evidence;
+  // And the window's own lineage, so a reader of the cut knows it is one.
+  EXPECT_NE(evidence.find("is_window: true"), std::string::npos) << evidence;
+  EXPECT_NE(evidence.find("samples_outside_window:"), std::string::npos) << evidence;
+}
+
+TEST_F(IdentifyWorkflow, WritingARecordNeedsBothPathsAndTheyMayNotBeTheSameFile) {
+  const std::string chain = "version: 1\nstages:\n" + import_and_split();
+  // The evidence path is an output file role, so the executor requires it.
+  EXPECT_THROW((void)run(chain
+                             + "  - id: out\n    capability: report.record\n"
+                               "    input: {record: {from: estimation}, path: record.csv}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+  EXPECT_THROW((void)run(chain
+                             + "  - id: out\n    capability: report.record\n    input:\n"
+                               "      record: {from: estimation}\n      path: both.csv\n"
+                               "      evidence_path: both.csv\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+}
 
 // --- identify.static_fit through the pipeline -------------------------------
 //

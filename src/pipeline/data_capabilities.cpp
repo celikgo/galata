@@ -9,6 +9,8 @@
 #include "galata/pipeline/files.hpp"
 
 #include <iomanip>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -141,6 +143,103 @@ Artifact window_capability(const StageContext& context) {
   return artifact;
 }
 
+// --- report.record ---------------------------------------------------------
+//
+// A measured record, written out. The missing counterpart to `data.import.*`:
+// until this existed, a record could be imported and consumed and there was no
+// way to see what galata had actually decoded — which made the reader's
+// agreement with an independent parser unverifiable from outside the test
+// suite, and ADR-0016 asks for exactly that verification.
+//
+// TWO FILES, BOTH REQUIRED. The CSV carries the samples; the evidence file
+// carries each channel's unit, frame, source name and the scale and offset
+// applied on the way in, plus what the import had to drop. A record's numbers
+// without their units and frames are not measurements — the same argument
+// `model.quadrotor.export` makes about a model — so neither path is optional.
+Artifact write_record(const StageContext& context) {
+  const auto& record = context.upstream_at("record").payload_as<data::Record>("measured_record");
+  const std::string path = context.input->string_at("path");
+  const std::string evidence_path = context.input->string_at("evidence_path");
+  if (path == evidence_path) {
+    throw std::invalid_argument(
+        "report.record: `path` and `evidence_path` name the same file. The samples and the "
+        "account of what they are are two documents and one would overwrite the other");
+  }
+
+  std::ostringstream csv;
+  csv.imbue(std::locale::classic());
+  csv << std::setprecision(std::numeric_limits<double>::max_digits10);
+  csv << "time_s";
+  for (const data::Channel& channel : record.channels) {
+    csv << ',' << channel.name;
+  }
+  csv << '\n';
+  for (std::size_t k = 0; k < record.times_s.size(); ++k) {
+    csv << record.times_s[k];
+    for (const data::Channel& channel : record.channels) {
+      csv << ',' << channel.samples[k];
+    }
+    csv << '\n';
+  }
+  context.write_output(path, csv.str());
+
+  std::ostringstream evidence;
+  evidence.imbue(std::locale::classic());
+  evidence << std::setprecision(std::numeric_limits<double>::max_digits10);
+  evidence << "# SPDX-License-Identifier: Apache-2.0\n";
+  evidence << "#\n";
+  evidence << "# Written by `report.record`. What the samples in the CSV beside this ARE:\n";
+  evidence << "# the unit and frame a human declared for each, what the source held before\n";
+  evidence << "# conversion, and what the import had to drop. Not a study input.\n\n";
+  evidence << "samples_csv: \"" << path << "\"\n";
+  evidence << "source_path: \"" << record.source_path << "\"\n";
+  evidence << "source_sha256: \"" << record.source_sha256 << "\"\n";
+  evidence << "sample_count: " << record.sample_count() << "\n";
+  evidence << "first_time_s: " << record.first_time_s() << "\n";
+  evidence << "last_time_s: " << record.last_time_s() << "\n";
+  evidence << "timebase: \""
+           << (record.timebase == data::Timebase::UniformResampled ? "uniform_resampled"
+                                                                   : "source_timestamps")
+           << "\"\n";
+  if (record.timebase == data::Timebase::UniformResampled) {
+    evidence << "sample_rate_hz: " << record.sample_rate_hz << "\n";
+  }
+  evidence << "is_window: " << (record.is_window ? "true" : "false") << "\n";
+  if (record.is_window) {
+    evidence << "window_start_s: " << record.window_start_s << "\n";
+    evidence << "window_end_s: " << record.window_end_s << "\n";
+    evidence << "samples_outside_window: " << record.samples_outside_window << "\n";
+  }
+  evidence << "\nimport:\n";
+  evidence << "  rows_read: " << record.rows_read << "\n";
+  evidence << "  rows_dropped_nonfinite: " << record.rows_dropped_nonfinite << "\n";
+  evidence << "  rows_dropped_duplicate_time: " << record.rows_dropped_duplicate_time << "\n";
+  evidence << "  samples_altered: " << record.samples_altered << "\n";
+  evidence << "\nchannels:\n";
+  for (const data::Channel& channel : record.channels) {
+    evidence << "  - name: \"" << channel.name << "\"\n";
+    evidence << "    source_name: \"" << channel.source_name << "\"\n";
+    evidence << "    unit: \"" << channel.unit << "\"\n";
+    evidence << "    frame: \"" << channel.frame << "\"\n";
+    if (!channel.source_unit.empty()) {
+      evidence << "    source_unit: \"" << channel.source_unit << "\"\n";
+    }
+    evidence << "    scale_applied: " << channel.scale_applied << "\n";
+    evidence << "    offset_applied: " << channel.offset_applied << "\n";
+  }
+  context.write_output(evidence_path, evidence.str());
+
+  std::ostringstream summary;
+  summary << "wrote " << record.sample_count() << " sample(s) of " << record.channels.size()
+          << " channel(s) to " << path << ", with their units and frames in " << evidence_path;
+
+  Artifact artifact;
+  artifact.kind = "report";
+  artifact.summary = summary.str();
+  artifact.payload = context.resolve_output_path(path);
+  return artifact;
+}
+
 }  // namespace
 
 void register_data_capabilities(Registry& registry) {
@@ -169,6 +268,17 @@ void register_data_capabilities(Registry& registry) {
       import_ulog,
       {"path", "channels", "resample_hz", "description"},
       {"path"}});
+
+  registry.add(Capability{
+      "report.record",
+      "Write an imported record as CSV, with each channel's unit, frame and applied conversion "
+      "in a required evidence file beside it",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      write_record,
+      {"record", "path", "evidence_path"},
+      {},
+      {"path", "evidence_path"}});
 
   registry.add(
       Capability{"data.window",
