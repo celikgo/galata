@@ -255,6 +255,13 @@ jobs:
       - name: Rule 4 — every path and test name in every document resolves
         run: scripts/check-doc-references.sh
 
+      # ADR-0019. This gate checks the file it is running from, which is unusual
+      # and is the point: reinstating a base-branch filter on the pull_request
+      # trigger produces a regression no OTHER gate can see, because its symptom
+      # is an empty check column rather than a red one.
+      - name: ADR-0019 — every pull request fires the required graph
+        run: scripts/check-ci-coverage.sh
+
   # 120 minutes, not the 60 every other job gets. This job is measurably the
   # most expensive one: a Debug build under ASan and UBSan, and 466 tests run
   # one at a time. The tests that dominate are the ones exercising the isolated

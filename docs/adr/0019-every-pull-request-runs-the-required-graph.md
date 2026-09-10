@@ -117,6 +117,28 @@ merge with an empty or red rollup is still mechanically possible. It also does n
 stack a green integration — part 2 above is the reason, and the integration head's run is the
 only evidence about the combination.
 
+**AND IT DOES NOT RETROACTIVELY COVER THE STACKS THAT ARE ALREADY OPEN.** GitHub resolves a
+`pull_request` trigger against the workflow file in the merge of head into base, so a stacked
+pull request keeps firing — or not firing — according to whichever `ci.yml` its own base branch
+carries. Measured after this change landed on the integration branch: `#26`, `#29`, `#31` and
+`#32` still reported zero checks, because their bases are feature branches that predate it.
+Three ways to close that, and only the first is free of side effects on other people's
+branches: merge this fix to `main`, after which every future pull request based on `main` — and
+every stack rebased onto it — fires the graph; retarget an existing stacked pull request at
+`main`, which fires it immediately at the cost of enlarging that pull request's diff to include
+its ancestors; or push this `ci.yml` change onto each stack base, which alters four other pull
+requests' contents. Until one of those happens, the seven stacked pull requests remain
+individually unchecked and the integration head's own run is the only hosted evidence covering
+their code. That is the honest state and it is written here rather than left to be discovered
+from an empty tick column a second time.
+
+**The filter cannot come back by accident.** `scripts/check-ci-coverage.sh` runs in the Charter
+gates job and fails if a `branches:` or `branches-ignore:` key appears under `pull_request:`, or
+if the trigger is deleted outright. A gate that inspects the workflow file it is running from is
+unusual; it earns its place because the regression it catches has no other symptom. Every other
+gate in this repository reports a failure by going red, and this one's failure mode is a tick
+column that is simply empty.
+
 ## Revisit when
 
 Branch protection lands on `main`, at which point the eleven contexts become enforced and the

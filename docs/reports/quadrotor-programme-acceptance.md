@@ -157,12 +157,40 @@ an item has two pull requests, the second is the ADR the first depends on.
 | 12 | Grey-box identification against the nonlinear plant | `identify.greybox`, `model.quadrotor.export`, ADR-0018 | #31 + integration | yes | yes | **no** | no |
 | 13 | Held-out validation, and the identity that makes it one | `identify.validate`, `data.window` | #32 + integration | yes | yes | **no** | no |
 
-The **CI-verified** column above records the state measured on 2026-09-10, before ADR-0019
-removed the base-branch filter from `.github/workflows/ci.yml`. Seven items read `no` or
-`ADR only` for one structural reason: their pull requests were stacked on other feature
-branches, so the workflow never fired and GitHub reported zero checks rather than a failure.
-The integration pull request is what establishes the combined stack; each stacked branch now
-gets its own run as well.
+The **CI-verified** column above is a per-pull-request reading, and for seven items it says
+`no` or `ADR only` for one structural reason: their pull requests are stacked on other feature
+branches, so `.github/workflows/ci.yml`'s base-branch filter meant the workflow never fired and
+GitHub reported zero checks rather than a failure. ADR-0019 removed that filter.
+
+### The combined stack is CI-verified; the individual stacked pull requests are not
+
+These are two different claims and the table above answers only the second.
+
+The integration pull request runs the complete required graph against the combined head, and
+that head is a tree no constituent branch has: it carries the merge resolutions. Its run is
+therefore the only hosted evidence about the combination, and after ADR-0019 it is also the
+first hosted evidence of any kind covering `sim.sampled`, the public chart map, the ULog parser
+and all three `identify.*` capabilities.
+
+**The trigger fix does not reach the already-open stacks retroactively.** GitHub resolves a
+`pull_request` trigger against the workflow file in the merge of head into base, so a stacked
+pull request keeps firing — or not firing — according to whichever `ci.yml` its own base carries.
+Measured after the fix landed on the integration branch, `#26`, `#29`, `#31` and `#32` still
+reported zero checks. ADR-0019 records the three ways to close that and their costs; until one
+of them happens, the seven remain individually unchecked.
+
+**Where validation happens, decided and recorded.** On *each stack branch, at its own head*, so
+no pull request can be reviewed against an empty rollup — and *additionally at one integration
+head*, which is the merge gate, because a green stack is not a green integration. The
+integration head merges once; the constituents close as merged-by-integration rather than being
+merged individually, so the same commits are not applied twice and `main` never carries an
+untested combination between the first merge and the last.
+
+**And the filter cannot come back by accident.** `scripts/check-ci-coverage.sh` runs in the
+Charter gates job and fails if a base-branch filter reappears under `pull_request:`, or if the
+trigger is deleted. It is a gate that inspects the workflow file it runs from, which earns its
+place because the regression it catches has no other symptom: every other gate here fails by
+going red, and this one's failure mode is a tick column that is simply empty.
 
 ### Per-item local evidence
 
