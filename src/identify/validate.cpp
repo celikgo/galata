@@ -10,8 +10,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 namespace galata::identify {
 namespace {
@@ -24,16 +26,259 @@ const std::vector<double>& channel_of(const data::Record& record, const std::str
   return channel->samples;
 }
 
+RecordLineage lineage_of(const data::Record& record) {
+  RecordLineage lineage;
+  lineage.source_path = record.source_path;
+  lineage.source_sha256 = record.source_sha256;
+  lineage.is_window = record.is_window;
+  lineage.window_start_s = record.window_start_s;
+  lineage.window_end_s = record.window_end_s;
+  lineage.first_sample_s = record.first_time_s();
+  lineage.last_sample_s = record.last_time_s();
+  lineage.sample_count = static_cast<int>(record.sample_count());
+  return lineage;
+}
+
+// The channel names both records carry, in the validation record's order so the
+// result does not depend on which record was passed where. `std::set` rather
+// than a hash: ADR-0004, ordered iteration reaching output.
+std::vector<std::string> shared_channel_names(const data::Record& left, const data::Record& right) {
+  std::set<std::string> in_right;
+  for (const data::Channel& channel : right.channels) {
+    in_right.insert(channel.name);
+  }
+  std::vector<std::string> shared;
+  for (const data::Channel& channel : left.channels) {
+    if (in_right.count(channel.name) != 0) {
+      shared.push_back(channel.name);
+    }
+  }
+  return shared;
+}
+
+// Observations found in BOTH records: a sample instant whose values agree
+// exactly on every shared channel. Exact equality is the right test and its own
+// limit — it finds a segment copied verbatim between files, however they were
+// formatted, and it cannot see a copy that was rescaled or resampled. The basis
+// sentence says so rather than leaving a reader to assume otherwise.
+int shared_sample_count(const data::Record& left,
+                        const data::Record& right,
+                        const std::vector<std::string>& shared) {
+  if (shared.empty()) {
+    return 0;
+  }
+  std::vector<const std::vector<double>*> left_channels;
+  std::vector<const std::vector<double>*> right_channels;
+  for (const std::string& name : shared) {
+    left_channels.push_back(&left.find(name)->samples);
+    right_channels.push_back(&right.find(name)->samples);
+  }
+
+  std::vector<std::vector<double>> rows;
+  rows.reserve(right.times_s.size());
+  for (std::size_t k = 0; k < right.times_s.size(); ++k) {
+    std::vector<double> row;
+    row.reserve(shared.size() + 1);
+    row.push_back(right.times_s[k]);
+    for (const std::vector<double>* channel : right_channels) {
+      row.push_back((*channel)[k]);
+    }
+    rows.push_back(std::move(row));
+  }
+  std::sort(rows.begin(), rows.end());
+
+  int found = 0;
+  for (std::size_t k = 0; k < left.times_s.size(); ++k) {
+    std::vector<double> row;
+    row.reserve(shared.size() + 1);
+    row.push_back(left.times_s[k]);
+    for (const std::vector<double>* channel : left_channels) {
+      row.push_back((*channel)[k]);
+    }
+    if (std::binary_search(rows.begin(), rows.end(), row)) {
+      ++found;
+    }
+  }
+  return found;
+}
+
+std::string interval_text(const data::Record& record) {
+  std::ostringstream out;
+  out << "[" << record.first_time_s() << ", " << record.last_time_s() << "] s";
+  return out.str();
+}
+
+}  // namespace
+
+std::string to_string(Independence independence) {
+  switch (independence) {
+    case Independence::NotHeldOut:
+      return "not held out";
+    case Independence::VerifiedDisjoint:
+      return "verified disjoint";
+    case Independence::CallerDeclared:
+      return "caller-declared";
+    case Independence::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+namespace {
+
+// THE CLASSIFICATION. Ordered so that a proof of overlap always beats a claim
+// of independence: every branch that can establish NotHeldOut is taken before
+// any branch that can grant it.
+void classify_independence(const data::Record& record,
+                           const ValidationRequest& request,
+                           ValidationResult& result) {
+  const std::string& estimation_digest = result.estimation_record_sha256;
+
+  // 1. The same bytes. Nothing else needs checking, and nothing else could
+  //    overturn it.
+  if (!estimation_digest.empty() && record.source_sha256 == estimation_digest
+      && request.estimation_record == nullptr) {
+    result.independence = Independence::NotHeldOut;
+    result.independence_basis =
+        "the validation record and the estimation record are the same bytes (sha256 "
+        + estimation_digest.substr(0, 16)
+        + "...), so this is the model scored on its own training data — a legitimate "
+          "diagnostic, and not validation";
+    return;
+  }
+
+  if (request.estimation_record == nullptr) {
+    // Nothing to compare against. Whatever the digests say, an inequality of
+    // hashes is an inequality of BYTES: the same observations reformatted, or a
+    // segment copied between files, would pass it. So the verdict is the
+    // caller's claim or silence, and it says which.
+    if (request.caller_declares_independent) {
+      result.independence = Independence::CallerDeclared;
+      result.independence_basis =
+          "the study declared these to be different data and the estimation record was not "
+          "supplied, so nothing here checked the claim. Digest inequality alone was NOT "
+          "treated as evidence: the same observations reformatted, exported twice, or copied "
+          "between files carry different digests. Supply the estimation record to have the "
+          "claim verified";
+    } else {
+      result.independence = Independence::Unknown;
+      result.independence_basis =
+          "only the estimation record's digest was given, and a digest identifies bytes rather "
+          "than observations. Nothing here establishes that these are different data, and "
+          "nothing here establishes that they are not";
+    }
+    return;
+  }
+
+  const data::Record& estimation = *request.estimation_record;
+  result.estimation_lineage = lineage_of(estimation);
+  result.estimation_lineage_is_known = true;
+
+  const std::vector<std::string> shared = shared_channel_names(record, estimation);
+  result.shared_channel_count = static_cast<int>(shared.size());
+  result.shared_sample_count = shared_sample_count(record, estimation, shared);
+  result.intervals_overlap = record.first_time_s() <= estimation.last_time_s()
+                             && estimation.first_time_s() <= record.last_time_s();
+
+  const bool same_source =
+      !record.source_sha256.empty() && record.source_sha256 == estimation.source_sha256;
+
+  // 2. Same file, overlapping stretch of it. The observations are the same
+  //    seconds of the same run whether or not any sample is bit-identical:
+  //    two exports of one segment at two rates share no tuple and every
+  //    measurement.
+  if (same_source && result.intervals_overlap) {
+    result.independence = Independence::NotHeldOut;
+    std::ostringstream basis;
+    basis << "both records are cut from one imported file (sha256 "
+          << record.source_sha256.substr(0, 16) << "...) and their sample intervals overlap — "
+          << "validation " << interval_text(record) << " against estimation "
+          << interval_text(estimation)
+          << ". The same stretch of one run is the same observations however it was resampled";
+    result.independence_basis = basis.str();
+    result.caller_declaration_was_contradicted = request.caller_declares_independent;
+    return;
+  }
+
+  // 3. Observations found in both, whatever the files were called.
+  if (result.shared_sample_count > 0) {
+    result.independence = Independence::NotHeldOut;
+    std::ostringstream basis;
+    basis << result.shared_sample_count << " of the validation record's " << record.sample_count()
+          << " sample(s) occur in the estimation record too, matching exactly on all "
+          << shared.size() << " shared channel(s)"
+          << (same_source ? "" : " despite the two files having different digests")
+          << ". A model scored on samples it was fitted to is not being validated on them";
+    result.independence_basis = basis.str();
+    result.caller_declaration_was_contradicted = request.caller_declares_independent;
+    return;
+  }
+
+  // 4. The one case that can be PROVEN. One file, two stretches of it that do
+  //    not meet. Nothing outside those stretches is in either record, so no
+  //    observation can be in both — and the scan above confirms none is.
+  if (same_source && !result.intervals_overlap && record.is_window && estimation.is_window) {
+    result.independence = Independence::VerifiedDisjoint;
+    std::ostringstream basis;
+    basis << "both records are windows of one imported file (sha256 "
+          << record.source_sha256.substr(0, 16) << "...) over intervals that do not meet — "
+          << "validation " << interval_text(record) << " against estimation "
+          << interval_text(estimation) << " — and no sample instant occurs in both across the "
+          << shared.size()
+          << " shared channel(s). Disjoint by construction, not by an inequality of hashes";
+    result.independence_basis = basis.str();
+    return;
+  }
+
+  // 5. Two different files, no shared sample found. That is the absence of a
+  //    contradiction and not a proof: exact equality cannot see the same flight
+  //    rescaled or resampled into a second file.
+  if (request.caller_declares_independent) {
+    result.independence = Independence::CallerDeclared;
+    std::ostringstream basis;
+    basis << "the study declared these to be different data, and the checks that were possible "
+             "did not contradict it: no sample instant occurs in both across the "
+          << shared.size() << " shared channel(s)"
+          << (result.intervals_overlap ? ", though their intervals do overlap in time"
+                                       : ", and their intervals do not overlap")
+          << ". This is not a proof — exact comparison cannot see the same run rescaled or "
+             "resampled into a second file — so it stands as the caller's claim, unrefuted";
+    result.independence_basis = basis.str();
+    return;
+  }
+
+  result.independence = Independence::Unknown;
+  std::ostringstream basis;
+  basis << "the two records come from different files and share no sample instant across the "
+        << shared.size()
+        << " shared channel(s), but nothing here proves they hold different observations and "
+           "the study claimed nothing. Cut both from one import with `data.window` to have the "
+           "split verified, or declare the claim to have it recorded as yours";
+  result.independence_basis = basis.str();
+}
+
 }  // namespace
 
 ValidationResult validate_model(const model::Quadrotor& model,
                                 const data::Record& record,
                                 const ValidationRequest& request) {
-  if (request.estimation_record_sha256.empty()) {
+  if (request.estimation_record_sha256.empty() && request.estimation_record == nullptr) {
     throw std::invalid_argument(
-        "identify.validate: the estimation record's digest is required. A caller who cannot say "
-        "which record trained the model cannot claim anything was held out from it, and this "
-        "will not accept the claim on trust");
+        "identify.validate: the estimation record's identity is required — either the record "
+        "itself, or its digest. A caller who cannot say which record trained the model cannot "
+        "claim anything was held out from it, and this will not accept the claim on trust");
+  }
+  // Both may be given, and then they must agree. Resolving a disagreement by
+  // preferring one would be choosing which record trained the model on the
+  // caller's behalf, and only one of them did.
+  if (request.estimation_record != nullptr && !request.estimation_record_sha256.empty()
+      && request.estimation_record->source_sha256 != request.estimation_record_sha256) {
+    throw std::invalid_argument(
+        "identify.validate: the declared estimation digest '" + request.estimation_record_sha256
+        + "' is not the digest of the estimation record supplied, '"
+        + request.estimation_record->source_sha256
+        + "'. They cannot both be the data the model was fitted to, and which one is is not "
+          "this routine's to decide");
   }
   if (request.outputs.empty()) {
     throw std::invalid_argument("identify.validate: at least one output must be declared");
@@ -100,12 +345,12 @@ ValidationResult validate_model(const model::Quadrotor& model,
 
   ValidationResult result;
   result.sample_count = samples;
-  result.estimation_record_sha256 = request.estimation_record_sha256;
+  result.estimation_record_sha256 = request.estimation_record != nullptr
+                                        ? request.estimation_record->source_sha256
+                                        : request.estimation_record_sha256;
   result.validation_record_sha256 = record.source_sha256;
-  // The one comparison this capability exists to make. Equal digests mean the
-  // model is being run on the data it was fitted to, which is a diagnostic and
-  // not validation, and the difference is a label rather than a refusal.
-  result.is_held_out = record.source_sha256 != request.estimation_record_sha256;
+  result.validation_lineage = lineage_of(record);
+  classify_independence(record, request, result);
   result.assumptions =
       "errors are compared sample by sample against the record's own values; the fit fraction "
       "is 1 - ||y - yhat|| / ||y - mean(y)||, so zero means no better than predicting the "

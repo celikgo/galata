@@ -183,7 +183,24 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
     // Validity is enforced at EVERY evaluation, not only at the end: an
     // optimiser that walks through an invalid model on its way somewhere has
     // evaluated an objective that means nothing.
-    candidate.validate();
+    //
+    // The rethrow names the point it failed at. Without it the caller is told
+    // that some quadrotor somewhere was invalid, which is true of a model it
+    // never wrote and cannot see; with it, the study can read which declared
+    // parameter reached which value and widen or narrow the bound that let it.
+    try {
+      candidate.validate();
+    } catch (const std::exception& error) {
+      std::ostringstream message;
+      message << "identify.greybox: the search reached a model the plant refuses — " << error.what()
+              << ". The point was";
+      for (int p = 0; p < parameter_count; ++p) {
+        message << (p == 0 ? " " : ", ") << request.parameters[static_cast<std::size_t>(p)].path
+                << " = " << theta(p);
+      }
+      message << ". Declared bounds admit this point, so narrow the bound that does";
+      throw std::invalid_argument(message.str());
+    }
 
     Eigen::VectorXd out(sample_count * static_cast<int>(request.outputs.size()));
     Eigen::VectorXd state = request.initial_extended_state;
@@ -228,6 +245,8 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
 
   Eigen::VectorXd residual = residuals(theta);
   double objective = residual.squaredNorm();
+  const double initial_objective = objective;
+  int accepted_steps = 0;
   Eigen::MatrixXd jacobian(residual.size(), parameter_count);
   double damping = 1e-3;
   double last_step = 0.0;
@@ -258,6 +277,7 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
     const Eigen::VectorXd trial_residual = residuals(trial);
     const double trial_objective = trial_residual.squaredNorm();
     if (trial_objective < objective) {
+      ++accepted_steps;
       last_step = (trial - theta).norm();
       theta = trial;
       residual = trial_residual;
@@ -270,8 +290,22 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
   }
 
   GreyboxResult result;
+  // The plant the optimiser stopped at, built by the same `resolve` the
+  // objective used, so the model the caller receives and the model the last
+  // residual was evaluated on cannot differ. Validated here for the same reason
+  // every trial was: a fit must not hand back a model that would be refused if
+  // somebody tried to load it.
+  result.fitted_model = model;
+  for (int p = 0; p < parameter_count; ++p) {
+    *resolve(result.fitted_model, request.parameters[static_cast<std::size_t>(p)].path) = theta(p);
+  }
+  result.fitted_model.validate();
+
   result.iterations = request.iterations;
   result.objective = objective;
+  result.initial_objective = initial_objective;
+  result.accepted_steps = accepted_steps;
+  result.objective_improved = objective < initial_objective;
   result.residual_count = static_cast<int>(residual.size());
   result.residual_rms = std::sqrt(objective / static_cast<double>(residual.size()));
   result.last_step_norm = last_step;
@@ -329,6 +363,43 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
     result.note =
         "no uncertainty: the residual is at the arithmetic floor or there are as many "
         "parameters as residuals, so the record demonstrates no scatter to estimate from";
+  }
+
+  // THE MODEL SAYS WHAT IT IS. A file written from this plant is byte-for-byte
+  // the same kind of object as one written from a bench measurement, and nothing
+  // in the format tells them apart — so the two free-text fields the format does
+  // have are used to say it, at the moment the fitted model comes into
+  // existence rather than at whatever later point somebody remembers to. A
+  // library caller who wants different words can overwrite them; a library
+  // caller who forgets does not thereby publish a fitted model wearing its base
+  // model's description.
+  {
+    std::ostringstream described;
+    described << model.description;
+    if (!model.description.empty()) {
+      described << " — ";
+    }
+    described << result.names.size() << " parameter(s) identified against a measured record";
+    result.fitted_model.description = described.str();
+
+    std::ostringstream cited;
+    cited << "identified by identify.greybox from ";
+    if (!record.source_path.empty()) {
+      cited << "'" << record.source_path << "', ";
+    }
+    cited << "sha256 "
+          << (record.source_sha256.empty() ? std::string("unrecorded") : record.source_sha256)
+          << ", over " << record.sample_count() << " sample(s), fitting";
+    for (std::size_t p = 0; p < result.names.size(); ++p) {
+      cited << (p == 0 ? " " : ", ") << result.names[p];
+    }
+    cited << ". Every other parameter is the value the base model gave it";
+    if (!model.citation.empty()) {
+      cited << ", whose own source is: " << model.citation;
+    }
+    cited << ". A fitted model is not measured aircraft data and a completed fit is not a "
+             "validation";
+    result.fitted_model.citation = cited.str();
   }
   return result;
 }

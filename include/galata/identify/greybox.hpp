@@ -97,15 +97,43 @@ struct GreyboxResult {
   Eigen::VectorXd value;
   Eigen::VectorXd standard_error;  // meaningful only when uncertainty_is_estimable
   double objective = 0.0;          // final sum of squared scaled residuals
+  double initial_objective = 0.0;  // at the declared starting point, for comparison
   double residual_rms = 0.0;       // in scaled units
   int iterations = 0;              // as declared; not a count of what was needed
+  int accepted_steps = 0;          // iterations whose trial point beat the incumbent
   int residual_count = 0;
   double last_step_norm = 0.0;
+  // `optimiser_finished` says the declared iterations ran, and nothing else: with
+  // a fixed count it is true even for a run that moved nothing. So the two
+  // questions a reader actually has are answered separately. A fit whose
+  // objective never improved is a fit that returned its own starting point, and
+  // a caller who reads only `optimiser_finished` would not be told.
   bool optimiser_finished = false;
+  bool objective_improved = false;
   bool uncertainty_is_estimable = false;
   double jacobian_condition_number = 0.0;
   std::vector<bool> at_bound;  // a parameter resting on a bound is not an interior estimate
   std::string note;
+
+  // THE FIT'S PRODUCT, and the reason it is here rather than left to the caller
+  // to rebuild. `value` is a vector of numbers whose meaning is a list of path
+  // strings; turning that back into a plant means re-implementing the path
+  // resolution this file's own `resolve` already does, and a second
+  // implementation of it is a second place for a parameter to land somewhere
+  // other than where the optimiser thought it did. So the routine that moved
+  // the parameters returns what it moved them into.
+  //
+  // It is the base model with the DECLARED parameters replaced and nothing
+  // else touched: every parameter the study did not name is the value the base
+  // model file gave it, byte for byte. `fitted_parameter_paths()` is the
+  // complete list of what changed, so what did not is the complement — that
+  // is what makes "unfitted parameters are preserved" a checkable statement
+  // rather than a promise.
+  model::Quadrotor fitted_model;
+
+  [[nodiscard]] const std::vector<std::string>& fitted_parameter_paths() const noexcept {
+    return names;
+  }
 };
 
 // Refuses: an unrecognised parameter path; an initial value outside its own
