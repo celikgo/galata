@@ -713,11 +713,26 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
         << fit.estimation_last_sample_s << "] s, from base model `" << fit.base_model_path
         << "` (sha256 " << fit.base_model_sha256 << ").\n\n";
     out << "| Diagnostic | Value |\n|---|---|\n"
-        << "| Objective (scaled) | " << fit.objective << " |\n"
+        << "| Objective, start → final (scaled) | " << fit.initial_objective << " → "
+        << fit.objective << " |\n"
+        << "| Objective improved | " << (fit.objective_improved ? "yes" : "**no**") << " |\n"
         << "| Residual RMS (scaled) | " << fit.residual_rms << " |\n"
         << "| Residuals | " << fit.residual_count << " |\n"
-        << "| Iterations declared | " << fit.iterations << " |\n"
+        << "| Iterations declared / run | " << fit.iterations_declared << " / "
+        << fit.iterations_run << " |\n"
+        << "| Stop reason | " << fit.stop_reason << " |\n"
+        << "| Accepted steps, last at iteration | " << fit.accepted_steps << ", "
+        << fit.last_accepted_iteration << " |\n"
+        << "| First-order measure, ‖Jᵀr‖∞ at the final point | " << fit.gradient_infinity_norm
+        << " |\n"
+        << "| The same over each parameter's declared range | "
+        << fit.gradient_over_bound_span_infinity_norm << " |\n"
         << "| Sensitivity condition number | " << fit.jacobian_condition_number << " |\n\n";
+    out << "The table above answers five separate questions and no sixth one. That the routine "
+           "ran is not that the objective improved; that the objective improved is not that the "
+           "fit converged; that it converged is not that the parameters are identifiable; and "
+           "none of them is whether the fit is accurate enough for a use. There is deliberately "
+           "no convergence verdict here.\n\n";
     out << "_Objective:_ " << fit.objective_definition << "\n\n";
     out << "_Uncertainty:_ "
         << (fit.uncertainty_is_estimable ? fit.uncertainty_assumptions

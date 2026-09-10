@@ -169,7 +169,12 @@ Eigen::VectorXd initial_state_for(const StageContext& context,
       throw std::invalid_argument(capability + ": `initial_state_from_record` reads channel '"
                                   + channel + "', which this record does not have");
     }
-    initial(static_cast<Eigen::Index>(found - state_names.begin())) = samples->samples.front();
+    // Bound rather than cast: the iterator difference is already `ptrdiff_t`,
+    // which is what `Eigen::Index` is, so an explicit cast is one GCC refuses
+    // under -Wuseless-cast. The implicit conversion keeps the intent and would
+    // still warn under -Wconversion if the two types ever stopped matching.
+    const Eigen::Index component = found - state_names.begin();
+    initial(component) = samples->samples.front();
   }
   // The quaternion may have been set component by component from four channels
   // that were themselves recorded to finite precision, so it is renormalised
@@ -302,12 +307,20 @@ Artifact greybox_capability(const StageContext& context) {
 
   provenance->objective = fit.objective;
   provenance->residual_rms = fit.residual_rms;
-  provenance->iterations = fit.iterations;
   provenance->residual_count = fit.residual_count;
-  provenance->last_step_norm = fit.last_step_norm;
+  provenance->iterations_declared = fit.iterations_declared;
+  provenance->iterations_run = fit.iterations_run;
+  provenance->stop_reason = identify::to_string(fit.stop_reason);
+  provenance->objective_improved = fit.objective_improved;
+  provenance->initial_objective = fit.initial_objective;
+  provenance->accepted_steps = fit.accepted_steps;
+  provenance->last_step_norm = fit.convergence.last_step_norm;
+  provenance->last_accepted_iteration = fit.convergence.last_accepted_iteration;
+  provenance->gradient_infinity_norm = fit.convergence.gradient_infinity_norm;
+  provenance->gradient_over_bound_span_infinity_norm =
+      fit.convergence.gradient_over_bound_span_infinity_norm;
   provenance->jacobian_condition_number = fit.jacobian_condition_number;
-  provenance->identifiability_ratio = request.identifiability_ratio;
-  provenance->optimiser_finished = fit.optimiser_finished;
+  provenance->identifiability_ratio = fit.identifiability_ratio;
   provenance->uncertainty_is_estimable = fit.uncertainty_is_estimable;
   provenance->uncertainty_assumptions = fit.note;
   provenance->step_s = request.step_s;

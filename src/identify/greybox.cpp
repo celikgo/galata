@@ -94,6 +94,14 @@ const std::vector<double>& channel_of(const data::Record& record, const std::str
 
 }  // namespace
 
+std::string to_string(StopReason reason) {
+  switch (reason) {
+    case StopReason::DeclaredIterationsCompleted:
+      return "the declared iteration count completed";
+  }
+  return "unknown";
+}
+
 GreyboxResult fit_greybox(const model::Quadrotor& model,
                           const data::Record& record,
                           const GreyboxRequest& request) {
@@ -247,6 +255,8 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
   double objective = residual.squaredNorm();
   const double initial_objective = objective;
   int accepted_steps = 0;
+  int last_accepted_iteration = -1;
+  int iterations_run = 0;
   Eigen::MatrixXd jacobian(residual.size(), parameter_count);
   double damping = 1e-3;
   double last_step = 0.0;
@@ -256,6 +266,7 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
   // stops when it is close enough stops after a different number of steps on a
   // different machine.
   for (int iteration = 0; iteration < request.iterations; ++iteration) {
+    ++iterations_run;
     for (int p = 0; p < parameter_count; ++p) {
       const double scale = std::fmax(std::fabs(theta(p)), 1e-8);
       const double step = 1e-6 * scale;
@@ -278,6 +289,7 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
     const double trial_objective = trial_residual.squaredNorm();
     if (trial_objective < objective) {
       ++accepted_steps;
+      last_accepted_iteration = iteration;
       last_step = (trial - theta).norm();
       theta = trial;
       residual = trial_residual;
@@ -288,6 +300,22 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
       last_step = 0.0;
     }
   }
+
+  // THE JACOBIAN IS RECOMPUTED AT THE POINT BEING REPORTED. The one the loop
+  // left behind was taken at the START of the last iteration, before its step
+  // was accepted or rejected, so a condition number, a covariance or a gradient
+  // read off it describes a point the caller is not being handed. Every figure
+  // below is therefore taken from a fresh Jacobian at the final `theta`, at the
+  // cost of one more Jacobian evaluation — which is the right price for a
+  // diagnostic that claims to be about the answer.
+  for (int p = 0; p < parameter_count; ++p) {
+    const double scale = std::fmax(std::fabs(theta(p)), 1e-8);
+    const double step = 1e-6 * scale;
+    Eigen::VectorXd forward = theta;
+    forward(p) += step;
+    jacobian.col(p) = (residuals(forward) - residual) / step;
+  }
+  const Eigen::VectorXd gradient = jacobian.transpose() * residual;
 
   GreyboxResult result;
   // The plant the optimiser stopped at, built by the same `resolve` the
@@ -301,15 +329,27 @@ GreyboxResult fit_greybox(const model::Quadrotor& model,
   }
   result.fitted_model.validate();
 
-  result.iterations = request.iterations;
+  result.iterations_declared = request.iterations;
+  result.iterations_run = iterations_run;
+  result.stop_reason = StopReason::DeclaredIterationsCompleted;
   result.objective = objective;
   result.initial_objective = initial_objective;
   result.accepted_steps = accepted_steps;
   result.objective_improved = objective < initial_objective;
   result.residual_count = static_cast<int>(residual.size());
   result.residual_rms = std::sqrt(objective / static_cast<double>(residual.size()));
-  result.last_step_norm = last_step;
-  result.optimiser_finished = true;
+  result.convergence.last_step_norm = last_step;
+  result.convergence.last_accepted_iteration = last_accepted_iteration;
+  result.convergence.gradient_infinity_norm =
+      parameter_count > 0 ? gradient.cwiseAbs().maxCoeff() : 0.0;
+  double scaled_gradient = 0.0;
+  for (int p = 0; p < parameter_count; ++p) {
+    const Parameter& bound = request.parameters[static_cast<std::size_t>(p)];
+    scaled_gradient =
+        std::fmax(scaled_gradient, std::fabs(gradient(p)) * (bound.upper - bound.lower));
+  }
+  result.convergence.gradient_over_bound_span_infinity_norm = scaled_gradient;
+  result.identifiability_ratio = request.identifiability_ratio;
   result.value = theta;
   result.standard_error = Eigen::VectorXd::Zero(parameter_count);
   for (int p = 0; p < parameter_count; ++p) {

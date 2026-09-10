@@ -1095,15 +1095,39 @@ std::string fitted_model_evidence(const QuadrotorArtifact& subject, const std::s
     out << "  - \"" << path << "\"\n";
   }
 
-  out << "\ndiagnostics:\n";
-  out << "  objective: " << fit.objective << "\n";
+  // The five questions, under five headings. A single `diagnostics` block with
+  // them interleaved is how they get read as one verdict.
+  out << "\nexecution:\n";
+  out << "  iterations_declared: " << fit.iterations_declared << "\n";
+  out << "  iterations_run: " << fit.iterations_run << "\n";
+  write_yaml_text(out, "  stop_reason", fit.stop_reason);
+  out << "  # One stopping rule exists. A tolerance-based exit is not missing here;\n";
+  out << "  # ADR-0004 forbids it, because it stops after a different number of\n";
+  out << "  # steps on a different machine.\n";
+
+  out << "\nobjective_progress:\n";
+  out << "  initial: " << fit.initial_objective << "\n";
+  out << "  final: " << fit.objective << "\n";
+  out << "  improved: " << (fit.objective_improved ? "true" : "false") << "\n";
+  out << "  accepted_steps: " << fit.accepted_steps << "\n";
   out << "  residual_rms_scaled: " << fit.residual_rms << "\n";
   out << "  residual_count: " << fit.residual_count << "\n";
-  out << "  iterations_declared: " << fit.iterations << "\n";
+
+  out << "\nconvergence_evidence:   # evidence, NOT a verdict — there is no `converged` field\n";
   out << "  last_step_norm: " << fit.last_step_norm << "\n";
-  out << "  optimiser_finished: " << (fit.optimiser_finished ? "true" : "false") << "\n";
+  out << "  last_accepted_iteration: " << fit.last_accepted_iteration << "\n";
+  out << "  gradient_infinity_norm: " << fit.gradient_infinity_norm << "\n";
+  out << "  gradient_over_bound_span_infinity_norm: " << fit.gradient_over_bound_span_infinity_norm
+      << "\n";
+  out << "  # J^T r at the FINAL point, with J recomputed there rather than reused\n";
+  out << "  # from the last iteration's start. How near zero is near enough is a\n";
+  out << "  # question about this fit's use, which nothing here answers.\n";
+
+  out << "\nidentifiability:\n";
   out << "  jacobian_condition_number: " << fit.jacobian_condition_number << "\n";
-  out << "  identifiability_ratio: " << fit.identifiability_ratio << "\n";
+  out << "  ratio_required: " << fit.identifiability_ratio << "\n";
+  out << "  # A fit failing this test does not return at all; the refusal is the\n";
+  out << "  # report. These figures describe a fit that passed it.\n";
 
   out << "\nuncertainty:\n";
   out << "  estimable: " << (fit.uncertainty_is_estimable ? "true" : "false") << "\n";

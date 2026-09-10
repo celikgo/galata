@@ -465,7 +465,11 @@ TEST(Determinism, AGreyboxFitIsBitIdenticalAcrossRuns) {
   EXPECT_EQ(first.objective, second.objective);
   EXPECT_EQ(first.initial_objective, second.initial_objective);
   EXPECT_EQ(first.residual_rms, second.residual_rms);
-  EXPECT_EQ(first.last_step_norm, second.last_step_norm);
+  EXPECT_EQ(first.convergence.last_step_norm, second.convergence.last_step_norm);
+  EXPECT_EQ(first.convergence.last_accepted_iteration, second.convergence.last_accepted_iteration);
+  EXPECT_EQ(first.convergence.gradient_infinity_norm, second.convergence.gradient_infinity_norm);
+  EXPECT_EQ(first.convergence.gradient_over_bound_span_infinity_norm,
+            second.convergence.gradient_over_bound_span_infinity_norm);
   EXPECT_EQ(first.accepted_steps, second.accepted_steps);
   EXPECT_EQ(first.jacobian_condition_number, second.jacobian_condition_number);
 

@@ -138,18 +138,27 @@ struct FittedModelProvenance {
   std::vector<std::string> output_matches;  // "channel -> state (scale unit)"
   std::vector<std::string> command_channels;
 
-  // THREE THINGS THAT ARE NOT THE SAME, kept apart here as
-  // `include/galata/identify/greybox.hpp` keeps them apart: the optimiser
-  // finished, the parameters are identifiable, the fit is acceptable. This
-  // record carries the first two and never the third.
+  // THE FIVE QUESTIONS `include/galata/identify/greybox.hpp` keeps apart, kept
+  // apart here too, because an evidence file that merged them would undo the
+  // separation the library exists to maintain. Execution completed; why it
+  // stopped; the objective improved; convergence evidence; identifiability.
+  // None of them is the sixth question — whether the fit is ACCEPTABLE — and
+  // this record never answers that one.
   double objective = 0.0;
   double residual_rms = 0.0;
-  int iterations = 0;
   int residual_count = 0;
+  int iterations_declared = 0;
+  int iterations_run = 0;
+  std::string stop_reason;
+  bool objective_improved = false;
+  double initial_objective = 0.0;
+  int accepted_steps = 0;
   double last_step_norm = 0.0;
+  int last_accepted_iteration = -1;
+  double gradient_infinity_norm = 0.0;
+  double gradient_over_bound_span_infinity_norm = 0.0;
   double jacobian_condition_number = 0.0;
   double identifiability_ratio = 0.0;
-  bool optimiser_finished = false;
   bool uncertainty_is_estimable = false;
   std::string uncertainty_assumptions;
   double step_s = 0.0;

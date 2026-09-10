@@ -166,11 +166,51 @@ TEST(Greybox, RecoversAKnownParameterFromAnExcitedRecord) {
   // Start deliberately away from the answer.
   const auto result = fit_greybox(shipped(), record, thrust_request(shipped(), 1.55));
   ASSERT_EQ(result.value.size(), 1);
-  EXPECT_TRUE(result.optimiser_finished);
   EXPECT_NEAR(result.value(0), actual, 1e-3)
       << "the fit did not recover the coefficient the record was generated from";
   EXPECT_FALSE(result.at_bound.front()) << "an estimate resting on a bound is not an interior one";
-  EXPECT_EQ(result.iterations, 30) << "the iteration count is declared, not discovered";
+
+  // The five questions the result keeps apart. This test is about the third and
+  // the fourth; it asserts the first two because they are the ones a reader is
+  // most likely to mistake for the others.
+  EXPECT_EQ(result.iterations_declared, 30) << "the iteration count is declared, not discovered";
+  EXPECT_EQ(result.iterations_run, result.iterations_declared)
+      << "a fixed-count loop runs what it declared; if these ever differ, a stopping rule was "
+         "added and ADR-0004 needs re-reading";
+  EXPECT_EQ(result.stop_reason, galata::identify::StopReason::DeclaredIterationsCompleted);
+  EXPECT_TRUE(result.objective_improved)
+      << "a fit that recovered the parameter must have improved on its starting point";
+  EXPECT_LT(result.objective, result.initial_objective);
+  EXPECT_GT(result.accepted_steps, 0);
+  EXPECT_GE(result.convergence.last_accepted_iteration, 0);
+  // Evidence, not a verdict: the first-order measure is small at a point the
+  // optimiser stopped at, and how small is small enough is not this code's call.
+  EXPECT_LT(result.convergence.gradient_over_bound_span_infinity_norm, 1e-3)
+      << "the objective should be flat against the parameter's own declared range at the "
+         "point being reported; gradient infinity norm "
+      << result.convergence.gradient_infinity_norm;
+}
+
+// A run that moves nothing must say so. With a declared iteration count the loop
+// always completes, so "it finished" cannot distinguish this case from a good
+// fit — which is exactly why the field that said only that was removed.
+TEST(Greybox, ARunThatCannotImproveOnItsStartingPointReportsThatRatherThanSuccess) {
+  const Quadrotor truth = shipped();
+  const Record record = synthesise(truth, 20.0);
+  // Start AT the answer, with one iteration: the record was generated from this
+  // mass, so the objective is already at its floor and no trial step improves it.
+  auto request = thrust_request(truth, truth.mass.mass_kg);
+  request.iterations = 1;
+  const auto result = fit_greybox(truth, record, request);
+
+  EXPECT_EQ(result.iterations_run, 1);
+  EXPECT_EQ(result.stop_reason, galata::identify::StopReason::DeclaredIterationsCompleted);
+  EXPECT_FALSE(result.objective_improved)
+      << "starting at the answer leaves nothing to improve, and the result must not imply it did";
+  EXPECT_EQ(result.accepted_steps, 0);
+  EXPECT_EQ(result.convergence.last_accepted_iteration, -1)
+      << "no iteration improved anything, and -1 is how that is said";
+  EXPECT_EQ(result.convergence.last_step_norm, 0.0);
 }
 
 // THE CASE THAT MATTERS. A fit that recovers a parameter from its own simulator
