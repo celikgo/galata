@@ -2,11 +2,17 @@
 
 # RFC-0002: Quadrotor programme support — native plant, hover trim, generic linearisation, measured-data import, identification, sampled control
 
-- **Status:** partly delivered. WP1 and WP2 are implemented and their delivery records are
-  at the foot of this document; WP3, WP4 and WP5 are not started. The line this replaced said
-  "nothing below is implemented", which WP1 left standing and which stopped being true when it
-  landed. The README's Status table, generated from the capability registry, remains the
-  authority on what exists; nothing here is a release commitment.
+- **Status:** partly delivered. WP1 through WP5 are implemented and their delivery records
+  are at the foot of this document. Every capability is registered as
+  implemented-unvalidated: none of them is anchored to a published reference, for the reason
+  the acceptance section gives, and a completed run of any of them is not a validation.
+  What is NOT delivered is named in each record rather than left to be inferred — chiefly the
+  Gramians the WP5 companion asked for, and any evidence at all from real hardware, which does
+  not exist. This line has been wrong twice: it said "nothing below is implemented" after WP1
+  landed, and "WP3, WP4 and WP5 are not started" after all three had. The README's Status
+  table, generated from the capability registry, remains the authority on what exists, and it
+  is the authority precisely because a hand-maintained status line drifts; nothing here is a
+  release commitment.
 - **Date:** 2026-09-08
 - **Requested by:** the Souxmar forest-ISR quadrotor programme (GitLab `souxmar`, a Python repository; not the CAE project of the same name that ADR-0001 cites)
 - **Affects:** `src/model/`, `src/trim/`, `src/linearize/`, `src/sim/`, `src/pipeline/capabilities.cpp`, `docs/product/FEATURES.md`, `docs/ROADMAP.md`, `docs/VERIFICATION.md`, ADR-0002, ADR-0006
@@ -872,3 +878,154 @@ hover, because the double-integrator chains are defective. `model.channels` can
 select or drop the wind columns because they are named, but no case here
 exercises that path. Gusts and turbulence stay out of scope until a wind model
 owns the `-R^T dw/dt` term, exactly as WP1 left them.
+
+### WP3 — measured-data import, 2026-09-10
+
+`data.import.csv` and `data.import.ulog` register as implemented-unvalidated, with
+`data.window` beside them. `include/galata/data/record.hpp` is the contract every fitting
+capability reads: a channel carries the unit and the frame a human wrote down, plus what the
+source held before conversion and the scale and offset applied, so a coefficient can be traced
+back to the exact bytes that produced it. The readers refuse rather than repair — an unmapped
+and unignored column, a missing unit, a missing frame, a non-monotonic timestamp, a ragged row
+— and what they had to drop is counted and reported rather than absorbed. ADR-0016 records why
+ULog is parsed in-repo rather than by a dependency.
+
+**One capability the request did not ask for.** `data.window` cuts a record to a half-open
+interval of itself, keeping the file's identity and adding the interval. It exists because of a
+defect WP4 found in its own held-out semantics, described below; it is not a convenience.
+
+**Acceptance** is held in the `unit` tier by `CsvImport.*` and `UlogImport.*`, and the ULog
+fixture is generated from `tests/data/make_ulog_fixture.py` rather than committed, because a
+binary blob nobody can read is a fixture nobody can check.
+
+**What WP3 does not deliver.** No frame conversion is performed anywhere: PX4's NED and FRD
+already match ADR-0002, and a record in FLU stays in FLU and says so. There is no smoothing,
+no interpolation on demand and no gap repair, by design.
+
+### WP4 — identification, 2026-09-10
+
+`identify.static_fit`, `identify.greybox` and `identify.validate` register as
+implemented-unvalidated, with `model.quadrotor.export` beside them, and
+`examples/quadrotor-identification/` runs the whole path through public capabilities.
+
+**The grey box is grey.** `identify.greybox` fits a DECLARED subset of `model::Quadrotor`'s
+parameters by simulating that same plant through the same `Quadrotor::derivative` and
+`numerics::integrate_fixed_step` pair `sim.plant` uses, so a fit and a simulation cannot
+disagree about what the model does. A parameter the study did not name is held at the value the
+model file gave it, and the exported provenance lists every such parameter BY NAME so that
+"unfitted parameters are preserved" is a checkable statement rather than a promise.
+
+**Three things kept apart, because ADR-0008 requires them to be separable.** The optimiser
+finished; the parameters are identifiable; the fit is acceptable. The first is nearly
+worthless on its own — the iteration count is declared, so it is true even of a run that moved
+nothing — which is why `objective_improved` and `accepted_steps` are reported beside it and
+carried in the headline. The second is a REFUSAL: a parameter direction the Jacobian cannot see
+is a parameter this record did not measure, and the run stops rather than reporting where the
+optimiser happened to stop. The third is not made here and is not implied.
+
+**ADR-0018 records the fitted-model artefact decision**, which the request did not anticipate
+and without which the fit produced numbers nothing downstream could consume. A fit emits the
+same `quadrotor` artefact kind `model.quadrotor` emits, so `trim.hover`, `linearize.extended`
+and `sim.plant` take it with no adapter and no special case; `model.quadrotor.export` writes it
+as a model file the loader reads back, with a required evidence file carrying the base-model
+identity, the estimation-record identity, every fitted parameter with its unit, bounds and
+standard error, the objective in words, and the optimiser diagnostics. The base model is never
+rewritten, and that is enforced by the executor rather than promised by the capability: the
+model file is a recorded run input and `RunFiles::check_input_collision` refuses any output
+that would overwrite one.
+
+**A DEFECT IN THE FIRST HELD-OUT SEMANTICS, FOUND AND CORRECTED HERE.** The first version of
+`identify.validate` set a boolean `is_held_out` to `validation_digest != estimation_digest`.
+The negative half of that is sound — the same bytes are the same observations — and the
+positive half is not, because a digest identifies BYTES and held-out is a claim about DATA. A
+file reformatted, exported twice, or written to a different number of decimal places has a
+different digest and the same observations in it; a segment copied between two files shares
+every sample it copied; two exports of one flight at two sample rates describe the same seconds
+of the same aircraft. Every one of those would have passed as validation, and each is a model
+being scored on its own training data under a label saying otherwise.
+
+Independence is now classified, and the classification says on what grounds.
+`VerifiedDisjoint` is reserved for the one case this code can prove — two windows of ONE
+imported file over intervals that do not meet, which is why `data.window` exists — and is
+confirmed by scanning the shared channels for a sample instant occurring in both.
+`CallerDeclared` is what an honest study gets when it knows two files are different flights and
+galata cannot check that: recorded as the caller's claim, in the caller's name, and downgraded
+the moment a check contradicts it. `Unknown` is what silence gets. `NotHeldOut` beats every
+positive branch, so a caller cannot declare away a proof of overlap. And `identify.validate`
+now reads the estimation record's identity out of the fitted model's own provenance rather than
+off a string the study typed, refusing a study that contradicts it, and refusing a record wired
+in as the training data whose lineage is not the lineage the fit recorded — which a digest
+comparison could not have caught, since a window keeps its parent's digest.
+
+**Acceptance, by test name.** `unit`: `StaticFit.*`, `Greybox.*`, `Validate.*` and
+`Independence.*` — the last being the eight cases the old boolean could not have had, each one
+a pair of records whose digest comparison gives the wrong answer. `QuadrotorSerialisation.*`
+holds the model file round trip bit for bit, and `RecordWindow.*` the half-open interval and
+the surviving source identity. `integration`: `IdentifyWorkflow.*` holds the strict schemas,
+the durable export, the refused overwrite of the source model and the provenance-driven
+identity; `ExampleQuadrotorIdentification.*` runs the shipped example and compares the
+recovered parameters against the committed truth model. `determinism`:
+`Determinism.AGreyboxFitIsBitIdenticalAcrossRuns` holds ADR-0004 tier 1 over the longest
+floating-point chain in the tree, and over the exported bytes as well as the parameters.
+
+**What WP4 does not deliver, stated plainly.** The synthetic self-test is noiseless to
+round-off, so it demonstrates that the machinery recovers a parameter it can SEE and nothing
+about behaviour against a sensor. No record here was measured; no bench produced any
+coefficient; there is no aircraft. The reported standard errors on that record are correct and
+useless in magnitude — they say the record demonstrates no scatter. The request's ULog topic
+list is imported but no PX4 log from the built aircraft exists to import, so the physical
+half of WP3's and WP4's verification is outstanding and is blocked on hardware rather than on
+software.
+
+**One gate was silently skipping this whole vertical.** `scripts/check-si-boundary.sh` listed
+`src/ident` and `include/galata/ident` among the numerical-core directories; the code landed at
+`src/identify` and `include/galata/identify`, so the gate reported them as "not yet present,
+skipped" while they existed, and passed. The list now names the real directories. A gate that
+skips is not a gate that passes, and this one said so in its own output without anybody reading
+it.
+
+### WP5 — sampled control and time-varying inputs, 2026-09-10
+
+`sim.plant`, `sim.sampled` and the declared input histories register as
+implemented-unvalidated, under vehicle-neutral names as the acceptance section decided, with
+the quadrotor as the case that had to pass.
+
+**`sim.plant` closed a gap the audit called the most basic one.** Before it, the nonlinear
+multirotor was reachable only from C++: this repository could integrate a quadrotor in its own
+tests and a user could not integrate one at all. `sim.nonlinear` is the fixed-wing path — it
+takes a `trim.level` point and actuators named elevator, aileron, rudder and thrust — and is
+untouched.
+
+**Declared input histories, for both the linear and the nonlinear path.** A command or wind
+history is a declared sample list with a stated hold and a stated extrapolation rule, and the
+recorded trajectory carries the command and wind AT EACH SAMPLE rather than the constants the
+run was configured with, because a schedule makes those constants a half-truth. A discontinuity
+strictly inside an integration step is refused rather than rounded to the nearest step, which
+would move the event and say nothing about having done so.
+
+**`sim.sampled` executes a state-feedback law at a declared rate**, with zero-order hold, a
+whole number of periods of delay, and per-rotor saturation, feeding back on the attitude-error
+chart coordinates ADR-0017 made publicly invertible. Requested and applied commands are both
+recorded: a run reported only through its applied commands hides a controller that spent the
+whole run against its limits, and one reported only through its requested commands describes a
+vehicle that was never flown. A controller period that is not a whole number of integration
+steps is refused rather than rounded, because unlike a wind step it cannot be split around —
+the tick is where the command is DEFINED to change.
+
+**Acceptance, by test name.** `unit`: `InputSchedule.*` and `ChartMapping.*`. `integration`:
+`QuadrotorWorkflow.*` re-derives the sampled logic — the law, the saturation and the delay line
+— from the states the run recorded, so a loop that sampled at the wrong instant or shifted its
+delay by one tick fails there rather than passing on a plausible trajectory;
+`ExampleQuadrotorSampledControl.*` runs the shipped example and requires the closed loop to
+remove at least nine tenths of the displacement it was started from.
+
+**What WP5 does not deliver.** The controllability and observability Gramians the companion
+paragraph asked for are NOT implemented; an exported model's defective integrator chains and
+any unobservable direction are still discovered from a failed synthesis rather than reported in
+advance. `c2d`-style discretisation of a continuous design and a sampled DARE are also absent:
+`sim.sampled` executes a continuously-designed law at a discrete rate, which is the honest
+description of what it does and is not the same thing as designing in discrete time. And the
+sampled loop's own robustness is unanswered — gain, phase and disk margins here describe the
+continuous loop, and no capability computes the sampled loop's margins. Per
+`docs/product/FEATURES.md`, this implements the proposed work of F14 and part of F17 and
+delivers neither row; both stay open.

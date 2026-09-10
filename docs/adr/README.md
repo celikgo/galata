@@ -25,3 +25,4 @@ The format is in [0000-template.md](0000-template.md).
 | [0015](0015-supported-platforms.md) | Supported platforms are Linux and macOS | accepted |
 | [0016](0016-ulog-import-by-in-repo-parser.md) | PX4 ULog is imported by an in-repo parser, not a dependency | accepted |
 | [0017](0017-attitude-error-chart-has-a-public-inverse.md) | The attitude-error chart has a public inverse | accepted |
+| [0018](0018-fitted-models-are-derived-plants.md) | A fitted model is a derived plant with its own identity, never an edit to its source | accepted |

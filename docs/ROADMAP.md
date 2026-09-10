@@ -75,7 +75,7 @@ reference data and acceptance criteria before it becomes a release commitment.
 | Aircraft fidelity | Additional independently validated conditions and aircraft, scheduled aerodynamic data, propulsion and configuration models, quantified model uncertainty |
 | Control design | Discrete-time control, sensors and estimators, explicit delay models, constrained synthesis, gain scheduling and robust-design methods |
 | Assessment | Handling-quality criteria, root locus, uncertainty campaigns and application-specific acceptance reports |
-| Simulation and identification | Disturbances, measured-data identification, sampled control execution, SITL/HIL interfaces and independently measured hardware responses |
+| Simulation and identification | Independently measured hardware responses, SITL/HIL interfaces, controllability and observability Gramians, discrete-time synthesis (`c2d`, sampled DARE) and the sampled loop's own robustness margins. Measured-data import, grey-box identification, held-out validation, declared input histories and sampled control execution are implemented and UNVALIDATED — RFC-0002's WP3 to WP5 records say what each does not establish, and no capability in this row has been checked against a real aircraft |
 | User interface | Desktop shell, interactive plots and pipeline editor, engineering 3-D visualisation, platform installers |
 | Extensions and automation | Stable C plugin ABI, aerodynamic/sensor extension contracts, AI and MCP interfaces with separate execution controls and evaluations |
 
