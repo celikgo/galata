@@ -29,6 +29,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -830,6 +831,76 @@ TEST_F(QuadrotorWorkflow, SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefus
   const Artifact* disk = result.find("disk0");
   ASSERT_NE(disk, nullptr);
   EXPECT_NE(disk->summary.find("alpha"), std::string::npos) << disk->summary;
+}
+
+// THE SAMPLED IMPLEMENTATION'S DELAY IS A CONSTRAINT ON THE DESIGN, AND IT BINDS.
+//
+// `sim.sampled` applies a whole-period transport delay plus a zero-order hold.
+// The continuous loop has a DELAY MARGIN, which `analyze.margins` reports, and
+// that is the one continuous-domain figure speaking directly to whether a
+// sampled implementation's delay is defensible: a transport delay EXCEEDING it
+// condemns the design outright, whatever the trajectory looks like.
+//
+// It is NOT a sampled-loop margin and nothing here treats it as one. A
+// zero-order hold is not a pure delay — it also reshapes the loop between ticks
+// — so being inside the continuous delay margin is NECESSARY and not
+// SUFFICIENT. What this test establishes is that the necessary condition has
+// teeth: a faster design on the same plant at the same sample rate runs out of
+// it. Without this half, the shipped example's comfortable margin would be
+// indistinguishable from a condition nothing could fail.
+TEST_F(QuadrotorWorkflow, AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate) {
+  // Unit state weights and the same control weight the shipped study uses. That
+  // penalises the rotor-speed states as hard as position, which the shipped
+  // study deliberately does not — it weights them at a thousandth — and the
+  // result is a much faster loop.
+  const RunResult result =
+      run(chain()
+              + "  - id: rotors\n    capability: model.channels\n    input:\n"
+                "      system: {from: linear}\n"
+                "      inputs: [omega_command_0, omega_command_1, omega_command_2, "
+                "omega_command_3]\n"
+                "      outputs: [position_north_m, position_east_m, altitude_m]\n"
+              + "  - id: lqr\n    capability: synth.lqr\n    input: "
+                "{system: {from: rotors}, break_at: plant_input, q: "
+              + identity_weight(16, 1.0) + ", r: " + identity_weight(4, 0.02) + "}\n",
+          {.overwrite = true, .write_manifest = false});
+  const Artifact* law_stage = result.find("lqr");
+  ASSERT_NE(law_stage, nullptr);
+  const auto& law = law_stage->payload_as<galata::synth::LqrDesign>("control_law");
+
+  // The equivalent lag the shipped sampled study applies: two controller periods
+  // of transport delay at 250 Hz, plus about half a period for the hold. The
+  // hold's contribution is counted rather than dropped, because leaving it out
+  // would flatter the comparison.
+  const double controller_period_s = 0.004;
+  const double equivalent_lag_s = 2.0 * controller_period_s + 0.5 * controller_period_s;
+  RecordProperty("equivalent_lag_s", std::to_string(equivalent_lag_s));
+
+  double smallest = std::numeric_limits<double>::infinity();
+  for (int channel = 0; channel < law.plant.input_count(); ++channel) {
+    const galata::model::LinearSystem loop = galata::synth::single_loop_others_closed(law, channel);
+    const galata::analyze::StabilityMargins margins =
+        galata::analyze::stability_margins(loop, 0, 0, {});
+    ASSERT_TRUE(margins.has_delay_margin)
+        << law.plant.input_names[static_cast<std::size_t>(channel)]
+        << ": no delay margin was found, so this test bounds nothing";
+    RecordProperty(law.plant.input_names[static_cast<std::size_t>(channel)] + "_delay_margin_s",
+                   std::to_string(margins.delay_margin_s));
+    smallest = std::fmin(smallest, margins.delay_margin_s);
+  }
+  RecordProperty("smallest_delay_margin_s", std::to_string(smallest));
+
+  // The finding this test exists to pin: this design's worst channel tolerates
+  // LESS delay than the sampled implementation applies. It is not a defect in
+  // the plant or in `sim.sampled` — it is what unit state weights buy on this
+  // vehicle — and it is the reason the shipped study's weights are declared in
+  // its own file rather than defaulted.
+  EXPECT_LT(smallest, equivalent_lag_s)
+      << "a unit-weighted design on this plant is expected to run out of delay margin at "
+         "250 Hz with two periods of delay. If it no longer does, the shipped example's "
+         "comfortable margin has stopped being evidence of anything, because the condition "
+         "would then be one nothing can fail; find a faster design or delete this test and "
+         "say why";
 }
 
 // A channel the plant does not have is refused by name, with the vocabulary

@@ -8,10 +8,12 @@
 // its failure is the first thing they learn about the project.
 
 #include "galata/analyze/gramians.hpp"
+#include "galata/analyze/margins.hpp"
 #include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/synth/control.hpp"
 
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
@@ -474,6 +476,39 @@ TEST(ExampleQuadrotorIdentification, LabelsTheHeldOutWindowAndTheTrainingWindowD
   ASSERT_NE(fitted.identity.fit, nullptr);
   EXPECT_EQ(held_out.result.estimation_record_sha256,
             fitted.identity.fit->estimation_record_sha256);
+}
+
+// The other half of the delay argument, on the SHIPPED study rather than on a
+// throwaway design. `QuadrotorWorkflow.AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate`
+// shows the condition can fail; this shows this study passes it, with room.
+TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousDelayMargin) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  const galata::pipeline::Artifact* law_stage = result.find("lqr");
+  ASSERT_NE(law_stage, nullptr);
+  const auto& law = law_stage->payload_as<galata::synth::LqrDesign>("control_law");
+
+  // What the study declares, restated here rather than parsed out of it: a study
+  // that quietly raised its delay must fail this instead of moving the
+  // reference alongside itself.
+  const double controller_period_s = 0.004;
+  const double equivalent_lag_s = 2.0 * controller_period_s + 0.5 * controller_period_s;
+  // The budget, fixed before the numbers are read. Five, because the necessary
+  // condition alone is weak — a zero-order hold is not a pure delay — and
+  // because a factor nothing could fail is not a gate.
+  constexpr double kRequiredFactor = 5.0;
+
+  for (int channel = 0; channel < law.plant.input_count(); ++channel) {
+    const galata::model::LinearSystem loop = galata::synth::single_loop_others_closed(law, channel);
+    const auto margins = galata::analyze::stability_margins(loop, 0, 0, {});
+    const std::string& name = law.plant.input_names[static_cast<std::size_t>(channel)];
+    ASSERT_TRUE(margins.has_delay_margin) << name;
+    EXPECT_GT(margins.delay_margin_s, kRequiredFactor * equivalent_lag_s)
+        << name << ": the continuous loop tolerates " << margins.delay_margin_s
+        << " s of delay and the sampled implementation applies an equivalent lag of "
+        << equivalent_lag_s
+        << " s. This is a NECESSARY condition for the sampled loop and not a sufficient one, "
+           "but a design outside it should not be shipped as an example";
+  }
 }
 
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {

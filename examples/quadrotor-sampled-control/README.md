@@ -69,6 +69,22 @@ can be generous while a small perturbation applied to two channels at once
 destabilises the loop. `analyze.diskmargin` is in the study for that reason, and
 neither figure says anything about the sampled loop.
 
+**One continuous figure does bear on the sampled implementation: the delay
+margin.** The loop executes at 250 Hz with two periods of transport delay, and
+the hold adds about half a period more. A design whose continuous delay margin
+was *smaller* than that equivalent lag would be condemned outright, whatever its
+trajectory looked like. This study's four channels are comfortably clear of it —
+and that is not automatic. A design on the same plant at the same rate with unit
+state weights, penalising the rotor-speed states as hard as position, runs
+*out* of delay margin; this study weights those states at a thousandth, which is
+one of the reasons its weights are declared in `study.yaml` rather than
+defaulted.
+
+Being inside the continuous delay margin is **necessary and not sufficient**. A
+zero-order hold is not a pure delay — it also reshapes the loop between ticks —
+so clearing the margin does not establish the sampled loop's robustness, and
+nothing here claims it does.
+
 **The trim is a real equilibrium of a vehicle whose rotors differ.** Four
 different thrust coefficients mean four different equilibrium speeds and no
 vehicle-wide hover speed to seed the solve from; `trim.hover` seeds per rotor
@@ -122,7 +138,16 @@ is a statement about the sampled loop.
 holds both halves of the margin argument — the other-loops-open reading refused
 with its cause named, and the loop-at-a-time reading yielding a margin — and
 `Gramians.*` in the `unit` tier holds the Gramian arithmetic against closed
-forms rather than against a previous run. The sampled logic itself — the law,
+forms rather than against a previous run.
+
+The delay relationship is held by a pair, because one half alone would prove
+nothing.
+`ExampleQuadrotorSampledControl.TheTransportDelayIsWellInsideTheContinuousDelayMargin`
+requires this study's four channels to clear the equivalent lag by a factor of
+five, and
+`QuadrotorWorkflow.AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate`
+requires a unit-weighted design on the same plant to fail it — so that clearing
+the condition stays evidence rather than becoming something nothing can fail. The sampled logic itself — the law,
 the saturation and the delay line — is re-derived independently from the
 recorded states by `QuadrotorWorkflow` in the same tier, so a loop that sampled
 at the wrong instant or shifted its delay by one tick fails there rather than

@@ -192,6 +192,29 @@ trigger is deleted. It is a gate that inspects the workflow file it runs from, w
 place because the regression it catches has no other symptom: every other gate here fails by
 going red, and this one's failure mode is a tick column that is simply empty.
 
+### Per-item CI runs
+
+Durable references. A run URL outlives the branch it tested, which a commit SHA on a
+squash-merged branch does not — see the note on citing commits in `CONTRIBUTING.md`. The seven
+items absent from this table have no hosted run of their own to cite; the integration pull
+request's run is the only hosted evidence covering their code.
+
+| # | PR | Head tested | Result | Run |
+|---|---|---|---|---|
+| 1 | #18 | `0eb3755` | 11 of 11 | [34452200072](https://github.com/celikgo/galata/actions/runs/34452200072) |
+| 2 | #19 | `8dc8aaf` | 11 of 11 | [34453772771](https://github.com/celikgo/galata/actions/runs/34453772771) |
+| 3 | #20 | `72ab99a` | 11 of 11 | [34459197530](https://github.com/celikgo/galata/actions/runs/34459197530) |
+| 4 | #22 | `275dcc8` | 11 of 11 | [34462187161](https://github.com/celikgo/galata/actions/runs/34462187161) |
+| 6 | #24 (ADR only) | `bda5fa7` | 11 of 11 | [34465297923](https://github.com/celikgo/galata/actions/runs/34465297923) |
+| 8 | #27 | `5e50f22` | 11 of 11 | [34469244732](https://github.com/celikgo/galata/actions/runs/34469244732) |
+| 9 | #28 | `48f131b` | 11 of 11 | [34471404322](https://github.com/celikgo/galata/actions/runs/34471404322) |
+| 10 | #21 (ADR only) | `ea0299f` | 11 of 11 | [34459437564](https://github.com/celikgo/galata/actions/runs/34459437564) |
+
+The integration pull request's own runs are on [#33](https://github.com/celikgo/galata/pull/33).
+Note that its `concurrency` group cancels a run when a newer commit arrives, so only the run
+against the final head is meaningful; an earlier head's partial result is not evidence about
+the head that superseded it.
+
 ### Per-item local evidence
 
 | # | Gtest suites (tier) | Outstanding limitation |
@@ -366,6 +389,7 @@ broader roadmap work outside it.
 | Controllability and observability analysis for a declared input and output set, so an exported model's defective integrator chains and any unobservable direction are reported rather than discovered from a failed synthesis | `analyze.gramians`, in the registry. Reports the reachable and observable subspace ranks with a declared relative tolerance, the directions that fall outside them by state name, and finite-horizon Gramians over a declared horizon. It **refuses** to report an infinite-horizon Gramian for a plant whose spectrum is not strictly stable, which the hover linearisation's six integrator eigenvalues make the ordinary case rather than the exception. |
 | Usable frequency-domain margin analysis on the hover-linearised multirotor | `model.control_system` gains `use: single_loop` with a required `channel`, building the loop seen at one plant input with the other loops still **closed**. `analyze.margins`, `analyze.diskmargin` and `analyze.sensitivity` all work on it. The previously-recorded refusal was correct and nothing in the stability check was relaxed: breaking one channel of the MIMO return ratio leaves the other three *open*, that closure genuinely is not internally stable, and its Nyquist encirclement count means nothing. What was missing was the other reading, not a looser gate. |
 | A statement of what the sampled controller workflow's margins are **not** | `sim.sampled`'s header, its capability summary and its report section all record that gain, phase and disk margins computed from the continuous linearisation describe the continuous loop, and that the sampled loop's own robustness is a separate question no capability here answers. No claim of sampled-loop robustness is made anywhere from a continuous-time margin. |
+| The one continuous figure that **does** bear on the sampled implementation: the delay margin | Held by a pair of tests, because one alone would prove nothing. `ExampleQuadrotorSampledControl.TheTransportDelayIsWellInsideTheContinuousDelayMargin` requires the shipped study's four channels to clear the equivalent lag — two periods of transport delay plus about half a period for the hold — by a factor of five. `QuadrotorWorkflow.AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate` requires a unit-weighted design on the same plant at the same rate to **fail** it. Being inside the continuous delay margin is **necessary and not sufficient**: a zero-order hold is not a pure delay, so clearing it does not establish the sampled loop's robustness. A design outside it would be condemned outright, which is what makes the comparison worth making. |
 
 ### Out of scope: F14 / F17 roadmap work
 
