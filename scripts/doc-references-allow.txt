@@ -18,3 +18,4 @@ include/galata-c/                             # ADR-0001 describes the plugin C 
 scripts/check-frozen-headers.sh               # ADR-0001's proposed ABI-freeze gate, to arrive with the ABI
 src/synth/                                    # RFC-0001 and the roadmap; RFC-0001 explicitly forbids code there until its open questions are answered
 tests/validation/reference/carex1995_care.csv # RFC-0001's proposed CAREX reference file, whose rights position is one of the RFC's open questions
+src/data/ulog/                                # ADR-0016's proposed location for the ULog parser; the decision precedes the code, and the ADR says so
