@@ -196,4 +196,45 @@ double angular_distance(const Quaternion& a, const Quaternion& b) noexcept {
   return 2.0 * std::atan2(vector_norm, std::fabs(relative.w()));
 }
 
+namespace {
+
+// Below this vector-part norm the closed form's division becomes the dominant
+// error and the series is used instead. 1e-7 corresponds to a rotation of about
+// 4e-7 rad; the series' first neglected term there is of order 1e-21 relative,
+// far under round-off, and the closed form is still healthy well above it — the
+// threshold sits in the overlap where both are accurate rather than at the edge
+// of either.
+constexpr double kSmallVectorNorm = 1e-7;
+
+}  // namespace
+
+Quaternion quaternion_from_rotation_vector(const Eigen::Vector3d& rotation_rad) {
+  const double angle = rotation_rad.norm();
+  if (!(angle > 0.0)) {
+    return {1.0, 0.0, 0.0, 0.0};
+  }
+  const Eigen::Vector3d axis = rotation_rad / angle;
+  const double half = 0.5 * angle;
+  const double sine = std::sin(half);
+  return normalised(Quaternion(std::cos(half), axis.x() * sine, axis.y() * sine, axis.z() * sine));
+}
+
+Eigen::Vector3d rotation_vector_from_quaternion(const Quaternion& q) {
+  // Canonical first: q and -q are one attitude, and taking the logarithm of the
+  // wrong representative returns the long way round.
+  const Quaternion unit = canonical(normalised(q));
+  const Eigen::Vector3d vector(unit.x(), unit.y(), unit.z());
+  const double vector_norm = vector.norm();
+  if (vector_norm < kSmallVectorNorm) {
+    // atan2(n, w) / n -> 1/w as n -> 0. One correction term is kept so the
+    // series and the closed form agree across the threshold rather than meeting
+    // with a step in between.
+    const double w = unit.w();
+    const double ratio = (1.0 / w) * (1.0 - (vector_norm * vector_norm) / (3.0 * w * w));
+    return 2.0 * ratio * vector;
+  }
+  const double angle = 2.0 * std::atan2(vector_norm, unit.w());
+  return (angle / vector_norm) * vector;
+}
+
 }  // namespace galata::core

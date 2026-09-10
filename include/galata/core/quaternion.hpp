@@ -112,6 +112,38 @@ struct EulerAngles {
 // Requires a and b to be unit quaternions.
 [[nodiscard]] double angular_distance(const Quaternion& a, const Quaternion& b) noexcept;
 
+// The exponential map: the attitude perturbation exp(e/2) written as a
+// quaternion, where `e` is a rotation vector — an axis scaled by an angle in
+// radians. The half-angle is the quaternion's, because a quaternion rotates by
+// twice its own angle.
+//
+// This is the `delta` that `linearize::extended_from_chart` composes onto a
+// reference attitude, and it is here rather than beside its one caller because
+// its inverse below has to agree with it exactly, and two functions that must
+// agree belong in one place.
+[[nodiscard]] Quaternion quaternion_from_rotation_vector(const Eigen::Vector3d& rotation_rad);
+
+// The logarithm: the rotation vector `e` for which
+// `quaternion_from_rotation_vector(e)` reproduces `q`.
+//
+// TWO THINGS THIS HAS TO GET RIGHT, both of which are silent when wrong.
+//
+// THE DOUBLE COVER. q and -q are the same attitude and their naive logarithms
+// differ by a full turn. The input is canonicalised first, so the result is
+// always the SHORT way round — |e| <= pi. Without that a controller that
+// crossed a sign boundary would command a rotation the long way at full
+// authority, having been told the error had suddenly grown by 2 pi.
+//
+// THE SMALL-ANGLE LIMIT. The closed form divides by the vector part's norm,
+// which vanishes at zero rotation — exactly where a controller spends its time.
+// Below a declared threshold a series is used instead. The threshold is a
+// stated constant, not whichever value happened to be numerically quiet.
+//
+// Round-trips with the exponential to a bound the tests state, at the identity,
+// across the series boundary, and up to a half turn where the parameterisation
+// itself stops being unique.
+[[nodiscard]] Eigen::Vector3d rotation_vector_from_quaternion(const Quaternion& q);
+
 }  // namespace galata::core
 
 #endif  // GALATA_CORE_QUATERNION_HPP
