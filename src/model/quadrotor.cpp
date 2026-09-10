@@ -348,6 +348,20 @@ double Quadrotor::hover_speed_rad_s(double gravity_m_s2) const {
                    / (static_cast<double>(rotor_count()) * coefficient));
 }
 
+double Quadrotor::hover_speed_rad_s(int rotor_index, double gravity_m_s2) const {
+  if (rotor_index < 0 || rotor_index >= rotor_count()) {
+    throw std::invalid_argument("quadrotor: rotor index out of range");
+  }
+  const double coefficient = rotors[static_cast<std::size_t>(rotor_index)].thrust_coefficient_n_s2;
+  if (!(coefficient > 0.0)) {
+    throw std::invalid_argument("quadrotor: hover requires a positive thrust coefficient");
+  }
+  // Deliberately the same expression as the whole-vehicle form, in the same
+  // order, so a homogeneous model produces bit-identical numbers here.
+  return std::sqrt(mass.mass_kg * gravity_m_s2
+                   / (static_cast<double>(rotor_count()) * coefficient));
+}
+
 void Quadrotor::project(Eigen::VectorXd& extended_state) const {
   core::State state = core::State::from_vector(extended_state.head<core::kStateSize>());
   state.renormalise_attitude();

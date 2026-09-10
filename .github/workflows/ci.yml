@@ -194,6 +194,13 @@ jobs:
           "build/${{ matrix.preset }}/src/cli/galata" run \
             examples/nt33a-lateral-modes/modal-study.yaml --output-dir "$RUNNER_TEMP"
           test -s "$RUNNER_TEMP/lateral-modes.md"
+          # The multirotor path, whose starting point differs from the fixed-wing
+          # one: four rotors with four different thrust coefficients.
+          "build/${{ matrix.preset }}/src/cli/galata" run \
+            examples/quadrotor-heterogeneous-rotors/study.yaml \
+            --output-dir "$RUNNER_TEMP/hetero"
+          test -s "$RUNNER_TEMP/hetero/heterogeneous-hover.md"
+          test -s "$RUNNER_TEMP/hetero/operating-point.yaml"
 
   # Charter gates. Seconds, not minutes — a PR that violates one should hear
   # about it before the compilers have finished warming up. Each step maps to a
