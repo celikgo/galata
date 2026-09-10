@@ -286,7 +286,6 @@ TEST_F(QuadrotorWorkflow, TheSeventeenStateBatteryVariantLowersThroughTheTypedGr
   EXPECT_EQ(graph.state_ids.size(), 17u);
 }
 
-<<<<<<< HEAD
 // A conjugate pair is one mode, so a sixteen-state model that oscillates
 // reports fewer modes than it has states. That is the intended convention —
 // src/analyze/modes.cpp consumes the partner deliberately — but a bare "12
@@ -310,7 +309,8 @@ TEST_F(QuadrotorWorkflow, TheModeCountReconcilesItselfWithTheStateCount) {
       << "a count that already equals the state count must not be padded with the "
          "reconciliation: "
       << modes->summary;
-=======
+}
+
 // --- sim.plant -------------------------------------------------------------
 //
 // The nonlinear multirotor, integrated through a PUBLIC capability. Before this
@@ -698,7 +698,6 @@ TEST_F(QuadrotorWorkflow, UnsupportedSampledTimingIsRefused) {
                                        "      delay_periods: 1.5\n"),
                          {.overwrite = true, .write_manifest = false}),
                std::runtime_error);
->>>>>>> feat/sampled-control
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {
