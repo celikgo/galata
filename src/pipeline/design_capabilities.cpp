@@ -443,8 +443,42 @@ Artifact csv(const StageContext& context) {
       }
       out << '\n';
     }
+  } else if (source.kind == "plant_trajectory") {
+    // The columns are the model's, so they are read from the run rather than
+    // written down here: a six-rotor vehicle and a four-rotor one with a battery
+    // have different widths, and a fixed header would be wrong for both.
+    const auto& run = source.payload_as<PlantRun>("plant_trajectory");
+    out << "time_s";
+    for (const auto& name : run.state_names) {
+      out << ',' << csv_label("state:" + name);
+    }
+    for (Eigen::Index j = 0; j < run.command_rad_s.size(); ++j) {
+      out << ',' << csv_label("command:omega_command_" + std::to_string(j) + "_rad_s");
+    }
+    out << ',' << csv_label("wind:north_m_s") << ',' << csv_label("wind:east_m_s") << ','
+        << csv_label("wind:down_m_s") << '\n';
+    for (std::size_t i = 0; i < run.trajectory.states.size(); ++i) {
+      out << run.trajectory.times_s[i];
+      const auto& x = run.trajectory.states[i];
+      for (Eigen::Index j = 0; j < x.size(); ++j) {
+        out << ',' << x(j);
+      }
+      // The command and the wind are constant over this run and are repeated on
+      // every row rather than left to a header comment, so one file is one
+      // complete record of what was integrated. `sim.linear` writes its constant
+      // input into the outputs for the same reason.
+      // Per sample, because a declared history makes the configured constant a
+      // half-truth: a reader who combines the recorded air-relative velocity
+      // with the wrong wind reconstructs a ground velocity that never happened.
+      const Eigen::VectorXd& command_now = run.command_samples_rad_s[i];
+      const Eigen::Vector3d& wind_now = run.wind_samples_ned_m_s[i];
+      for (Eigen::Index j = 0; j < command_now.size(); ++j) {
+        out << ',' << command_now(j);
+      }
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
+    }
   } else {
-    throw std::invalid_argument("report.csv requires a linear or nonlinear trajectory");
+    throw std::invalid_argument("report.csv requires a linear, nonlinear or plant trajectory");
   }
   const auto path = context.input->string_at("path");
   context.write_output(path, out.str());
