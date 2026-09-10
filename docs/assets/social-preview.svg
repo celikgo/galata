@@ -127,5 +127,5 @@
 <rect x="944" y="479" width="4" height="56" fill="#5BC8F5"/>
 <text class="s" x="960.0" y="497.0" fill="#E6EDF3" font-size="14" font-weight="600" text-anchor="start">C++20  ·  strict SI</text>
 <text class="s" x="960.0" y="517.0" fill="#93A1AF" font-size="13.5" font-weight="500" text-anchor="start">deterministic  ·  Apache-2.0</text>
-<text class="s" x="64.0" y="628.0" fill="#5E6B78" font-size="13" font-weight="400" text-anchor="start">s-plane, units of 1/s  ·  NT-33A at sea level, M = 0.204, trimmed to 2.15° alpha  ·  poles as computed by galata 0.2.0</text>
+<text class="s" x="64.0" y="628.0" fill="#5E6B78" font-size="13" font-weight="400" text-anchor="start">s-plane, units of 1/s  ·  NT-33A at sea level, M = 0.204, trimmed to 2.15° alpha  ·  poles as computed by galata 0.3.0</text>
 </svg>

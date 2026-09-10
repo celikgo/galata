@@ -166,6 +166,17 @@ jobs:
         shell: bash
         run: scripts/gen-modal-map.sh "build/${{ matrix.preset }}/tools/social/galata-modal-map" --check
 
+      # The card itself, not just the numbers behind it. modal-map.json was
+      # gated from the start and the picture drawn from it was not, so the
+      # version caption sat at 0.2.0 from 1b403cf until this step existed while
+      # every job stayed green. Only the SVG is compared: it is deterministic
+      # text, it needs no librsvg, and the PNG is a rasterisation of it that
+      # would gate on the runner's renderer rather than on galata.
+      - name: The social preview card matches its run
+        if: matrix.name == 'linux-gcc'
+        shell: bash
+        run: python3 scripts/gen-social-preview.py --check
+
       # The NT-33A report page is drawn from a run too, and more is at stake
       # than with the card: it is the artefact an engineer would actually read,
       # and a page that has drifted from the code still looks like evidence.
