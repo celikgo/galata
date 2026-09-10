@@ -94,8 +94,7 @@ void require_detectable(const Eigen::MatrixXd& abar,
     Eigen::JacobiSVD<Eigen::MatrixXcd> rank(pbh);
     if (rank.info() != Eigen::Success
         || rank.singularValues()(count - 1)
-               <= 128.0 * kEps * static_cast<double>(count)
-                      * std::max(root_scale, state_scale)) {
+               <= 128.0 * kEps * static_cast<double>(count) * std::max(root_scale, state_scale)) {
       throw std::invalid_argument(
           "solve_dare: a mode on or outside the unit circle is unpenalised, so the "
           "stabilising solution is numerically unresolved; penalise the nonstable modes "
@@ -169,7 +168,8 @@ DareSolution solve_dare(const Eigen::MatrixXd& a,
   // Abar is refused by name rather than answered badly.
   const Eigen::FullPivLU<Eigen::MatrixXd> transition(abar.transpose());
   Eigen::JacobiSVD<Eigen::MatrixXd> transition_svd(abar);
-  if (transition_svd.info() != Eigen::Success || transition_svd.singularValues()(states - 1) <= 0.0) {
+  if (transition_svd.info() != Eigen::Success
+      || transition_svd.singularValues()(states - 1) <= 0.0) {
     throw std::runtime_error("solve_dare: state transition singular value decomposition failed");
   }
   result.transition_condition =
@@ -274,8 +274,7 @@ DareSolution solve_dare(const Eigen::MatrixXd& a,
   const double denominator =
       std::max(std::numeric_limits<double>::min(),
                result.x.norm() + transported.norm() + q.norm() + quadratic.norm());
-  result.relative_residual =
-      (result.x - transported - q + quadratic).norm() / denominator;
+  result.relative_residual = (result.x - transported - q + quadratic).norm() / denominator;
   // The same cap the continuous solver applies: poor conditioning must not buy
   // an arbitrarily weak gate, and no caller option can relax it.
   result.residual_budget = std::min(1e-8, roundoff);
@@ -424,16 +423,19 @@ SampledLqrDesign design_sampled_lqr(const model::LinearSystem& plant,
   // under the same declared hold, and only then is the discrete problem solved.
   design.discretisation = model::discretize_zoh(plant, sample_time_s);
   design.cost = discretize_cost(plant, q, r, design.continuous_n, sample_time_s);
-  design.riccati = solve_dare(design.discretisation.system.a, design.discretisation.system.b,
-                              design.cost.q, design.cost.r, design.cost.n);
+  design.riccati = solve_dare(design.discretisation.system.a,
+                              design.discretisation.system.b,
+                              design.cost.q,
+                              design.cost.r,
+                              design.cost.n);
 
   design.closed_loop = design.discretisation.system;
   design.closed_loop.a =
       design.discretisation.system.a - design.discretisation.system.b * design.riccati.k;
   design.closed_loop.b = Eigen::MatrixXd::Zero(plant.state_count(), plant.input_count());
-  design.closed_loop.description =
-      plant.description.empty() ? std::string("Sampled closed loop")
-                                : plant.description + " — sampled closed loop";
+  design.closed_loop.description = plant.description.empty()
+                                       ? std::string("Sampled closed loop")
+                                       : plant.description + " — sampled closed loop";
   design.closed_loop.validate();
   return design;
 }

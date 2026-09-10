@@ -33,19 +33,18 @@
 
 #include "galata/synth/discrete_control.hpp"
 
-#include <gtest/gtest.h>
-
 #include <Eigen/Dense>
+#include <gtest/gtest.h>
 
 #include <cmath>
 #include <stdexcept>
 
 namespace {
 
+using galata::model::LinearSystem;
 using galata::synth::design_sampled_lqr;
 using galata::synth::discretize_cost;
 using galata::synth::solve_dare;
-using galata::model::LinearSystem;
 
 // THE INDEPENDENT SOLVER. Riccati value iteration: X <- A'XA + Q - (A'XB + N)
 // (R + B'XB)^-1 (B'XA + N'), from X = 0. A fixed iteration count, per ADR-0004,
@@ -105,27 +104,20 @@ TEST(DiscreteControl, TheScalarDareMatchesItsClosedFormSolution) {
 // algorithm.
 TEST(DiscreteControl, AMultivariableDareAgreesWithValueIteration) {
   Eigen::MatrixXd a(3, 3);
-  a << 1.05, 0.10, 0.00,
-       0.00, 0.90, 0.25,
-       0.10, 0.00, 1.10;
+  a << 1.05, 0.10, 0.00, 0.00, 0.90, 0.25, 0.10, 0.00, 1.10;
   Eigen::MatrixXd b(3, 2);
-  b << 1.0, 0.0,
-       0.0, 0.5,
-       0.2, 1.0;
+  b << 1.0, 0.0, 0.0, 0.5, 0.2, 1.0;
   Eigen::MatrixXd q = Eigen::MatrixXd::Zero(3, 3);
   q.diagonal() << 2.0, 1.0, 4.0;
   Eigen::MatrixXd r = Eigen::MatrixXd::Zero(2, 2);
   r.diagonal() << 1.0, 3.0;
 
   const auto solution = solve_dare(a, b, q, r);
-  const Eigen::MatrixXd reference = dare_by_value_iteration(a, b, q, r,
-                                                            Eigen::MatrixXd::Zero(3, 2));
+  const Eigen::MatrixXd reference =
+      dare_by_value_iteration(a, b, q, r, Eigen::MatrixXd::Zero(3, 2));
 
-  const double relative =
-      (solution.x - reference).norm() / std::max(reference.norm(), 1e-300);
-  EXPECT_LT(relative, 1e-9) << "symplectic:\n"
-                            << solution.x << "\nvalue iteration:\n"
-                            << reference;
+  const double relative = (solution.x - reference).norm() / std::max(reference.norm(), 1e-300);
+  EXPECT_LT(relative, 1e-9) << "symplectic:\n" << solution.x << "\nvalue iteration:\n" << reference;
   EXPECT_LT(solution.spectral_radius, 1.0) << "two unstable modes must be pulled inside";
   EXPECT_LE(solution.relative_residual, solution.residual_budget);
 }
@@ -153,8 +145,7 @@ TEST(DiscreteControl, ADareWithACrossTermAgreesWithValueIteration) {
 
   const auto solution = solve_dare(a, b, q, r, n);
   const Eigen::MatrixXd reference = dare_by_value_iteration(a, b, q, r, n);
-  const double relative =
-      (solution.x - reference).norm() / std::max(reference.norm(), 1e-300);
+  const double relative = (solution.x - reference).norm() / std::max(reference.norm(), 1e-300);
   EXPECT_LT(relative, 1e-9) << "the completing-the-square reduction must give the same X";
   EXPECT_LT(solution.spectral_radius, 1.0);
 }
@@ -175,8 +166,8 @@ TEST(DiscreteControl, TheDiscretisedCostMatchesTheHandIntegratedInterval) {
   const double q = 5.0;
   const double r = 2.0;
   const double interval = 0.2;  // s
-  const auto cost = discretize_cost(plant, Eigen::MatrixXd::Constant(1, 1, q),
-                                    Eigen::MatrixXd::Constant(1, 1, r), {}, interval);
+  const auto cost = discretize_cost(
+      plant, Eigen::MatrixXd::Constant(1, 1, q), Eigen::MatrixXd::Constant(1, 1, r), {}, interval);
 
   EXPECT_NEAR(cost.q(0, 0), q * interval, 1e-14) << "Qd = q T";
   EXPECT_NEAR(cost.n(0, 0), 0.5 * q * interval * interval, 1e-14)
@@ -344,9 +335,10 @@ TEST(DiscreteControl, AnInvalidCostIsRefusedByName) {
       << "R must be positive definite, not merely semidefinite";
   EXPECT_THROW((void)solve_dare(a, b, q, Eigen::MatrixXd::Constant(1, 1, -1.0)),
                std::invalid_argument);
-  EXPECT_THROW((void)solve_dare(a, b, Eigen::MatrixXd::Constant(1, 1, -1.0),
-                                Eigen::MatrixXd::Constant(1, 1, 1.0)),
-               std::invalid_argument)
+  EXPECT_THROW(
+      (void)solve_dare(
+          a, b, Eigen::MatrixXd::Constant(1, 1, -1.0), Eigen::MatrixXd::Constant(1, 1, 1.0)),
+      std::invalid_argument)
       << "a negative Q makes the block cost indefinite";
 
   // Asymmetric Q is refused rather than quietly symmetrised, because the caller
@@ -354,9 +346,10 @@ TEST(DiscreteControl, AnInvalidCostIsRefusedByName) {
   Eigen::MatrixXd asymmetric(2, 2);
   asymmetric << 1.0, 0.5, -0.5, 1.0;
   Eigen::MatrixXd a2 = Eigen::MatrixXd::Identity(2, 2) * 0.5;
-  EXPECT_THROW((void)solve_dare(a2, Eigen::MatrixXd::Identity(2, 2), asymmetric,
-                                Eigen::MatrixXd::Identity(2, 2)),
-               std::invalid_argument);
+  EXPECT_THROW(
+      (void)solve_dare(
+          a2, Eigen::MatrixXd::Identity(2, 2), asymmetric, Eigen::MatrixXd::Identity(2, 2)),
+      std::invalid_argument);
 
   // A block cost that is indefinite because the CROSS TERM is too large, which
   // is the case a reader is most likely to build by accident.
@@ -375,8 +368,7 @@ TEST(DiscreteControl, AnInvalidSampleTimeIsRefusedByEveryEntryPoint) {
   EXPECT_THROW((void)discretize_cost(plant, q, r, {}, 0.0), std::invalid_argument);
   EXPECT_THROW((void)discretize_cost(plant, q, r, {}, -0.01), std::invalid_argument);
   EXPECT_THROW((void)design_sampled_lqr(plant, q, r, {}, 0.0), std::invalid_argument);
-  EXPECT_THROW((void)design_sampled_lqr(plant, q, r, {},
-                                        std::numeric_limits<double>::quiet_NaN()),
+  EXPECT_THROW((void)design_sampled_lqr(plant, q, r, {}, std::numeric_limits<double>::quiet_NaN()),
                std::invalid_argument);
 
   // Mismatched weight dimensions, which is how a caller most often pairs a cost

@@ -75,10 +75,10 @@ struct DareSolution {
   Eigen::MatrixXd k;  // input_i / state_j
   // Backward error of the DISCRETE Riccati equation as it was posed, cross term
   // included, against a conditioning-scaled budget no caller can widen.
-  double relative_residual = 0.0;  // dimensionless
-  double residual_budget = 0.0;    // dimensionless
-  double symmetry_defect = 0.0;    // dimensionless
-  double subspace_condition = 0.0; // dimensionless
+  double relative_residual = 0.0;   // dimensionless
+  double residual_budget = 0.0;     // dimensionless
+  double symmetry_defect = 0.0;     // dimensionless
+  double subspace_condition = 0.0;  // dimensionless
   // How far the symplectic spectrum stays from the UNIT CIRCLE — the discrete
   // analogue of the Hamiltonian's distance from the imaginary axis. A spectrum
   // touching the circle has no separated stabilising solution.
@@ -88,7 +88,7 @@ struct DareSolution {
   // problem is near the boundary deserves to know before reading the gain.
   double transition_condition = 0.0;  // dimensionless
   // max |lambda| of A - B K. Strictly below 1 for a stabilising solution.
-  double spectral_radius = 0.0;  // dimensionless
+  double spectral_radius = 0.0;                               // dimensionless
   std::vector<std::complex<double>> closed_loop_eigenvalues;  // dimensionless
 };
 

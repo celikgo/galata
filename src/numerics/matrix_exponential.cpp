@@ -36,11 +36,18 @@ constexpr double kBackwardErrorBound = 1.1102230246251565e-16;  // GALATA_SI_EXE
 const std::vector<double>& coefficients(int order) {
   static const std::vector<double> three{120.0, 60.0, 12.0, 1.0};
   static const std::vector<double> five{30240.0, 15120.0, 3360.0, 420.0, 30.0, 1.0};
-  static const std::vector<double> seven{17297280.0, 8648640.0, 1995840.0, 277200.0,
-                                         25200.0,    1512.0,    56.0,      1.0};
-  static const std::vector<double> nine{17643225600.0, 8821612800.0, 2075673600.0, 302702400.0,
-                                        30270240.0,    2162160.0,    110880.0,     3960.0,
-                                        90.0,          1.0};
+  static const std::vector<double> seven{
+      17297280.0, 8648640.0, 1995840.0, 277200.0, 25200.0, 1512.0, 56.0, 1.0};
+  static const std::vector<double> nine{17643225600.0,
+                                        8821612800.0,
+                                        2075673600.0,
+                                        302702400.0,
+                                        30270240.0,
+                                        2162160.0,
+                                        110880.0,
+                                        3960.0,
+                                        90.0,
+                                        1.0};
   static const std::vector<double> thirteen{64764752532480000.0,
                                             32382376266240000.0,
                                             7771770303897600.0,
@@ -123,8 +130,8 @@ Eigen::MatrixXd pade(const Eigen::MatrixXd& a, int order) {
 
 MatrixExponential matrix_exponential(const Eigen::MatrixXd& m) {
   if (m.rows() != m.cols()) {
-    throw std::invalid_argument("matrix_exponential: the matrix must be square, but it is " +
-                                std::to_string(m.rows()) + " by " + std::to_string(m.cols()));
+    throw std::invalid_argument("matrix_exponential: the matrix must be square, but it is "
+                                + std::to_string(m.rows()) + " by " + std::to_string(m.cols()));
   }
   if (m.rows() == 0) {
     throw std::invalid_argument("matrix_exponential: the matrix is empty");
@@ -139,10 +146,7 @@ MatrixExponential matrix_exponential(const Eigen::MatrixXd& m) {
   result.one_norm = m.cwiseAbs().colwise().sum().maxCoeff();
   result.backward_error_bound = kBackwardErrorBound;
 
-  const PadeOrder direct[] = {{3, kThetaThree},
-                              {5, kThetaFive},
-                              {7, kThetaSeven},
-                              {9, kThetaNine}};
+  const PadeOrder direct[] = {{3, kThetaThree}, {5, kThetaFive}, {7, kThetaSeven}, {9, kThetaNine}};
   for (const auto& candidate : direct) {
     if (result.one_norm <= candidate.theta) {
       result.pade_order = candidate.order;

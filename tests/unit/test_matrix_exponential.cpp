@@ -30,9 +30,8 @@
 
 #include "galata/numerics/matrix_exponential.hpp"
 
-#include <gtest/gtest.h>
-
 #include <Eigen/Dense>
+#include <gtest/gtest.h>
 
 #include <cmath>
 #include <stdexcept>
@@ -176,8 +175,8 @@ TEST(MatrixExponential, TheScalingPathAgreesWithTheClosedFormAtLargeNorm) {
   // The bound is looser than the unscaled cases on purpose: squaring amplifies
   // the Pade step's error, which is exactly the hump the header describes. It is
   // stated here rather than absorbed into a blanket tolerance.
-  const double relative = (result.value - expected).cwiseAbs().maxCoeff() /
-                          expected.cwiseAbs().maxCoeff();
+  const double relative =
+      (result.value - expected).cwiseAbs().maxCoeff() / expected.cwiseAbs().maxCoeff();
   EXPECT_LT(relative, 1e-12) << "relative error " << relative << " after " << result.squarings
                              << " squarings";
 }
@@ -188,10 +187,7 @@ TEST(MatrixExponential, TheScalingPathAgreesWithTheClosedFormAtLargeNorm) {
 // when its entries look plausible.
 TEST(MatrixExponential, TheDeterminantIsTheExponentialOfTheTrace) {
   Eigen::MatrixXd a(4, 4);
-  a << -1.5, 0.25, 0.0, 2.0,
-       0.5, -0.75, 1.25, 0.0,
-       0.0, -2.5, -0.5, 0.75,
-       1.0, 0.0, -0.25, -3.0;
+  a << -1.5, 0.25, 0.0, 2.0, 0.5, -0.75, 1.25, 0.0, 0.0, -2.5, -0.5, 0.75, 1.0, 0.0, -0.25, -3.0;
 
   const auto result = matrix_exponential(a);
   const double expected = std::exp(a.trace());
@@ -209,10 +205,9 @@ TEST(MatrixExponential, SquaringTheResultMatchesDoublingTheArgument) {
   const auto once = matrix_exponential(a);
   const auto twice = matrix_exponential(2.0 * a);
   const Eigen::MatrixXd squared = once.value * once.value;
-  EXPECT_LT((squared - twice.value).cwiseAbs().maxCoeff(), 1e-13)
-      << "expm(A)^2:\n"
-      << squared << "\nexpm(2A):\n"
-      << twice.value;
+  EXPECT_LT((squared - twice.value).cwiseAbs().maxCoeff(), 1e-13) << "expm(A)^2:\n"
+                                                                  << squared << "\nexpm(2A):\n"
+                                                                  << twice.value;
 }
 
 TEST(MatrixExponential, TheReportedDiagnosticsDescribeThePathTaken) {

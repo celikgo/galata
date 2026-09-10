@@ -111,9 +111,11 @@ struct DiscreteLinearSystem {
   [[nodiscard]] Eigen::Index state_count() const {
     return a.rows();
   }
+
   [[nodiscard]] Eigen::Index input_count() const {
     return b.cols();
   }
+
   [[nodiscard]] Eigen::Index output_count() const {
     return c.size() == 0 ? a.rows() : c.rows();
   }
@@ -135,10 +137,10 @@ struct DiscretisationEvidence {
   // From the block-matrix exponential this discretisation is built on, carried
   // through so the discrete model's accuracy is traceable to the routine that
   // set it rather than asserted here.
-  double exponential_one_norm = 0.0;      // dimensionless
-  int exponential_pade_order = 0;         // dimensionless
-  int exponential_squarings = 0;          // dimensionless
-  double exponential_error_bound = 0.0;   // dimensionless, backward, declared
+  double exponential_one_norm = 0.0;     // dimensionless
+  int exponential_pade_order = 0;        // dimensionless
+  int exponential_squarings = 0;         // dimensionless
+  double exponential_error_bound = 0.0;  // dimensionless, backward, declared
 
   // max |lambda| over the DISCRETE A. Strictly inside 1 is a stable sampled
   // model; this is reported and never gated on, for the same reason the

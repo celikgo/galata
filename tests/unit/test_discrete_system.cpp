@@ -19,17 +19,16 @@
 
 #include "galata/model/discrete_system.hpp"
 
-#include <gtest/gtest.h>
-
 #include <Eigen/Dense>
+#include <gtest/gtest.h>
 
 #include <cmath>
 #include <stdexcept>
 
 namespace {
 
-using galata::model::discretize_zoh;
 using galata::model::DiscreteLinearSystem;
+using galata::model::discretize_zoh;
 using galata::model::InputHold;
 using galata::model::LinearSystem;
 
@@ -59,7 +58,7 @@ LinearSystem double_integrator() {
 }  // namespace
 
 TEST(DiscreteSystem, AFirstOrderLagMatchesItsClosedFormDiscretisation) {
-  const double tau = 0.4;       // s
+  const double tau = 0.4;        // s
   const double interval = 0.05;  // s
   const auto result = discretize_zoh(first_order_lag(tau), interval);
 
@@ -94,9 +93,8 @@ TEST(DiscreteSystem, TheDoubleIntegratorMatchesItsExactDiscretisation) {
   Eigen::MatrixXd expected_b(2, 1);
   expected_b << 0.5 * interval * interval, interval;
 
-  EXPECT_LT((result.system.a - expected_a).cwiseAbs().maxCoeff(), 1e-15)
-      << "computed:\n"
-      << result.system.a;
+  EXPECT_LT((result.system.a - expected_a).cwiseAbs().maxCoeff(), 1e-15) << "computed:\n"
+                                                                         << result.system.a;
   EXPECT_LT((result.system.b - expected_b).cwiseAbs().maxCoeff(), 1e-16)
       << "the T^2/2 term is what a first-order series would get wrong:\n"
       << result.system.b;
@@ -110,7 +108,7 @@ TEST(DiscreteSystem, AHeldInputTrajectoryAgreesWithTheExactContinuousSolution) {
   const auto result = discretize_zoh(double_integrator(), interval);
 
   Eigen::VectorXd state(2);
-  state << 3.0, -0.5;  // m, m/s
+  state << 3.0, -0.5;           // m, m/s
   const double command = 1.25;  // m/s^2, held across every interval
   Eigen::VectorXd input = Eigen::VectorXd::Constant(1, command);
 
@@ -128,8 +126,7 @@ TEST(DiscreteSystem, AHeldInputTrajectoryAgreesWithTheExactContinuousSolution) {
       initial(0) + initial(1) * elapsed + 0.5 * command * elapsed * elapsed;
   const double expected_velocity = initial(1) + command * elapsed;
 
-  EXPECT_NEAR(state(0), expected_position, 1e-12)
-      << "position after " << ticks << " held steps";
+  EXPECT_NEAR(state(0), expected_position, 1e-12) << "position after " << ticks << " held steps";
   EXPECT_NEAR(state(1), expected_velocity, 1e-13) << "velocity after " << ticks << " held steps";
 }
 
@@ -139,8 +136,8 @@ TEST(DiscreteSystem, AHeldInputTrajectoryAgreesWithTheExactContinuousSolution) {
 TEST(DiscreteSystem, ContinuousEigenvaluesMapOntoTheUnitDiskByTheExponential) {
   LinearSystem system;
   system.a = Eigen::MatrixXd::Zero(3, 3);
-  system.a(0, 0) = -2.0;   // stable real
-  system.a(1, 2) = 4.0;    // an oscillatory pair at +-4i, marginally stable
+  system.a(0, 0) = -2.0;  // stable real
+  system.a(1, 2) = 4.0;   // an oscillatory pair at +-4i, marginally stable
   system.a(2, 1) = -4.0;
   system.b = Eigen::MatrixXd::Zero(3, 1);
   system.b(0, 0) = 1.0;
@@ -215,8 +212,7 @@ TEST(DiscreteSystem, ADiscreteModelWithoutASampleTimeDoesNotValidate) {
 TEST(DiscreteSystem, WhatCannotBeDiscretisedIsRefusedByName) {
   EXPECT_THROW((void)discretize_zoh(double_integrator(), 0.0), std::invalid_argument);
   EXPECT_THROW((void)discretize_zoh(double_integrator(), -0.1), std::invalid_argument);
-  EXPECT_THROW((void)discretize_zoh(double_integrator(),
-                                    std::numeric_limits<double>::quiet_NaN()),
+  EXPECT_THROW((void)discretize_zoh(double_integrator(), std::numeric_limits<double>::quiet_NaN()),
                std::invalid_argument);
 
   // A system with no inputs has nothing for a hold to hold, and is refused with
