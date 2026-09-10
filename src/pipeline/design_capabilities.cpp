@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // File-driven control design and simulation adapters. All numeric algorithms
 // live in synth/sim; this layer validates wiring, preserves names and renders.
+#include "galata/analyze/gramians.hpp"
 #include "galata/analyze/hinfinity.hpp"
 #include "galata/identify/validate.hpp"
 #include "galata/pipeline/artifacts.hpp"
@@ -189,6 +190,55 @@ Artifact lqr(const StageContext& context) {
   return result;
 }
 
+// --- analyze.gramians ------------------------------------------------------
+//
+// RFC-0002 asked for this so that "an exported model's defective integrator
+// chains and any unobservable direction are reported rather than discovered
+// from a failed synthesis". The horizon is required rather than defaulted: see
+// the header for why a default would put a number nobody chose into a figure a
+// reader quotes.
+Artifact gramians(const StageContext& context) {
+  const model::LinearSystem system = system_at(context);
+  analyze::GramianOptions options;
+  options.horizon_s = context.input->number_at("horizon_s");
+  options.steps = context.input->integer_at("steps", 400);
+  options.rank_tolerance = context.input->number_at("rank_tolerance", 1e-9);
+  auto analysis = analyze::analyse_gramians(system, options);
+
+  std::ostringstream summary;
+  summary << "reachable " << analysis.reachability.rank << "/" << analysis.reachability.state_count
+          << ", observable " << analysis.observability.rank << "/"
+          << analysis.observability.state_count << " at a relative floor of " << std::scientific
+          << std::setprecision(1) << options.rank_tolerance;
+  summary.unsetf(std::ios::floatfield);
+  // The one thing a reader most needs and would otherwise assume: these are
+  // finite-horizon Gramians, and for this class of model the infinite-horizon
+  // ones do not exist at all.
+  summary << "; finite-horizon Gramians over " << std::fixed << std::setprecision(2)
+          << analysis.horizon_s << " s";
+  summary.unsetf(std::ios::floatfield);
+  if (!analysis.spectrum_is_strictly_stable) {
+    summary << " (the infinite-horizon Gramians DO NOT EXIST for this model — rightmost "
+               "eigenvalue real part "
+            << std::scientific << std::setprecision(3) << analysis.rightmost_eigenvalue_real_part
+            << ")";
+    summary.unsetf(std::ios::floatfield);
+  }
+  if (!analysis.reachability.missing_directions.empty()
+      || !analysis.observability.missing_directions.empty()) {
+    summary << "; "
+            << analysis.reachability.missing_directions.size()
+                   + analysis.observability.missing_directions.size()
+            << " direction(s) named in the report";
+  }
+
+  Artifact artifact;
+  artifact.kind = "gramians";
+  artifact.summary = summary.str();
+  artifact.payload = std::move(analysis);
+  return artifact;
+}
+
 Artifact control_system(const StageContext& context) {
   const auto& law = context.upstream_at("law").payload_as<synth::LqrDesign>("control_law");
   const auto use = context.input->string_at("use");
@@ -198,7 +248,45 @@ Artifact control_system(const StageContext& context) {
   if (use == "broken_loop") {
     return system_artifact(law.broken_loop);
   }
-  throw std::invalid_argument("model.control_system: use must be closed_loop or broken_loop");
+  // The loop-at-a-time reading, which is the one a frequency-domain margin can
+  // be computed from on a plant that needs all its channels. See
+  // `synth::single_loop_others_closed` for why `broken_loop` cannot be handed
+  // to a SISO margin routine on such a plant, and for what a set of these
+  // figures does NOT bound.
+  if (use == "single_loop") {
+    const ValuePtr channel = context.input->get("channel");
+    if (!channel) {
+      throw std::invalid_argument(
+          "model.control_system: `use: single_loop` needs `channel`, naming which plant input "
+          "the loop is broken at. There is one such loop per input and they are different "
+          "loops with different margins; picking one for the caller would be choosing which "
+          "number to report");
+    }
+    const std::vector<std::string>& inputs = law.plant.input_names;
+    int index = -1;
+    if (channel->kind() == Value::Kind::Number) {
+      index = static_cast<int>(channel->as_number());
+    } else {
+      const std::string name = channel->as_string();
+      for (std::size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i] == name) {
+          index = static_cast<int>(i);
+          break;
+        }
+      }
+      if (index < 0) {
+        std::ostringstream message;
+        message << "model.control_system: the plant has no input '" << name << "'. It has: ";
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+          message << (i == 0 ? "" : ", ") << inputs[i];
+        }
+        throw std::invalid_argument(message.str());
+      }
+    }
+    return system_artifact(synth::single_loop_others_closed(law, index));
+  }
+  throw std::invalid_argument(
+      "model.control_system: use must be closed_loop, broken_loop or single_loop");
 }
 
 analyze::HinfinityOptions norm_options(const ValuePtr& input) {
@@ -572,12 +660,21 @@ void register_design_capabilities(Registry& registry) {
                 State::ImplementedUnvalidated,
                 select_channels,
                 {"system", "inputs", "outputs"}});
+  registry.add({"analyze.gramians",
+                "Reachability and observability of a linear model for a declared input and "
+                "output set — the subspace ranks, the directions that fall outside them by "
+                "state name, and finite-horizon Gramians over a declared horizon",
+                "gramians",
+                State::ImplementedUnvalidated,
+                gramians,
+                {"system", "horizon_s", "steps", "rank_tolerance"}});
   registry.add({"model.control_system",
-                "Extract the closed loop or plant-input return ratio of an LQR design",
+                "Extract an LQR design's closed loop, its plant-input return ratio, or the "
+                "single loop at one input with the other loops still closed",
                 "linear_system",
                 State::ImplementedUnvalidated,
                 control_system,
-                {"law", "use"}});
+                {"law", "use", "channel"}});
   registry.add({"model.series",
                 "Cascade two state-space systems in declared channel order",
                 "linear_system",
@@ -782,6 +879,71 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
         << result.validation_record_sha256 << "; estimation record sha256 "
         << result.estimation_record_sha256 << ".\n\n";
     out << "_Assumptions:_ " << result.assumptions << "\n\n";
+    return true;
+  }
+  if (artifact.kind == "gramians") {
+    const auto& analysis = artifact.payload_as<analyze::GramianAnalysis>("gramians");
+    const auto subspace =
+        [&out](const char* title, const char* verb, const analyze::SubspaceAnalysis& s) {
+          out << "### " << title << "\n\n";
+          out << "| Quantity | Value |\n|---|---|\n"
+              << "| Rank | " << s.rank << " of " << s.state_count << " |\n"
+              << "| Condition number of the retained directions | " << s.retained_condition_number
+              << " |\n\n";
+          if (s.missing_directions.empty()) {
+            out << "Every direction in the state space can be " << verb << ".\n\n";
+            return;
+          }
+          out << s.missing_directions.size() << " direction(s) cannot be " << verb
+              << ". Each is a unit vector in the model's own state coordinates; the states listed "
+                 "are those carrying more than a one-percent share of it.\n\n";
+          out << "| Direction | Dominant states (share) |\n|---|---|\n";
+          for (std::size_t k = 0; k < s.missing_directions.size(); ++k) {
+            out << "| " << (k + 1) << " | ";
+            const auto& names = s.missing_directions[k].dominant_states;
+            for (std::size_t i = 0; i < names.size(); ++i) {
+              out << (i == 0 ? "" : ", ") << "`" << names[i] << "`";
+            }
+            out << " |\n";
+          }
+          out << "\n";
+        };
+    subspace("Reachability", "moved by the declared inputs", analysis.reachability);
+    subspace("Observability", "seen by the declared outputs", analysis.observability);
+
+    out << "### Finite-horizon Gramians\n\n";
+    out << "| Quantity | Controllability | Observability |\n|---|---|---|\n"
+        << "| Largest eigenvalue | "
+        << (analysis.controllability_eigenvalues.empty()
+                ? 0.0
+                : analysis.controllability_eigenvalues.front())
+        << " | "
+        << (analysis.observability_eigenvalues.empty() ? 0.0
+                                                       : analysis.observability_eigenvalues.front())
+        << " |\n"
+        << "| Smallest eigenvalue | "
+        << (analysis.controllability_eigenvalues.empty()
+                ? 0.0
+                : analysis.controllability_eigenvalues.back())
+        << " | "
+        << (analysis.observability_eigenvalues.empty() ? 0.0
+                                                       : analysis.observability_eigenvalues.back())
+        << " |\n"
+        << "| Condition number | " << analysis.controllability_condition_number << " | "
+        << analysis.observability_condition_number << " |\n\n";
+    out << "Integrated over " << analysis.horizon_s << " s in " << analysis.steps
+        << " fixed RK4 steps. **These are not the infinite-horizon Gramians**";
+    if (analysis.spectrum_is_strictly_stable) {
+      out << ", which do exist for this model — its rightmost eigenvalue has real part "
+          << analysis.rightmost_eigenvalue_real_part << " — but are not computed here.\n\n";
+    } else {
+      out << ", and for this model they do not exist at all: the rightmost eigenvalue has real "
+             "part "
+          << analysis.rightmost_eigenvalue_real_part
+          << ", so the T to infinity limit diverges and the matrix a Lyapunov solve would "
+             "return for it would not be a Gramian of anything.\n\n";
+    }
+    out << "_Assumptions:_ " << analysis.assumptions << "\n\n";
     return true;
   }
   if (artifact.kind == "robust_bounds") {

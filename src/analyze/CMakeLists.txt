@@ -15,6 +15,7 @@ add_library(galata_analyze
   hinfinity.cpp
   margins.cpp
   modes.cpp
+  gramians.cpp
 )
 add_library(galata::analyze ALIAS galata_analyze)
 

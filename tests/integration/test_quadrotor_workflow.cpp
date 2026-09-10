@@ -10,6 +10,8 @@
 // Written from the capability schemas and the headers, not from the capability
 // implementations (docs/TESTING.md).
 
+#include "galata/analyze/gramians.hpp"
+#include "galata/analyze/margins.hpp"
 #include "galata/core/state.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/modeling/linear_adapter.hpp"
@@ -84,6 +86,22 @@ class QuadrotorWorkflow : public ::testing::Test {
   // cannot read a file one of its own stages is about to write. Consuming the
   // export is a second study, which is also how the requesting programme
   // actually uses it: one run computes the model, a later one analyses it.
+  // A diagonal weight matrix as study YAML. The weights are the study's choice
+  // wherever they appear, and writing them out keeps that visible.
+  static std::string identity_weight(int size, double value) {
+    std::ostringstream out;
+    out << "[";
+    for (int row = 0; row < size; ++row) {
+      out << (row == 0 ? "[" : ", [");
+      for (int column = 0; column < size; ++column) {
+        out << (column == 0 ? "" : ", ") << (row == column ? value : 0.0);
+      }
+      out << "]";
+    }
+    out << "]";
+    return out.str();
+  }
+
   static std::string chain(const std::string& trim_input = "{quadrotor: {from: plant}}") {
     return "version: 1\nstages:\n"
            "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
@@ -698,6 +716,153 @@ TEST_F(QuadrotorWorkflow, UnsupportedSampledTimingIsRefused) {
                                        "      delay_periods: 1.5\n"),
                          {.overwrite = true, .write_manifest = false}),
                std::runtime_error);
+}
+
+// --- the two analyses that were unavailable on this plant --------------------
+
+// RFC-0002 asked for reachability and observability reporting "so that an
+// exported model's defective integrator chains and any unobservable direction
+// are reported rather than discovered from a failed synthesis". This is that,
+// on the real hover linearisation, through the public capability.
+TEST_F(QuadrotorWorkflow, ReachabilityAndObservabilityAreReportedBeforeAnyDesign) {
+  const RunResult result = run(chain()
+                                   + "  - id: gram\n    capability: analyze.gramians\n"
+                                     "    input: {system: {from: linear}, horizon_s: 4.0}\n",
+                               {.overwrite = true, .write_manifest = false});
+  const Artifact* gram = result.find("gram");
+  ASSERT_NE(gram, nullptr);
+  const auto& analysis = gram->payload_as<galata::analyze::GramianAnalysis>("gramians");
+
+  // Every chart direction is reachable: four rotor commands plus the wind
+  // columns move the whole sixteen-coordinate state.
+  EXPECT_EQ(analysis.reachability.rank, analysis.reachability.state_count);
+  EXPECT_TRUE(analysis.reachability.missing_directions.empty());
+
+  // THE INFINITE-HORIZON GRAMIANS DO NOT EXIST FOR THIS MODEL, and the analysis
+  // must say so rather than returning a Lyapunov solution that is not a Gramian
+  // of anything. Six eigenvalues sit at the origin — three because nothing reads
+  // position, three because nothing reads attitude at a level hover.
+  EXPECT_FALSE(analysis.spectrum_is_strictly_stable);
+  EXPECT_NEAR(analysis.rightmost_eigenvalue_real_part, 0.0, 1e-9);
+  EXPECT_NE(analysis.assumptions.find("do not exist for this model"), std::string::npos)
+      << analysis.assumptions;
+  EXPECT_GT(analysis.horizon_s, 0.0);
+
+  // The heading is unobservable from this observation model: it has body rates,
+  // position, altitude, ground velocity and specific force, and none of them
+  // measures an absolute yaw angle. That is a physical fact about the sensor
+  // set, and it is the kind of answer a failed synthesis would have delivered
+  // as a Riccati diagnostic three stages later.
+  ASSERT_FALSE(analysis.observability.missing_directions.empty())
+      << "a hover observation model with no heading reference must leave yaw unobservable";
+  bool names_yaw = false;
+  for (const auto& direction : analysis.observability.missing_directions) {
+    for (const std::string& state : direction.dominant_states) {
+      names_yaw = names_yaw || state.find("attitude_error_z") != std::string::npos;
+    }
+  }
+  EXPECT_TRUE(names_yaw) << "the unobservable direction must be NAMED, not merely counted";
+}
+
+// The frequency-domain margins the audit found unavailable on this plant. The
+// refusal was correct: breaking one channel of the MIMO return ratio leaves the
+// other three OPEN, and that closure is not internally stable. The loop-at-a-
+// time reading, with the other loops closed, is well posed and is what a margin
+// can be computed from.
+TEST_F(QuadrotorWorkflow, SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefused) {
+  const std::string design = chain()
+                             + "  - id: rotors\n    capability: model.channels\n    input:\n"
+                               "      system: {from: linear}\n"
+                               "      inputs: [omega_command_0, omega_command_1, "
+                               "omega_command_2, omega_command_3]\n"
+                               "      outputs: [position_north_m, position_east_m, altitude_m]\n"
+                             + "  - id: lqr\n    capability: synth.lqr\n    input: "
+                               "{system: {from: rotors}, break_at: plant_input, q: "
+                             + identity_weight(16, 1.0) + ", r: " + identity_weight(4, 0.02)
+                             + "}\n";
+
+  // The MIMO return ratio, handed to a SISO margin routine: refused, and the
+  // diagnostic names the cause rather than advising a rescale.
+  try {
+    (void)run(design
+                  + "  - id: brk\n    capability: model.control_system\n"
+                    "    input: {law: {from: lqr}, use: broken_loop}\n"
+                    "  - id: margins\n    capability: analyze.margins\n"
+                    "    input: {system: {from: brk}}\n",
+              {.overwrite = true, .write_manifest = false});
+    FAIL() << "margins of a loop that leaves three channels open must be refused";
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("internal stability unresolved"), std::string::npos) << message;
+    EXPECT_NE(message.find("unstabilised mode"), std::string::npos)
+        << "the diagnostic must name the cause: " << message;
+  }
+
+  // The same design, read loop at a time with the others closed: a margin.
+  const RunResult result =
+      run(design
+              + "  - id: loop0\n    capability: model.control_system\n"
+                "    input: {law: {from: lqr}, use: single_loop, channel: omega_command_0}\n"
+                "  - id: margins0\n    capability: analyze.margins\n"
+                "    input: {system: {from: loop0}}\n"
+                "  - id: disk0\n    capability: analyze.diskmargin\n"
+                "    input: {system: {from: loop0}}\n",
+          {.overwrite = true, .write_manifest = false});
+
+  const Artifact* loop = result.find("loop0");
+  ASSERT_NE(loop, nullptr);
+  const auto& single = loop->payload_as<galata::model::LinearSystem>("linear_system");
+  EXPECT_EQ(single.input_count(), 1);
+  EXPECT_EQ(single.output_count(), 1);
+  EXPECT_EQ(single.state_count(), 16);
+
+  const Artifact* margins = result.find("margins0");
+  ASSERT_NE(margins, nullptr);
+  EXPECT_EQ(margins->kind, "stability_margins");
+  // A phase margin exists and is reported. Its VALUE is a property of the
+  // weights this test chose and is deliberately not asserted: what is asserted
+  // is that the analysis is now AVAILABLE where the other reading refused it.
+  // The payload type is private to the capability layer, so the claim is read
+  // off the summary a user sees.
+  EXPECT_NE(margins->summary.find("PM "), std::string::npos) << margins->summary;
+  EXPECT_EQ(margins->summary.find("unresolved"), std::string::npos) << margins->summary;
+
+  const Artifact* disk = result.find("disk0");
+  ASSERT_NE(disk, nullptr);
+  EXPECT_NE(disk->summary.find("alpha"), std::string::npos) << disk->summary;
+}
+
+// A channel the plant does not have is refused by name, with the vocabulary
+// listed: picking a channel for the caller would be choosing which number to
+// report, and there is one loop per input with different margins.
+TEST_F(QuadrotorWorkflow, ASingleLoopNeedsAChannelAndRefusesOneTheDesignDoesNotHave) {
+  const std::string design = chain()
+                             + "  - id: rotors\n    capability: model.channels\n    input:\n"
+                               "      system: {from: linear}\n"
+                               "      inputs: [omega_command_0, omega_command_1, "
+                               "omega_command_2, omega_command_3]\n"
+                               "      outputs: [position_north_m, position_east_m, altitude_m]\n"
+                             + "  - id: lqr\n    capability: synth.lqr\n    input: "
+                               "{system: {from: rotors}, break_at: plant_input, q: "
+                             + identity_weight(16, 1.0) + ", r: " + identity_weight(4, 0.02)
+                             + "}\n";
+  EXPECT_THROW((void)run(design
+                             + "  - id: loop\n    capability: model.control_system\n"
+                               "    input: {law: {from: lqr}, use: single_loop}\n",
+                         {.overwrite = true, .write_manifest = false}),
+               std::runtime_error);
+  try {
+    (void)run(design
+                  + "  - id: loop\n    capability: model.control_system\n"
+                    "    input: {law: {from: lqr}, use: single_loop, channel: elevator}\n",
+              {.overwrite = true, .write_manifest = false});
+    FAIL() << "a channel the plant does not have must be refused";
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("no input 'elevator'"), std::string::npos) << message;
+    EXPECT_NE(message.find("omega_command_0"), std::string::npos)
+        << "the refusal must list the vocabulary: " << message;
+  }
 }
 
 TEST_F(QuadrotorWorkflow, TheExistingStateSpaceFilesStillLoadUnchanged) {

@@ -41,6 +41,7 @@ add_executable(galata_unit_tests
   test_static_fit.cpp
   test_record_window.cpp
   test_quadrotor_serialisation.cpp
+  test_gramians.cpp
   test_margins.cpp
   test_disk_margin.cpp
   test_singular_values.cpp
