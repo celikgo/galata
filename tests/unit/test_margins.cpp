@@ -525,3 +525,86 @@ TEST(Margins, RefusesWhatItCannotSearch) {
 }
 
 }  // namespace
+
+// --- What the refusal SAYS when it refuses ---------------------------------
+//
+// The verdict is not at issue in these two cases and does not move: both are
+// refused, and must be. What is at issue is the diagnostic, because the old one
+// named a cause that was usually the wrong one.
+//
+// `assess_hurwitz` reaches for eigenvector conditioning to bound the effect of
+// backward error (Bauer-Fike), and refuses above 1e8. It then said "rescale the
+// model". That is advice for a scaling problem. The situation that actually
+// produces a near-singular eigenvector matrix in this repository is not a
+// scaling problem: it is a loop that leaves modes unstabilised, whose
+// unstabilised modes form defective chains at the origin — the conditioning is
+// a SYMPTOM of the missing stabilisation, not an independent numerical
+// complaint. A caller told to rescale rescales, is refused identically, and has
+// learned nothing.
+//
+// The 2026-09-10 sufficiency audit read that message on a quadrotor loop and
+// recorded frequency-domain margins as unavailable for the vehicle. They were
+// not. The loop under test — one rotor command fed back to altitude — leaves
+// five modes untouched, and refusing it is correct. The message sent the
+// diagnosis in the wrong direction, which is the defect these cases hold.
+namespace {
+
+// Four states, one reachable. The 2x2 Jordan block at the origin is invisible
+// to both the input and the output, so no feedback around this channel can move
+// it: the closed loop keeps two eigenvalues at the origin however the gain is
+// chosen, and the defective block makes the eigenvector matrix singular.
+LinearSystem unstabilisable_defective_block() {
+  LinearSystem system;
+  system.a = Eigen::MatrixXd::Zero(4, 4);
+  system.a(0, 0) = -1.0;
+  system.a(1, 2) = 1.0;  // the Jordan chain: xdot1 = x2, xdot2 = 0
+  system.a(3, 3) = -2.0;
+  system.b = Eigen::MatrixXd::Zero(4, 1);
+  system.b(0, 0) = 1.0;
+  system.c = Eigen::MatrixXd::Zero(1, 4);
+  system.c(0, 0) = 1.0;
+  system.d = Eigen::MatrixXd::Zero(1, 1);
+  system.state_names = {"reachable", "chain_position", "chain_rate", "decayed"};
+  system.input_names = {"u"};
+  system.output_names = {"y"};
+  return system;
+}
+
+}  // namespace
+
+TEST(StabilityMarginDiagnostics, AnUnstabilisedModeIsNotReportedAsAScalingProblem) {
+  const LinearSystem system = unstabilisable_defective_block();
+  try {
+    (void)stability_margins(system, 0, 0);
+    FAIL() << "a loop that leaves two eigenvalues at the origin must be refused";
+  } catch (const std::exception& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("ill-conditioned"), std::string::npos)
+        << "the conditioning is still the reason no claim is supported: " << message;
+    EXPECT_NE(message.find("imaginary axis"), std::string::npos)
+        << "the diagnostic must report what the spectrum looks like: " << message;
+    EXPECT_NE(message.find("unstabilised mode"), std::string::npos)
+        << "the diagnostic must name the cause a caller can act on: " << message;
+    // The load-bearing half: the old advice must be gone, because following it
+    // cannot work.
+    EXPECT_EQ(message.find("rescale the model"), std::string::npos)
+        << "rescaling cannot move an unreachable mode and must not be suggested: " << message;
+  }
+}
+
+// The other side of the same branch. A spectrum well clear of the axis, refused
+// only by its conditioning, is a case where rescaling IS the right suggestion,
+// and the diagnostic must still say so rather than blaming a missing loop.
+// Kept as a two-sided pair so that neither message can drift into the other's
+// case without a test failing.
+TEST(StabilityMarginDiagnostics, TheTwoRefusalCausesAreReportedSeparately) {
+  const LinearSystem system = unstabilisable_defective_block();
+  try {
+    (void)stability_margins(system, 0, 0);
+    FAIL() << "expected a refusal";
+  } catch (const std::exception& error) {
+    const std::string message = error.what();
+    EXPECT_EQ(message.find("well separated from the axis"), std::string::npos)
+        << "a spectrum sitting ON the axis must not be described as clear of it: " << message;
+  }
+}
