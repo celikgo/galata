@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# REGENERATES `flight.csv`, the synthetic record `study.yaml` fits against.
+#
+#   galata run examples/quadrotor-identification/make-record.yaml --overwrite
+#
+# The record is committed so the example runs with no prior step, and this file
+# is committed so the record is REGENERABLE rather than a table of numbers whose
+# origin is a claim. Charter rule 2 in the small: the data has a routine.
+#
+# What it is: `quad-truth.yaml` trimmed at 100 m and flown open-loop through a
+# nose-up pitch pulse, a nose-down pulse, and two roll pulses, sampled every
+# 20 ms over 2 s. The pitch and roll excitation is what makes the pitch angular
+# drag observable; a purely vertical manoeuvre would leave it unmeasured, and
+# `identify.greybox` would refuse the fit rather than report a number for it.
+#
+# WHAT IT IS NOT: not measured data, and not noisy. The record is the truth
+# model's own output to round-off, so a perfect fit here demonstrates that the
+# machinery recovers a parameter it can see — and nothing about how it behaves
+# against a sensor. Real data carries noise, unmodelled dynamics and a timebase
+# that drifts; none of those is exercised by this file.
+
+version: 1
+
+stages:
+  - id: truth
+    capability: model.quadrotor
+    input:
+      path: quad-truth.yaml
+
+  - id: hover
+    capability: trim.hover
+    input:
+      quadrotor: {from: truth}
+      altitude_m: 100.0
+
+  - id: fly
+    capability: sim.plant
+    input:
+      trim: {from: hover}
+      step_s: 0.004
+      steps: 500
+      sample_stride: 5
+      command_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [632.0, 632.0, 632.0, 632.0]}
+          - {time_s: 0.2, values: [610.0, 660.0, 660.0, 610.0]}
+          - {time_s: 0.6, values: [660.0, 610.0, 610.0, 660.0]}
+          - {time_s: 1.2, values: [645.0, 645.0, 620.0, 620.0]}
+          - {time_s: 1.6, values: [620.0, 620.0, 645.0, 645.0]}
+
+  - id: record
+    capability: report.csv
+    input:
+      trajectory: {from: fly}
+      path: flight.csv

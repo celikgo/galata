@@ -7,12 +7,16 @@
 // runs is worse than no example: it is the first thing a new reader tries, and
 // its failure is the first thing they learn about the project.
 
+#include "galata/model/quadrotor.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
 #include "galata/pipeline/registry.hpp"
 
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -258,6 +262,179 @@ TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedMod
 
   // The state matrix is printed, so a reader can check it by hand.
   EXPECT_NE(text.find("State matrix A"), std::string::npos);
+}
+
+// ===========================================================================
+// The quadrotor programme's two end-to-end examples
+// ===========================================================================
+//
+// These run the SHIPPED study files, not a copy of them. An example that stops
+// running is worse than no example, and these two are the only place the
+// identification path and the sampled-control path are exercised through the
+// public capabilities a user actually has.
+
+TEST(ExampleQuadrotorSampledControl, RunsEndToEnd) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 8U);
+  EXPECT_EQ(result.stages[0].capability, "model.quadrotor");
+  EXPECT_EQ(result.stages[1].capability, "trim.hover");
+  EXPECT_EQ(result.stages[2].capability, "linearize.extended");
+  EXPECT_EQ(result.stages[3].capability, "model.channels");
+  EXPECT_EQ(result.stages[4].capability, "synth.lqr");
+  EXPECT_EQ(result.stages[5].capability, "sim.sampled");
+  for (const auto& stage : result.stages) {
+    EXPECT_NE(stage.artifact.produced_by_build.find("galata "), std::string::npos);
+  }
+}
+
+// The point of the example: a law designed on the linearisation, executed at a
+// declared rate against the NONLINEAR plant, removes the displacement it was
+// started from. A budget rather than a tolerance — a metre of the two-metre
+// initial offset would be a failure, and so would a run that diverged.
+TEST(ExampleQuadrotorSampledControl, TheLawDrivesTheDisplacementOut) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  const galata::pipeline::Artifact* closed = result.find("closed");
+  ASSERT_NE(closed, nullptr);
+  const auto& sampled = closed->payload_as<galata::pipeline::SampledRun>("sampled_trajectory");
+
+  const Eigen::VectorXd& first = sampled.plant.trajectory.states.front();
+  const Eigen::VectorXd& last = sampled.plant.trajectory.states.back();
+  const galata::pipeline::Artifact* hover = result.find("hover");
+  ASSERT_NE(hover, nullptr);
+  const auto& trimmed = hover->payload_as<galata::pipeline::HoverTrimArtifact>("hover_trim");
+  const Eigen::Vector3d reference = trimmed.point.extended_state.head<3>();
+
+  const double started = (first.head<3>() - reference).norm();
+  const double ended = (last.head<3>() - reference).norm();
+  EXPECT_GT(started, 2.0) << "the study must actually displace the vehicle";
+  EXPECT_LT(ended, 0.1 * started)
+      << "the sampled law must remove at least nine tenths of the displacement it started "
+         "from; started "
+      << started << " m, ended " << ended << " m";
+  EXPECT_EQ(sampled.control.delay_periods, 2);
+}
+
+TEST(ExampleQuadrotorIdentification, RunsEndToEnd) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 12U);
+  EXPECT_EQ(result.stages[1].capability, "data.import.csv");
+  EXPECT_EQ(result.stages[2].capability, "data.window");
+  EXPECT_EQ(result.stages[4].capability, "identify.greybox");
+  EXPECT_EQ(result.stages[5].capability, "model.quadrotor.export");
+  EXPECT_EQ(result.stages[6].capability, "trim.hover");
+  EXPECT_EQ(result.stages[9].capability, "identify.validate");
+}
+
+// THE SELF-TEST. The example commits its own truth model, so this compares the
+// recovered parameters against the file that generated the record rather than
+// against a number typed here. A fit that converged to the wrong root passes a
+// residual gate and fails this one.
+TEST(ExampleQuadrotorIdentification, RecoversTheParametersItsTruthModelDeclares) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  ASSERT_TRUE(fitted.identity.is_fitted());
+  ASSERT_NE(fitted.identity.fit, nullptr);
+
+  const galata::model::Quadrotor truth = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-truth.yaml")
+          .string());
+
+  // The record is the truth model's own output to round-off, so the budget is
+  // set by the fit's own reported precision rather than by engineering
+  // judgement: eight significant figures on each parameter.
+  EXPECT_NEAR(fitted.model.mass.mass_kg, truth.mass.mass_kg, 1e-8 * truth.mass.mass_kg);
+  EXPECT_NEAR(fitted.model.angular_drag_n_m_s(1),
+              truth.angular_drag_n_m_s(1),
+              1e-6 * truth.angular_drag_n_m_s(1));
+  // And the base model it started from was genuinely wrong about both, so the
+  // recovery is not an accident of the starting point.
+  const galata::model::Quadrotor base = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-base.yaml")
+          .string());
+  EXPECT_GT(std::fabs(base.mass.mass_kg - truth.mass.mass_kg), 0.1);
+  EXPECT_GT(std::fabs(base.angular_drag_n_m_s(1) - truth.angular_drag_n_m_s(1)), 1e-3);
+}
+
+// "Unfitted parameters are preserved" has to be a checked statement. This
+// compares every parameter the study did not name against the BASE model, and
+// requires the provenance to list each of them by name.
+TEST(ExampleQuadrotorIdentification, PreservesEveryParameterItWasNotAskedToFit) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  const galata::model::Quadrotor base = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-base.yaml")
+          .string());
+
+  ASSERT_EQ(fitted.model.rotor_count(), base.rotor_count());
+  for (std::size_t r = 0; r < base.rotors.size(); ++r) {
+    EXPECT_EQ(fitted.model.rotors[r].thrust_coefficient_n_s2,
+              base.rotors[r].thrust_coefficient_n_s2)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].torque_coefficient_n_m_s2,
+              base.rotors[r].torque_coefficient_n_m_s2)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].speed_time_constant_s, base.rotors[r].speed_time_constant_s)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].position_cg_to_hub_body_m,
+              base.rotors[r].position_cg_to_hub_body_m)
+        << "rotor " << r;
+  }
+  EXPECT_EQ(fitted.model.drag_linear_n_s_m, base.drag_linear_n_s_m);
+  EXPECT_EQ(fitted.model.drag_quadratic_n_s2_m2, base.drag_quadratic_n_s2_m2);
+  EXPECT_EQ(fitted.model.angular_drag_n_m_s(0), base.angular_drag_n_m_s(0));
+  EXPECT_EQ(fitted.model.angular_drag_n_m_s(2), base.angular_drag_n_m_s(2));
+  EXPECT_EQ(fitted.model.mass.inertia_cg_body_kg_m2, base.mass.inertia_cg_body_kg_m2);
+
+  // Twenty-two parameter paths exist on a four-rotor model; two were fitted.
+  const auto& provenance = *fitted.identity.fit;
+  EXPECT_EQ(provenance.fitted.size(), 2U);
+  EXPECT_EQ(provenance.preserved_parameter_paths.size(), 20U);
+  for (const auto& parameter : provenance.fitted) {
+    EXPECT_FALSE(parameter.unit.empty()) << parameter.path << " has no unit";
+    EXPECT_EQ(std::count(provenance.preserved_parameter_paths.begin(),
+                         provenance.preserved_parameter_paths.end(),
+                         parameter.path),
+              0)
+        << parameter.path << " is listed both as fitted and as preserved";
+  }
+}
+
+// THE ONE THAT MATTERS FOR THE LABEL. Two stages of the same study run the same
+// model against two windows of the same file. Their verdicts must differ, and
+// neither may have been decided by comparing digests — the digests are equal in
+// both cases, because both windows came from one import.
+TEST(ExampleQuadrotorIdentification, LabelsTheHeldOutWindowAndTheTrainingWindowDifferently) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* held = result.find("check_heldout");
+  const galata::pipeline::Artifact* trained = result.find("check_estimation");
+  ASSERT_NE(held, nullptr);
+  ASSERT_NE(trained, nullptr);
+
+  const auto& held_out = held->payload_as<galata::pipeline::ValidationArtifact>("validation");
+  const auto& on_training = trained->payload_as<galata::pipeline::ValidationArtifact>("validation");
+
+  EXPECT_EQ(held_out.result.independence, galata::identify::Independence::VerifiedDisjoint);
+  EXPECT_EQ(on_training.result.independence, galata::identify::Independence::NotHeldOut);
+  // Both records came from one import, so the digests are EQUAL in both stages.
+  // A classification that read the digests could not have separated them.
+  EXPECT_EQ(held_out.result.estimation_record_sha256, held_out.result.validation_record_sha256);
+  EXPECT_EQ(on_training.result.estimation_record_sha256,
+            on_training.result.validation_record_sha256);
+  EXPECT_FALSE(held_out.result.independence_basis.empty());
+  EXPECT_NE(held_out.result.independence_basis, on_training.result.independence_basis);
+
+  // The estimation digest was read from the fitted model's own provenance, not
+  // declared in the study — study.yaml states no digest anywhere.
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  ASSERT_NE(fitted.identity.fit, nullptr);
+  EXPECT_EQ(held_out.result.estimation_record_sha256,
+            fitted.identity.fit->estimation_record_sha256);
 }
 
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {
