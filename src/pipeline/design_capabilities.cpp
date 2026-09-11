@@ -10,6 +10,8 @@
 #include "galata/sim/nonlinear.hpp"
 #include "galata/synth/control.hpp"
 
+#include "input_schedule_parse.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -363,25 +365,67 @@ Artifact robust_bounds(const StageContext& context) {
 struct LinearRun {
   model::LinearSystem system;
   numerics::Trajectory trajectory;
+  // The constant input, or a declared history's value at t = 0.
   Eigen::VectorXd input;
+  // Under a declared history, the input IN FORCE at each recorded sample —
+  // right-continuous at events, the value the next step integrates under. Empty
+  // for a constant run, whose every sample is `input`.
+  std::vector<Eigen::VectorXd> input_samples;
+  std::string history;  // how the history was declared; empty for a constant run
+  std::vector<int> event_steps;
+
+  [[nodiscard]] const Eigen::VectorXd& input_at(std::size_t sample) const {
+    return input_samples.empty() ? input : input_samples[sample];
+  }
 };
 
+// A constant input or a declared history, never both: a run given both would
+// leave it unsaid which one drove it. The history's schema is `sim.plant`'s, so
+// one schedule means the same thing on the linear and the nonlinear path; its
+// semantics are in include/galata/sim/linear.hpp.
 Artifact linear_simulation(const StageContext& context) {
   LinearRun run;
   run.system = system_at(context);
-  run.input =
-      vector(context.input->get("constant_input"), run.system.input_count(), "constant_input");
-  run.trajectory = sim::simulate_linear(
-      run.system,
-      vector(context.input->get("initial_state"), run.system.state_count(), "initial_state"),
-      run.input,
-      context.input->number_at("step_s"),
-      context.input->integer_at("steps", 0),
-      context.input->integer_at("sample_stride", 1));
+  const bool has_constant = context.input->get("constant_input") != nullptr;
+  const bool has_history = context.input->get("input_schedule") != nullptr;
+  if (has_constant && has_history) {
+    throw std::invalid_argument(
+        "sim.linear: give `constant_input` or `input_schedule`, not both. A run given both "
+        "leaves it unsaid which input drove it");
+  }
+  const Eigen::VectorXd initial =
+      vector(context.input->get("initial_state"), run.system.state_count(), "initial_state");
+  const double step_s = context.input->number_at("step_s");
+  const int steps = context.input->integer_at("steps", 0);
+  const int stride = context.input->integer_at("sample_stride", 1);
+  std::ostringstream summary;
+  if (has_history) {
+    const ValuePtr declared = context.input->get("input_schedule");
+    const sim::InputSchedule schedule =
+        schedule_at(context, "input_schedule", static_cast<int>(run.system.input_count()));
+    sim::ScheduledLinearRun scheduled =
+        sim::simulate_linear(run.system, initial, schedule, step_s, steps, stride);
+    run.trajectory = std::move(scheduled.trajectory);
+    run.input_samples = std::move(scheduled.input_samples);
+    run.input = run.input_samples.front();
+    run.event_steps = std::move(scheduled.event_steps);
+    std::ostringstream history;
+    history << declared->string_at("hold") << " hold, extrapolation "
+            << declared->string_at("extrapolation") << ", "
+            << declared->get("samples")->as_list().size() << " sample(s), "
+            << run.event_steps.size() << " event(s) inside the run";
+    run.history = history.str();
+    summary << run.trajectory.states.size() << " samples; declared input history (" << run.history
+            << ")";
+  } else {
+    run.input =
+        vector(context.input->get("constant_input"), run.system.input_count(), "constant_input");
+    run.trajectory = sim::simulate_linear(run.system, initial, run.input, step_s, steps, stride);
+    summary << run.trajectory.states.size() << " samples; completed linear response";
+  }
   Artifact result;
   result.kind = "linear_trajectory";
-  result.summary =
-      std::to_string(run.trajectory.states.size()) + " samples; completed linear response";
+  result.summary = summary.str();
   result.payload = std::move(run);
   return result;
 }
@@ -502,17 +546,32 @@ Artifact csv(const StageContext& context) {
     for (const auto& name : run.system.output_labels()) {
       out << ',' << csv_label("output:" + name);
     }
+    // Under a declared history the input changes, so it is a column: a reader
+    // reconstructing an output from the states needs the D u that produced it.
+    // A constant run keeps the header it always had.
+    const bool history = !run.input_samples.empty();
+    if (history) {
+      for (const auto& name : run.system.input_names) {
+        out << ',' << csv_label("input:" + name);
+      }
+    }
     out << '\n';
     for (std::size_t i = 0; i < run.trajectory.states.size(); ++i) {
       out << run.trajectory.times_s[i];
       const auto& x = run.trajectory.states[i];
+      const Eigen::VectorXd& u = run.input_at(i);
       const Eigen::VectorXd y =
-          run.system.output_matrix() * x + run.system.feedthrough_matrix() * run.input;
+          run.system.output_matrix() * x + run.system.feedthrough_matrix() * u;
       for (Eigen::Index j = 0; j < x.size(); ++j) {
         out << ',' << x(j);
       }
       for (Eigen::Index j = 0; j < y.size(); ++j) {
         out << ',' << y(j);
+      }
+      if (history) {
+        for (Eigen::Index j = 0; j < u.size(); ++j) {
+          out << ',' << u(j);
+        }
       }
       out << '\n';
     }
@@ -711,11 +770,18 @@ void register_design_capabilities(Registry& registry) {
                 },
                 {"system"}});
   registry.add({"sim.linear",
-                "Integrate a continuous linear model with a constant input and fixed-step RK4",
+                "Integrate a continuous linear model with fixed-step RK4 under a constant input or "
+                "a declared input history with a stated hold and extrapolation",
                 "linear_trajectory",
                 State::ImplementedUnvalidated,
                 linear_simulation,
-                {"system", "step_s", "steps", "sample_stride", "initial_state", "constant_input"}});
+                {"system",
+                 "step_s",
+                 "steps",
+                 "sample_stride",
+                 "initial_state",
+                 "constant_input",
+                 "input_schedule"}});
   registry.add(
       {"sim.nonlinear",
        "Simulate a local aircraft model with bounded actuators and optional full-state feedback",
@@ -754,9 +820,9 @@ std::vector<TimeSeriesChart> design_charts(const Artifact& artifact) {
       chart.y_label = label + " (declared model units)";
       chart.times_s = run.trajectory.times_s;
       chart.series.push_back({label, {}});
-      for (const auto& state : run.trajectory.states) {
-        const Eigen::VectorXd output =
-            run.system.output_matrix() * state + run.system.feedthrough_matrix() * run.input;
+      for (std::size_t sample = 0; sample < run.trajectory.states.size(); ++sample) {
+        const Eigen::VectorXd output = run.system.output_matrix() * run.trajectory.states[sample]
+                                       + run.system.feedthrough_matrix() * run.input_at(sample);
         chart.series.front().values.push_back(output(index));
       }
       charts.push_back(std::move(chart));
@@ -1014,6 +1080,12 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
     const auto& run = artifact.payload_as<LinearRun>("linear_trajectory");
     out << "Completed " << run.trajectory.step_count << " steps at " << run.trajectory.step_s
         << " s. Fixed-step RK4; compare with a smaller step to assess integration error.\n\n";
+    if (!run.history.empty()) {
+      out << "Driven by a declared input history: " << run.history
+          << ". Timestamps are seconds from the start of the run; each recorded input is the "
+             "value in force after any event at that instant, and report.csv carries it per "
+             "sample.\n\n";
+    }
     matrix_table(out, "Final state", run.trajectory.states.back(), run.system.state_names);
     return true;
   }

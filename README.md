@@ -205,7 +205,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
-| `sim.linear` | Integrate a continuous linear model with a constant input and fixed-step RK4 | `linear_trajectory` | implemented, unvalidated |
+| `sim.linear` | Integrate a continuous linear model with fixed-step RK4 under a constant input or a declared input history with a stated hold and extrapolation | `linear_trajectory` | implemented, unvalidated |
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
 | `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |

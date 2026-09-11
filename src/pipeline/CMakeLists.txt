@@ -17,6 +17,7 @@ add_library(galata_pipeline
   model_capabilities.cpp
   quadrotor_capabilities.cpp
   discrete_capabilities.cpp
+  input_schedule_parse.cpp
   linear_graph_capability.cpp
   files.cpp
   sha256.cpp
