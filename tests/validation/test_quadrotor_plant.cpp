@@ -345,24 +345,124 @@ TEST(QuadrotorStepRefinement, HalvingTheStepConvergesAtFourthOrderOverAManoeuvre
 // A skip here is therefore a statement about the checkout, not about galata,
 // and it says so.
 //
-// BUDGET, and where it comes from. The two implementations differ in
-// integration scheme as well as in code: the fixture applies an EXACT
-// first-order rotor lag sampled at the RK stages, galata carries the rotor
-// speed as an ODE state through classical RK4. At the fixture's dt of 0.004 s
-// and tau of 0.035 s the two amplification factors differ by 1.79e-7 relative
-// per step, and the requesting programme bounded the resulting envelope
-// difference over one three-per-cent rotor transient at no more than 5.8e-7 of
-// the commanded fraction. On a hover rotor that is 5.8e-7 * 626.31 = 3.63e-4
-// rad/s, and the rotor gate sits one order above it at 4e-3 rad/s. That is the
-// whole derivation: the number comes from the mechanism, not from what galata
-// produced.
+// BUDGET, and where each number comes from. Each gate is compared with a
+// figure for the one thing that lets two correct implementations of these
+// equations disagree: the integration scheme, evaluated on this fixture's
+// excitation. No gate is drawn from what galata produced, and this derivation
+// changes and widens no gate value. Every figure below is printed by
+//   tools/validation/souxmar_cross_check_budgets.py --fixture-dir <dir>
+// (numpy its only dependency), run on this fixture and this model file:
+//   b0329175e8ff1330ca7334827beff5f1225a3830a05f7cd60804d2fe72b75e85  fixture
+//   08e7efeb2455f9ae8f08fafb320247bba94f407d87ac5d1c4bf69071c5e3883a  model
+// Both are SHA-256; the model is models/souxmar-quad/souxmar-quad.yaml. The
+// tool exits nonzero if any gate sits at or below its figure. It reproduces
+// the fixture BIT-EXACTLY, every state column of every row, from a
+// reimplementation of Souxmar's stepper. So the scheme it attributes to the
+// fixture is the fixture's own.
 //
-// The gate is deliberately NOT set just above the measured agreement, which is
-// far tighter than this bound — the case records it as `worst_rotor_rad_s`. A
-// budget drawn from the observed value would be a regression lock wearing a
-// validation's name, and charter rule 8 requires a lock to be labelled as one.
-// The remaining budgets are set an order above the motion that scheme term can
-// induce over 8 s. A disagreement beyond any of them is a finding to be
+// Not every figure is a proven bound. The rotor figure is exact. The body-rate
+// and attitude figures are upper bounds to first order. The position figure is
+// an estimate, checked against the tool's reimplementation of galata's scheme
+// at every row. Each is labelled below.
+//
+// WHAT DIFFERS. Both sides take classical RK4 at 0.004 s, hold the command over
+// the step, and renormalise the quaternion once the step is complete. The
+// ENU/FLU to NED/FRD change of frame commutes with both. Four things separate
+// them:
+//   (1, 2) The fixture applies the EXACT first-order rotor lag, sampled at the
+//          RK stages; galata carries rotor speed through RK4.
+//   (3)    The fixture integrates ground velocity; galata integrates
+//          air-relative body velocity.
+//   (4)    The fixture normalises the quaternion before forming each stage's
+//          matrix; dcm_ned_from_body does not.
+// Moments depend only on rotor speed and body rate, so (3) and (4) can reach
+// position, and velocity, which is not compared, but not attitude or body rate.
+//
+// ROTOR, 4e-3 rad/s. EXACT. The lag is linear and decoupled, so this term is
+// computed, not estimated. With a = h/tau = 0.114, the per-step decay factors
+// e^-a and RK4's quartic R(-a) differ by 1.787e-7 relative. After a commanded
+// change d the two lags differ by |R^N - e^(-aN)| d, which is largest at N = 9
+// steps: 5.751e-7 d. The largest change has all four rotors changing at once
+// by +/-18.789 rad/s (the collective change is the smaller 12.526), so the
+// compared four-rotor norm is 5.751e-7 x 37.579 = 2.161e-5 rad/s. The gate is
+// 185 times that.
+//
+// The earlier text here made three errors, all corrected:
+//   - It took 5.8e-7 as a bound and multiplied it by the HOVER speed,
+//     626.31 rad/s. That product, 3.63e-4, bounds nothing this case compares.
+//     5.8e-7 is the requesting programme's figure: its bridge_check.json,
+//     written by apps/galata_bridge.py at Souxmar revision 6ebe5f0, records
+//     5.7509e-7 as the relative rotor error of its linear model against its
+//     nonlinear plant, measured after rotor steps of 5 and 0.5 rad/s. It is a
+//     measured relative error, not a bound on this fixture's transients.
+//   - It called the measured agreement far tighter than the bound. It is not:
+//     a recorded run of this test measured worst_rotor_rad_s = 2.161e-05,
+//     which is the scheme term itself, and the tool's reimplementation of
+//     galata's scheme reproduces it.
+//   - It attributed 1.79e-7 to the requesting programme as well. No output of
+//     the programme states it. It is the relative decay difference above,
+//     rounded.
+//
+// BODY RATE 1e-5 rad/s, ATTITUDE 1e-6, POSITION 1e-3 m. For a linear lag, RK4
+// obeys h * (weighted stage mean of e) = tau * (e_k - e_{k+1}) exactly. So the
+// rate forcing that the stage rotor speeds drive TELESCOPES within each
+// transient, and galata's returns to zero with the rotor difference. What
+// remains is a plateau set by Souxmar's Simpson rule on the exact exponential,
+// whose excess sigma - 1 is 5.92e-8. Telescoping ignores the dynamics between
+// steps. Summation by parts charges what it leaves out: tau (e^(h|A|) - 1)
+// times the running sum of R^N - e^(-aN) per unit change, carried to the end
+// of the run with no cutoff. That is at most 3.06e-9 rad/s per pitch or roll
+// change. The charge needs each step's error propagator to have norm at most
+// 1, and the tool checks that on the fixture's rates.
+//
+// Each command change is carried by its own closed form through the rotor
+// moment and thrust sensitivities. The eight transients are summed in absolute
+// value: no cancellation is assumed between a pulse and the change that undoes
+// it. The rigid-body Jacobian is charged at the fixture's own largest rates,
+// and the feed from yaw into pitch and roll at the larger end of each step.
+// Attitude is the sum of each step's angle increment. Velocity is driven by
+// the attitude figure through at most 36.98 m/s^2 per radian of thrust and
+// drag.
+//
+// The figures:
+//   - body rate: 2.0358e-7 rad/s, an upper bound to first order; the gate is
+//     49.1 times that.
+//   - attitude: 3.5101e-7, an upper bound to first order; the gate is 2.85
+//     times that. This is the least headroom of the four: under three times,
+//     not "an order above". The earlier claim that these gates sat an order
+//     above the scheme term is withdrawn.
+//   - position: 1.1940e-4 m, of which (3) and (4) contribute 4.1e-7 m; the
+//     gate is 8.4 times that. This is an ESTIMATE, not a bound: it is sampled
+//     at rows, and the share of (3) and (4) comes from one-step defects
+//     measured against the fixture, galata's scheme stepped from each row and
+//     differenced with the next. It is checked against the tool's
+//     reimplementation of galata's scheme at every row, and stays at least
+//     2.02 times that reimplementation's disagreement. The position gate rests
+//     on that row-by-row check alone.
+// The two bounds are checked at every row as well. Their least margin is on
+// the first row after the first change: 1.0044 for body rate and 1.0113 for
+// attitude.
+//
+// VALIDITY. The bounds are first order in a per-step relative defect of order
+// 1e-7. They hold only inside this fixture's motion envelope: |omega| up to
+// 4.30 rad/s, |v_b| up to 28.2 m/s and a_th, the thrust-plus-drag slope, up to
+// 36.98 m/s^2 per rad. Items (3) and (4) grow like (h |omega|)^5 |v|. Hold the
+// same pulses instead of undoing them and the body spins up to 39.1 rad/s; the
+// position disagreement then reaches 7.3e-3 m, past the gate. A fixture
+// outside the envelope needs a new derivation, not these numbers.
+//
+// WHAT THE CASE CAN AND CANNOT SEE. Suppose galata's lag time constant were
+// wrong by a fraction of itself. Run through galata's scheme, the attitude gate
+// fails at 1.3e-5 of tau in either direction, the body-rate gate at 4.4e-5 and
+// the position gate at 9.1e-4. The rotor gate alone would pass an error up to
+// about 2.9e-4. No gate can see an error the two implementations share: the
+// same equations with the same wrong coefficient agree here.
+//
+// No gate is set just above the measured agreement the case records as
+// worst_position_m, worst_attitude, worst_body_rate_rad_s and
+// worst_rotor_rad_s. A budget drawn from an observed value would be a
+// regression lock wearing a validation's name, and charter rule 8 requires a
+// lock to be labelled as one. A disagreement beyond any gate is a finding to be
 // reported, never a tolerance to widen.
 namespace {
 
