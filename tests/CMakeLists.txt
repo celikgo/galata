@@ -25,8 +25,86 @@ endif()
 
 if(UNIX AND TARGET galata_cli)
   find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+
+  # THE PER-INVOCATION DEADLINE, and why the instrumented build cannot share
+  # the uninstrumented one.
+  #
+  # Each of the four suites below wraps every `galata project ...` call in a
+  # Python-level deadline, so that a wedged worker fails naming its own command
+  # instead of arriving as an opaque ctest kill of the whole module. That
+  # deadline is 45 s, set in the scripts, and 45 s was never a sound figure for
+  # the sanitizer build. It survived only while the CLI stayed small enough.
+  #
+  # One invocation, measured on Darwin/arm64 with
+  #   /usr/bin/time -p <cli> project <command> <scratch fixture>
+  # against the CLI built by this repository's own `asan` preset at two commits:
+  #
+  #     sanitizer CLI            bytes    import-linear    project run
+  #     main, ed63f76       82 882 000         13.19 s        12.05 s
+  #     this branch         96 776 528         13.89 s        13.68 s
+  #
+  # Two readings matter here. First, the two commands do entirely different work
+  # — one imports and rewrites a study, the other integrates a simulation — and
+  # cost the same to within a second. That is the mechanism the ProjectWorkflow
+  # note below describes, measured directly rather than inferred: the cost is
+  # dominated by the worker hashing its own executable, so it scales with the
+  # SIZE OF THE CLI and not with what the test exercises. The uninstrumented
+  # build makes the same point from the other side — 1.70 s and 1.77 s for the
+  # same two commands against a 28 MB binary, a factor of 7.7 to 8.0 below the
+  # instrumented figures.
+  #
+  # Second, the margin was never there to lose. 45 s bought about 5.6 s of
+  # instrumented work, and one instrumented invocation already measured 12 s on
+  # `main`, on a machine faster than any hosted runner. The ProjectWorkflow note
+  # records that same suite costing 222 s locally against 517-740 s hosted, so
+  # the hosted machine runs this workload 2.3 to 3.3 times slower: `main` sat at
+  # roughly 28-40 s against a 45 s deadline. This branch adds capabilities to
+  # the CLI, 16.8 percent of its instrumented size and 13.5 percent of its
+  # per-invocation cost, and that consumed what was left. Run 34506763806 lost
+  # FIFTEEN invocations to the deadline at once across all four suites — eleven
+  # `project run`, four `project import-linear` — with ProjectLinearImport
+  # losing its very first call in setUpClass and running zero tests. The same
+  # four suites passed 518/518 in run 34471404322.
+  #
+  # So the deadline is SCALED BY THE MEASURED FACTOR rather than raised until
+  # the suite goes green: 45 x 7.96 = 358, declared here as 360. Against a
+  # hosted instrumented invocation of 32-45 s that is eight to eleven times the
+  # work, comparable headroom to what 45 s gave the debug build, and it stays
+  # below every module TIMEOUT set below, so it still fires first and still
+  # names the command. The uninstrumented default is untouched at 45.
+  #
+  # CONFIRMED ON THE HOSTED RUNNER, which is what turns the paragraph above
+  # from an inference into a measurement. Run 34521117651 passed 637/637 under
+  # the 360 s deadline with no timeout and no sanitizer diagnostic, and the four
+  # suites' own times against the same four at 48f131b are:
+  #
+  #                          48f131b    this head    growth
+  #     ProjectWorkflow      653.43 s     762.54 s     16.7%
+  #     ProjectLinearImport  157.76 s     183.34 s     16.2%
+  #     ProjectRecovery      158.60 s     184.76 s     16.5%
+  #     ProjectRoutes        125.08 s     145.49 s     16.3%
+  #
+  # against an instrumented binary 16.8 percent larger. Four suites of quite
+  # different content, all growing within half a point of the SIZE of the
+  # executable: that is the hashing mechanism, measured on the machine that
+  # matters rather than argued from a laptop. It also means the next material
+  # addition to the CLI moves these figures again, and predictably.
+  #
+  # This is a wall-clock guard, NOT an error budget on a computed quantity. No
+  # numerical tolerance moves, no comparison loosens, no required outcome is
+  # relaxed and no test changes what it asserts — the same reasoning the
+  # ProjectWorkflow note sets out for its own figure, applied one level down. If
+  # the CLI keeps growing the factor is re-measured with the command above; it
+  # is not nudged.
+  if(GALATA_ENABLE_ASAN OR GALATA_ENABLE_UBSAN)
+    set(galata_project_timeout_s 360)
+  else()
+    set(galata_project_timeout_s 45)
+  endif()
+
   add_test(NAME ProjectWorkflow
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "GALATA_PROJECT_TIMEOUT_S=${galata_project_timeout_s}"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_project_workflow.py")
   # Instrumented workers hash their full executable/runtime inventory for every
   # run; give the process/recovery suite room on sanitizer and hosted machines.
@@ -79,14 +157,17 @@ if(UNIX AND TARGET galata_cli)
   set_tests_properties(ProjectWorkflow PROPERTIES LABELS "integration" TIMEOUT 1500)
   add_test(NAME ProjectLinearImport
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "GALATA_PROJECT_TIMEOUT_S=${galata_project_timeout_s}"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_project_linear_import.py")
   set_tests_properties(ProjectLinearImport PROPERTIES LABELS "integration" TIMEOUT 600)
   add_test(NAME ProjectRecovery
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "GALATA_PROJECT_TIMEOUT_S=${galata_project_timeout_s}"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_project_recovery.py")
   set_tests_properties(ProjectRecovery PROPERTIES LABELS "integration" TIMEOUT 600)
   add_test(NAME ProjectRoutes
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "GALATA_PROJECT_TIMEOUT_S=${galata_project_timeout_s}"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_project_routes.py")
   set_tests_properties(ProjectRoutes PROPERTIES LABELS "integration" TIMEOUT 600)
   add_test(NAME DesktopPackageContract

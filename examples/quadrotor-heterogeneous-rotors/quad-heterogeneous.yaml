@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A SYNTHETIC heterogeneous-rotor quadrotor, for demonstrating the trim path
+# that four differing rotors need. Everything here except the four thrust
+# coefficients is the shipped nominal model, models/souxmar-quad.
+#
+# THE FOUR THRUST COEFFICIENTS ARE NOT MEASURED. They are the nominal 1.0e-5
+# multiplied by 0.92, 1.00, 1.05 and 1.08 — a plus-or-minus eight percent spread
+# chosen by hand to make the rotors differ by a visible, physically ordinary
+# amount. No aircraft was weighed, no motor was run up, and no bench produced
+# them. They exist so the example has four DIFFERENT numbers, and for no other
+# reason.
+#
+# WHAT THIS IS NOT. It is not the Souxmar nominal vehicle (that is
+# models/souxmar-quad, whose four rotors are identical), and it is not the
+# proposed 2.475 kg hardware airframe (which has no model in this repository and
+# whose coefficients, when they exist, will come from a bench). It is a fixture
+# for one capability. Nothing computed from it is evidence about any aircraft.
+#
+# The spread's DIRECTION matters for reading the result: rotor 0 is the weakest,
+# so it must spin fastest to carry its share, and rotor 3 the strongest, so it
+# must spin slowest.
+
+description: "Synthetic heterogeneous-rotor quadrotor, 1.6 kg, X configuration, fixed voltage — four differing thrust coefficients, not measured"
+citation: "Derived by hand from the Souxmar forest-ISR programme, nonlinear quadrotor plant (fcs/plant/quadrotor.py), nominal coefficient set published in outputs/galata_bridge/reference_trajectory.json; an independent implementation, not measured aircraft data and not a published source"
+
+mass:
+  mass_kg: 1.6
+  inertia_xx_kg_m2: 0.023
+  inertia_yy_kg_m2: 0.023
+  inertia_zz_kg_m2: 0.042
+
+# Rotor order is the fixture's column order: front-left, rear-left, rear-right,
+# front-right. Hub positions are the X-configuration geometry of a 0.23 m arm,
+# 0.23 / sqrt(2) in each of body x and y, with the rotor plane through the CG.
+rotors:
+  - position_cg_to_hub_body_m: [0.16263455967290593, -0.16263455967290593, 0.0]
+    spin_about_body_z: 1
+    thrust_coefficient_n_s2: 9.2e-06   # nominal 1.0e-5 x 0.92
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [-0.16263455967290593, -0.16263455967290593, 0.0]
+    spin_about_body_z: -1
+    thrust_coefficient_n_s2: 1e-05   # nominal 1.0e-5 x 1.0
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [-0.16263455967290593, 0.16263455967290593, 0.0]
+    spin_about_body_z: 1
+    thrust_coefficient_n_s2: 1.05e-05   # nominal 1.0e-5 x 1.05
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [0.16263455967290593, 0.16263455967290593, 0.0]
+    spin_about_body_z: -1
+    thrust_coefficient_n_s2: 1.08e-05   # nominal 1.0e-5 x 1.08
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+
+drag:
+  linear_n_s_m: [0.12, 0.12, 0.18]
+  quadratic_n_s2_m2: [0.025, 0.025, 0.035]
+  angular_n_m_s: [0.002, 0.002, 0.003]

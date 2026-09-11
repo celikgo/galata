@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The whole model-first chain, on a vehicle whose four rotors are not identical:
+# a nonlinear plant, its hover equilibrium, a linearisation about that
+# equilibrium, a full-state law designed on the linearisation, and the law flown
+# back against the NONLINEAR plant at a declared rate with a declared delay.
+#
+#   galata run examples/quadrotor-sampled-control/study.yaml
+#
+# WHY THE LAST STEP IS THE POINT. A controller designed on a linearisation and
+# checked on that same linearisation has been checked against the assumptions it
+# was designed under. `sim.sampled` runs it against the plant the linearisation
+# was taken FROM, executing at 250 Hz with a two-period delay and per-rotor
+# saturation — so the run answers a different question from the design, and the
+# two answers are allowed to disagree.
+#
+# WHAT THIS IS NOT. Not a claim about the sampled loop's margins: the gain and
+# phase margins of the continuous linearisation describe the continuous loop,
+# and this loop samples, holds and delays. Not evidence about any aircraft — the
+# model's four thrust coefficients are synthetic, and quad-heterogeneous.yaml's
+# own header says so.
+
+version: 1
+
+stages:
+  - id: plant
+    capability: model.quadrotor
+    input:
+      path: quad-heterogeneous.yaml
+
+  # HETEROGENEOUS TRIM. Four different thrust coefficients mean four different
+  # equilibrium speeds, and there is no vehicle-wide hover speed to start the
+  # solve from. Rotor 0 is the weakest and must spin fastest.
+  - id: hover
+    capability: trim.hover
+    input:
+      quadrotor: {from: plant}
+      altitude_m: 120.0
+
+  - id: linear
+    capability: linearize.extended
+    input:
+      trim: {from: hover}
+      evidence_path: operating-point.yaml
+
+  # The design sees the rotor commands and the three position outputs; the wind
+  # columns are dropped, because a law fed back on a disturbance it cannot
+  # measure is not a law anybody can fly.
+  - id: rotors
+    capability: model.channels
+    input:
+      system: {from: linear}
+      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]
+      outputs: [position_north_m, position_east_m, altitude_m]
+
+  # Weights are the study's, declared here rather than defaulted: position held
+  # forty times harder than velocity, attitude twenty, and the rotor-speed states
+  # almost free because they are the actuator and not the objective.
+  - id: lqr
+    capability: synth.lqr
+    input:
+      system: {from: rotors}
+      break_at: plant_input
+      q:
+        [
+          [40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001]
+        ]
+      r:
+        [
+          [0.02, 0, 0, 0],
+          [0, 0.02, 0, 0],
+          [0, 0, 0.02, 0],
+          [0, 0, 0, 0.02]
+        ]
+
+  # BEFORE THE DESIGN IS TRUSTED, WHAT THE MODEL CAN AND CANNOT DO. Reachability
+  # and observability of the chart coordinates for this input and output set,
+  # reported by name rather than discovered later from a failed synthesis. The
+  # horizon is declared because the answer depends on it; the infinite-horizon
+  # Gramians do not exist for a hover linearisation at all, and the capability
+  # says so rather than returning a Lyapunov solution that is not a Gramian.
+  - id: reachability
+    capability: analyze.gramians
+    input:
+      system: {from: linear}
+      horizon_s: 4.0
+
+  # THE MARGINS OF THE DESIGN, read one loop at a time with the other loops
+  # CLOSED. Handing the MIMO return ratio to a SISO margin routine breaks one
+  # channel and leaves the other three open, which is a vehicle with most of its
+  # controller disconnected: that closure is not internally stable and
+  # `analyze.margins` refuses it, correctly. This reading closes back to the
+  # design's own closed loop, so the Nyquist test is well posed.
+  #
+  # THREE THINGS THAT ARE NOT THE SAME, and the disk margin below covers only
+  # the second. (1) Gain and phase margins bound a pure gain or a pure phase
+  # change in THIS channel. (2) The disk margin bounds simultaneous gain AND
+  # phase variation, still in THIS channel — it is a SISO condition.
+  # (3) Simultaneous variation ACROSS channels is bounded by neither, and
+  # galata has no capability for it: running the disk margin on each loop in
+  # turn does not add up to a MIMO result. None of the three says anything
+  # about the SAMPLED loop.
+  - id: loop_0
+    capability: model.control_system
+    input:
+      law: {from: lqr}
+      use: single_loop
+      channel: omega_command_0
+
+  - id: margins_0
+    capability: analyze.margins
+    input:
+      system: {from: loop_0}
+
+  - id: disk_0
+    capability: analyze.diskmargin
+    input:
+      system: {from: loop_0}
+
+  # 250 Hz, two periods of delay, from a displaced initial condition. The
+  # integration step divides the controller period exactly, which `sim.sampled`
+  # requires rather than rounds.
+  - id: closed
+    capability: sim.sampled
+    input:
+      trim: {from: hover}
+      law: {from: lqr}
+      step_s: 0.002
+      steps: 3000
+      controller_period_s: 0.004
+      delay_periods: 2
+      initial_chart_perturbation: [2.0, -1.0, 1.5, 0, 0, 0, 0.05, 0.02, 0.0, 0, 0, 0, 0, 0, 0, 0]
+
+  - id: history
+    capability: report.csv
+    input:
+      trajectory: {from: closed}
+      path: sampled-run.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: A sampled law flown against the nonlinear plant it was designed from
+      sections: [{from: reachability}, {from: lqr}, {from: margins_0}, {from: disk_0}, {from: closed}]
+      path: sampled-control.md

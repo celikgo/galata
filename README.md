@@ -174,33 +174,47 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 |---|---|---|---|
 | `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with estimated gain and phase ranges and a candidate boundary perturbation | `disk_margin` | implemented and validated |
 | `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
+| `analyze.gramians` | Reachability and observability of a linear model for a declared input and output set — the subspace ranks, the directions that fall outside them by state name, and finite-horizon Gramians over a declared horizon | `gramians` | implemented, unvalidated |
 | `analyze.hinfnorm` | Bound a stable continuous-time H-infinity norm using Hamiltonian level tests | `hinfinity_norm` | implemented, unvalidated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
 | `analyze.robust_bounds` | Bound S/T norms and SISO disk size for an internally stable feedback loop | `robust_bounds` | implemented, unvalidated |
 | `analyze.sensitivity` | Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with negative unit feedback, and the frequencies at which they occur | `sensitivity_peaks` | implemented and validated |
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
+| `data.import.csv` | Read a measured record from delimited text under a declared unit, frame and timebase mapping, refusing anything the study has not accounted for | `measured_record` | implemented, unvalidated |
+| `data.import.ulog` | Read a measured record from a PX4 ULog under a declared channel, unit and frame mapping, resampled onto one timebase by zero-order hold | `measured_record` | implemented, unvalidated |
+| `data.window` | Cut a measured record to a half-open time window of itself, keeping the source identity so that two windows of one import are provably disjoint | `measured_record` | implemented, unvalidated |
+| `identify.greybox` | Fit a declared subset of a multirotor's parameters to a measured record by simulating the nonlinear plant, refusing a parameter the data does not constrain | `quadrotor` | implemented, unvalidated |
+| `identify.static_fit` | Fit a response that is linear in declared terms — a bench map — reporting the range it was measured over and an uncertainty only where the data supports one | `static_fit` | implemented, unvalidated |
+| `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with separation from the training data classified on stated grounds rather than inferred from a digest | `validation` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
 | `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
-| `model.control_system` | Extract the closed loop or plant-input return ratio of an LQR design | `linear_system` | implemented, unvalidated |
+| `model.control_system` | Extract an LQR design's closed loop, its plant-input return ratio, or the single loop at one input with the other loops still closed | `linear_system` | implemented, unvalidated |
+| `model.discretize` | Discretise a continuous linear model exactly under a declared zero-order hold at a declared sample time, reporting the fastest mode against the Nyquist frequency | `discrete_linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
 | `model.linear.export` | Write a linear model as the named-matrix YAML that model.linear.statespace reads | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
 | `model.linear_graph` | Lower a typed linear system or LQR plant and feedback into an executable graph with origin evidence | `executable_model` | implemented, unvalidated |
 | `model.quadrotor` | Load a nonlinear multirotor plant — rotors with first-order speed lag, per-axis drag and an optional battery | `quadrotor` | implemented, unvalidated |
+| `model.quadrotor.export` | Write a multirotor as the YAML model.quadrotor reads, with a required record of where its numbers came from — which parameters were fitted, from what, and which were carried over untouched | `quadrotor` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
-| `sim.linear` | Integrate a continuous linear model with a constant input and fixed-step RK4 | `linear_trajectory` | implemented, unvalidated |
+| `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
+| `sim.linear` | Integrate a continuous linear model with fixed-step RK4 under a constant input or a declared input history with a stated hold and extrapolation | `linear_trajectory` | implemented, unvalidated |
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
+| `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |
+| `sim.sampled` | Execute a state-feedback law against the nonlinear plant — a continuous design at a declared rate, or a discrete design only at its own period — with zero-order hold, whole-period delay and per-rotor saturation | `sampled_trajectory` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
+| `synth.dare` | Solve a discrete-time algebraic Riccati equation, cross term included, refusing a residual over budget or a closed loop not strictly inside the unit circle | `dare_solution` | implemented, unvalidated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
 | `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
+| `synth.sampled_lqr` | Design sampled full-state feedback: discretise the plant and the continuous cost under one hold, retain the cost's state-input cross term, and solve the discrete Riccati equation | `sampled_control_law` | implemented, unvalidated |
 | `trim.hover` | Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a relative equilibrium — for attitude and rotor speeds, reporting each rotor's margin | `hover_trim` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->
@@ -383,6 +397,10 @@ no content that is not in the repository.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones and their contents
 - [`docs/rfc/`](docs/rfc/README.md) — design records with implementation status;
   [RFC-0001](docs/rfc/0001-control-synthesis.md) covers control synthesis
+- [The quadrotor programme's acceptance record](docs/reports/quadrotor-programme-acceptance.md)
+  — thirteen work items against their evidence, with *implemented*, *locally verified*,
+  *CI-verified* and *merged* kept apart, the commands to reproduce every acceptance run, and
+  the outstanding limitation for each item
 - [The NT-33A flight-condition report](https://celikgo.github.io/galata/reports/nt33a-fc1.html)
   — the trim point, the modal table, the pole map and the margins for the reference case, drawn
   from a run and diffed by CI. Committed at

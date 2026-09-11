@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // File-driven control design and simulation adapters. All numeric algorithms
 // live in synth/sim; this layer validates wiring, preserves names and renders.
+#include "galata/analyze/gramians.hpp"
 #include "galata/analyze/hinfinity.hpp"
+#include "galata/identify/validate.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/charts.hpp"
 #include "galata/sim/linear.hpp"
 #include "galata/sim/nonlinear.hpp"
 #include "galata/synth/control.hpp"
+
+#include "input_schedule_parse.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +192,55 @@ Artifact lqr(const StageContext& context) {
   return result;
 }
 
+// --- analyze.gramians ------------------------------------------------------
+//
+// RFC-0002 asked for this so that "an exported model's defective integrator
+// chains and any unobservable direction are reported rather than discovered
+// from a failed synthesis". The horizon is required rather than defaulted: see
+// the header for why a default would put a number nobody chose into a figure a
+// reader quotes.
+Artifact gramians(const StageContext& context) {
+  const model::LinearSystem system = system_at(context);
+  analyze::GramianOptions options;
+  options.horizon_s = context.input->number_at("horizon_s");
+  options.steps = context.input->integer_at("steps", 400);
+  options.rank_tolerance = context.input->number_at("rank_tolerance", 1e-9);
+  auto analysis = analyze::analyse_gramians(system, options);
+
+  std::ostringstream summary;
+  summary << "reachable " << analysis.reachability.rank << "/" << analysis.reachability.state_count
+          << ", observable " << analysis.observability.rank << "/"
+          << analysis.observability.state_count << " at a relative floor of " << std::scientific
+          << std::setprecision(1) << options.rank_tolerance;
+  summary.unsetf(std::ios::floatfield);
+  // The one thing a reader most needs and would otherwise assume: these are
+  // finite-horizon Gramians, and for this class of model the infinite-horizon
+  // ones do not exist at all.
+  summary << "; finite-horizon Gramians over " << std::fixed << std::setprecision(2)
+          << analysis.horizon_s << " s";
+  summary.unsetf(std::ios::floatfield);
+  if (!analysis.spectrum_is_strictly_stable) {
+    summary << " (the infinite-horizon Gramians DO NOT EXIST for this model — rightmost "
+               "eigenvalue real part "
+            << std::scientific << std::setprecision(3) << analysis.rightmost_eigenvalue_real_part
+            << ")";
+    summary.unsetf(std::ios::floatfield);
+  }
+  if (!analysis.reachability.missing_directions.empty()
+      || !analysis.observability.missing_directions.empty()) {
+    summary << "; "
+            << analysis.reachability.missing_directions.size()
+                   + analysis.observability.missing_directions.size()
+            << " direction(s) named in the report";
+  }
+
+  Artifact artifact;
+  artifact.kind = "gramians";
+  artifact.summary = summary.str();
+  artifact.payload = std::move(analysis);
+  return artifact;
+}
+
 Artifact control_system(const StageContext& context) {
   const auto& law = context.upstream_at("law").payload_as<synth::LqrDesign>("control_law");
   const auto use = context.input->string_at("use");
@@ -197,7 +250,45 @@ Artifact control_system(const StageContext& context) {
   if (use == "broken_loop") {
     return system_artifact(law.broken_loop);
   }
-  throw std::invalid_argument("model.control_system: use must be closed_loop or broken_loop");
+  // The loop-at-a-time reading, which is the one a frequency-domain margin can
+  // be computed from on a plant that needs all its channels. See
+  // `synth::single_loop_others_closed` for why `broken_loop` cannot be handed
+  // to a SISO margin routine on such a plant, and for what a set of these
+  // figures does NOT bound.
+  if (use == "single_loop") {
+    const ValuePtr channel = context.input->get("channel");
+    if (!channel) {
+      throw std::invalid_argument(
+          "model.control_system: `use: single_loop` needs `channel`, naming which plant input "
+          "the loop is broken at. There is one such loop per input and they are different "
+          "loops with different margins; picking one for the caller would be choosing which "
+          "number to report");
+    }
+    const std::vector<std::string>& inputs = law.plant.input_names;
+    int index = -1;
+    if (channel->kind() == Value::Kind::Number) {
+      index = static_cast<int>(channel->as_number());
+    } else {
+      const std::string name = channel->as_string();
+      for (std::size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i] == name) {
+          index = static_cast<int>(i);
+          break;
+        }
+      }
+      if (index < 0) {
+        std::ostringstream message;
+        message << "model.control_system: the plant has no input '" << name << "'. It has: ";
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+          message << (i == 0 ? "" : ", ") << inputs[i];
+        }
+        throw std::invalid_argument(message.str());
+      }
+    }
+    return system_artifact(synth::single_loop_others_closed(law, index));
+  }
+  throw std::invalid_argument(
+      "model.control_system: use must be closed_loop, broken_loop or single_loop");
 }
 
 analyze::HinfinityOptions norm_options(const ValuePtr& input) {
@@ -274,25 +365,67 @@ Artifact robust_bounds(const StageContext& context) {
 struct LinearRun {
   model::LinearSystem system;
   numerics::Trajectory trajectory;
+  // The constant input, or a declared history's value at t = 0.
   Eigen::VectorXd input;
+  // Under a declared history, the input IN FORCE at each recorded sample —
+  // right-continuous at events, the value the next step integrates under. Empty
+  // for a constant run, whose every sample is `input`.
+  std::vector<Eigen::VectorXd> input_samples;
+  std::string history;  // how the history was declared; empty for a constant run
+  std::vector<int> event_steps;
+
+  [[nodiscard]] const Eigen::VectorXd& input_at(std::size_t sample) const {
+    return input_samples.empty() ? input : input_samples[sample];
+  }
 };
 
+// A constant input or a declared history, never both: a run given both would
+// leave it unsaid which one drove it. The history's schema is `sim.plant`'s, so
+// one schedule means the same thing on the linear and the nonlinear path; its
+// semantics are in include/galata/sim/linear.hpp.
 Artifact linear_simulation(const StageContext& context) {
   LinearRun run;
   run.system = system_at(context);
-  run.input =
-      vector(context.input->get("constant_input"), run.system.input_count(), "constant_input");
-  run.trajectory = sim::simulate_linear(
-      run.system,
-      vector(context.input->get("initial_state"), run.system.state_count(), "initial_state"),
-      run.input,
-      context.input->number_at("step_s"),
-      context.input->integer_at("steps", 0),
-      context.input->integer_at("sample_stride", 1));
+  const bool has_constant = context.input->get("constant_input") != nullptr;
+  const bool has_history = context.input->get("input_schedule") != nullptr;
+  if (has_constant && has_history) {
+    throw std::invalid_argument(
+        "sim.linear: give `constant_input` or `input_schedule`, not both. A run given both "
+        "leaves it unsaid which input drove it");
+  }
+  const Eigen::VectorXd initial =
+      vector(context.input->get("initial_state"), run.system.state_count(), "initial_state");
+  const double step_s = context.input->number_at("step_s");
+  const int steps = context.input->integer_at("steps", 0);
+  const int stride = context.input->integer_at("sample_stride", 1);
+  std::ostringstream summary;
+  if (has_history) {
+    const ValuePtr declared = context.input->get("input_schedule");
+    const sim::InputSchedule schedule =
+        schedule_at(context, "input_schedule", static_cast<int>(run.system.input_count()));
+    sim::ScheduledLinearRun scheduled =
+        sim::simulate_linear(run.system, initial, schedule, step_s, steps, stride);
+    run.trajectory = std::move(scheduled.trajectory);
+    run.input_samples = std::move(scheduled.input_samples);
+    run.input = run.input_samples.front();
+    run.event_steps = std::move(scheduled.event_steps);
+    std::ostringstream history;
+    history << declared->string_at("hold") << " hold, extrapolation "
+            << declared->string_at("extrapolation") << ", "
+            << declared->get("samples")->as_list().size() << " sample(s), "
+            << run.event_steps.size() << " event(s) inside the run";
+    run.history = history.str();
+    summary << run.trajectory.states.size() << " samples; declared input history (" << run.history
+            << ")";
+  } else {
+    run.input =
+        vector(context.input->get("constant_input"), run.system.input_count(), "constant_input");
+    run.trajectory = sim::simulate_linear(run.system, initial, run.input, step_s, steps, stride);
+    summary << run.trajectory.states.size() << " samples; completed linear response";
+  }
   Artifact result;
   result.kind = "linear_trajectory";
-  result.summary =
-      std::to_string(run.trajectory.states.size()) + " samples; completed linear response";
+  result.summary = summary.str();
   result.payload = std::move(run);
   return result;
 }
@@ -413,17 +546,32 @@ Artifact csv(const StageContext& context) {
     for (const auto& name : run.system.output_labels()) {
       out << ',' << csv_label("output:" + name);
     }
+    // Under a declared history the input changes, so it is a column: a reader
+    // reconstructing an output from the states needs the D u that produced it.
+    // A constant run keeps the header it always had.
+    const bool history = !run.input_samples.empty();
+    if (history) {
+      for (const auto& name : run.system.input_names) {
+        out << ',' << csv_label("input:" + name);
+      }
+    }
     out << '\n';
     for (std::size_t i = 0; i < run.trajectory.states.size(); ++i) {
       out << run.trajectory.times_s[i];
       const auto& x = run.trajectory.states[i];
+      const Eigen::VectorXd& u = run.input_at(i);
       const Eigen::VectorXd y =
-          run.system.output_matrix() * x + run.system.feedthrough_matrix() * run.input;
+          run.system.output_matrix() * x + run.system.feedthrough_matrix() * u;
       for (Eigen::Index j = 0; j < x.size(); ++j) {
         out << ',' << x(j);
       }
       for (Eigen::Index j = 0; j < y.size(); ++j) {
         out << ',' << y(j);
+      }
+      if (history) {
+        for (Eigen::Index j = 0; j < u.size(); ++j) {
+          out << ',' << u(j);
+        }
       }
       out << '\n';
     }
@@ -443,8 +591,95 @@ Artifact csv(const StageContext& context) {
       }
       out << '\n';
     }
+  } else if (source.kind == "sampled_trajectory") {
+    // The plant rows, plus what the controller asked for beside what it got. A
+    // reader comparing the two sees the authority the law wanted and did not
+    // have; a file with only the applied command cannot show that.
+    const auto& sampled = source.payload_as<SampledRun>("sampled_trajectory");
+    const PlantRun& plant = sampled.plant;
+    out << "time_s";
+    for (const auto& name : plant.state_names) {
+      out << ',' << csv_label("state:" + name);
+    }
+    for (Eigen::Index j = 0; j < plant.command_rad_s.size(); ++j) {
+      const std::string index = std::to_string(j);
+      out << ',' << csv_label("requested:omega_" + index + "_rad_s");
+      out << ',' << csv_label("applied:omega_" + index + "_rad_s");
+    }
+    out << ',' << csv_label("wind:north_m_s") << ',' << csv_label("wind:east_m_s") << ','
+        << csv_label("wind:down_m_s");
+    // A discrete design's prediction of its own loop, beside what the plant did,
+    // in the same chart coordinates and at the same ticks. Both columns, because
+    // the discrepancy the report summarises is only checkable from the pair.
+    const LinearPredictionRecord& prediction = sampled.control.prediction;
+    if (prediction.available) {
+      for (const std::string& name : prediction.chart_names) {
+        out << ',' << csv_label("chart:" + name) << ',' << csv_label("predicted:" + name);
+      }
+    }
+    out << '\n';
+    for (std::size_t i = 0; i < plant.trajectory.states.size(); ++i) {
+      out << plant.trajectory.times_s[i];
+      const auto& x = plant.trajectory.states[i];
+      for (Eigen::Index j = 0; j < x.size(); ++j) {
+        out << ',' << x(j);
+      }
+      // The final sample is the state after the last hold; it has no tick of
+      // its own, so it repeats the last tick's commands rather than inventing
+      // one that was never issued.
+      const std::size_t tick = std::min(i, sampled.control.requested_rad_s.size() - 1);
+      for (Eigen::Index j = 0; j < plant.command_rad_s.size(); ++j) {
+        out << ',' << sampled.control.requested_rad_s[tick](j);
+        out << ',' << sampled.control.applied_rad_s[tick](j);
+      }
+      const Eigen::Vector3d& wind_now = plant.wind_samples_ned_m_s[i];
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z();
+      if (prediction.available) {
+        const Eigen::VectorXd& measured = prediction.measured_chart[i];
+        const Eigen::VectorXd& predicted = prediction.predicted_chart[i];
+        for (Eigen::Index j = 0; j < measured.size(); ++j) {
+          out << ',' << measured(j) << ',' << predicted(j);
+        }
+      }
+      out << '\n';
+    }
+  } else if (source.kind == "plant_trajectory") {
+    // The columns are the model's, so they are read from the run rather than
+    // written down here: a six-rotor vehicle and a four-rotor one with a battery
+    // have different widths, and a fixed header would be wrong for both.
+    const auto& run = source.payload_as<PlantRun>("plant_trajectory");
+    out << "time_s";
+    for (const auto& name : run.state_names) {
+      out << ',' << csv_label("state:" + name);
+    }
+    for (Eigen::Index j = 0; j < run.command_rad_s.size(); ++j) {
+      out << ',' << csv_label("command:omega_command_" + std::to_string(j) + "_rad_s");
+    }
+    out << ',' << csv_label("wind:north_m_s") << ',' << csv_label("wind:east_m_s") << ','
+        << csv_label("wind:down_m_s") << '\n';
+    for (std::size_t i = 0; i < run.trajectory.states.size(); ++i) {
+      out << run.trajectory.times_s[i];
+      const auto& x = run.trajectory.states[i];
+      for (Eigen::Index j = 0; j < x.size(); ++j) {
+        out << ',' << x(j);
+      }
+      // The command and the wind are constant over this run and are repeated on
+      // every row rather than left to a header comment, so one file is one
+      // complete record of what was integrated. `sim.linear` writes its constant
+      // input into the outputs for the same reason.
+      // Per sample, because a declared history makes the configured constant a
+      // half-truth: a reader who combines the recorded air-relative velocity
+      // with the wrong wind reconstructs a ground velocity that never happened.
+      const Eigen::VectorXd& command_now = run.command_samples_rad_s[i];
+      const Eigen::Vector3d& wind_now = run.wind_samples_ned_m_s[i];
+      for (Eigen::Index j = 0; j < command_now.size(); ++j) {
+        out << ',' << command_now(j);
+      }
+      out << ',' << wind_now.x() << ',' << wind_now.y() << ',' << wind_now.z() << '\n';
+    }
   } else {
-    throw std::invalid_argument("report.csv requires a linear or nonlinear trajectory");
+    throw std::invalid_argument(
+        "report.csv requires a linear, nonlinear, plant or sampled trajectory");
   }
   const auto path = context.input->string_at("path");
   context.write_output(path, out.str());
@@ -502,12 +737,21 @@ void register_design_capabilities(Registry& registry) {
                 State::ImplementedUnvalidated,
                 select_channels,
                 {"system", "inputs", "outputs"}});
+  registry.add({"analyze.gramians",
+                "Reachability and observability of a linear model for a declared input and "
+                "output set — the subspace ranks, the directions that fall outside them by "
+                "state name, and finite-horizon Gramians over a declared horizon",
+                "gramians",
+                State::ImplementedUnvalidated,
+                gramians,
+                {"system", "horizon_s", "steps", "rank_tolerance"}});
   registry.add({"model.control_system",
-                "Extract the closed loop or plant-input return ratio of an LQR design",
+                "Extract an LQR design's closed loop, its plant-input return ratio, or the "
+                "single loop at one input with the other loops still closed",
                 "linear_system",
                 State::ImplementedUnvalidated,
                 control_system,
-                {"law", "use"}});
+                {"law", "use", "channel"}});
   registry.add({"model.series",
                 "Cascade two state-space systems in declared channel order",
                 "linear_system",
@@ -526,11 +770,18 @@ void register_design_capabilities(Registry& registry) {
                 },
                 {"system"}});
   registry.add({"sim.linear",
-                "Integrate a continuous linear model with a constant input and fixed-step RK4",
+                "Integrate a continuous linear model with fixed-step RK4 under a constant input or "
+                "a declared input history with a stated hold and extrapolation",
                 "linear_trajectory",
                 State::ImplementedUnvalidated,
                 linear_simulation,
-                {"system", "step_s", "steps", "sample_stride", "initial_state", "constant_input"}});
+                {"system",
+                 "step_s",
+                 "steps",
+                 "sample_stride",
+                 "initial_state",
+                 "constant_input",
+                 "input_schedule"}});
   registry.add(
       {"sim.nonlinear",
        "Simulate a local aircraft model with bounded actuators and optional full-state feedback",
@@ -569,9 +820,9 @@ std::vector<TimeSeriesChart> design_charts(const Artifact& artifact) {
       chart.y_label = label + " (declared model units)";
       chart.times_s = run.trajectory.times_s;
       chart.series.push_back({label, {}});
-      for (const auto& state : run.trajectory.states) {
-        const Eigen::VectorXd output =
-            run.system.output_matrix() * state + run.system.feedthrough_matrix() * run.input;
+      for (std::size_t sample = 0; sample < run.trajectory.states.size(); ++sample) {
+        const Eigen::VectorXd output = run.system.output_matrix() * run.trajectory.states[sample]
+                                       + run.system.feedthrough_matrix() * run.input_at(sample);
         chart.series.front().values.push_back(output(index));
       }
       charts.push_back(std::move(chart));
@@ -607,6 +858,178 @@ std::vector<TimeSeriesChart> design_charts(const Artifact& artifact) {
 }
 
 bool write_design_section(std::ostream& out, const Artifact& artifact) {
+  // A fitted plant reaching a report must arrive with the account of how it was
+  // fitted, and a loaded one must arrive saying it was loaded. A report that
+  // showed only the coefficients would be a table of numbers with no way to tell
+  // a measurement from an estimate.
+  if (artifact.kind == "quadrotor") {
+    const auto& subject = artifact.payload_as<QuadrotorArtifact>("quadrotor");
+    if (!subject.identity.is_fitted() || !subject.identity.fit) {
+      out << "Loaded from `" << subject.identity.path << "` (sha256 " << subject.identity.sha256
+          << "). No parameter was fitted.\n\n";
+      return true;
+    }
+    const FittedModelProvenance& fit = *subject.identity.fit;
+    out << "### Identified parameters\n\n";
+    out << "| Parameter | Unit | Value | Standard error | Bounds | At bound |\n";
+    out << "|---|---|---|---|---|---|\n";
+    for (const FittedParameter& parameter : fit.fitted) {
+      out << "| `" << parameter.path << "` | " << parameter.unit << " | " << parameter.value
+          << " | ";
+      if (parameter.standard_error_is_estimable) {
+        out << parameter.standard_error;
+      } else {
+        out << "none estimable";
+      }
+      out << " | [" << parameter.lower << ", " << parameter.upper << "] | "
+          << (parameter.at_bound ? "**yes**" : "no") << " |\n";
+    }
+    out << "\n"
+        << fit.preserved_parameter_paths.size()
+        << " further parameter(s) were NOT fitted and carry the base model's values "
+           "unchanged.\n\n";
+    out << "**Fitted against** `" << fit.estimation_record_path << "` (sha256 "
+        << fit.estimation_record_sha256 << "), " << fit.estimation_sample_count
+        << " sample(s) over [" << fit.estimation_first_sample_s << ", "
+        << fit.estimation_last_sample_s << "] s, from base model `" << fit.base_model_path
+        << "` (sha256 " << fit.base_model_sha256 << ").\n\n";
+    out << "| Diagnostic | Value |\n|---|---|\n"
+        << "| Objective, start → final (scaled) | " << fit.initial_objective << " → "
+        << fit.objective << " |\n"
+        << "| Objective improved | " << (fit.objective_improved ? "yes" : "**no**") << " |\n"
+        << "| Residual RMS (scaled) | " << fit.residual_rms << " |\n"
+        << "| Residuals | " << fit.residual_count << " |\n"
+        << "| Iterations declared / run | " << fit.iterations_declared << " / "
+        << fit.iterations_run << " |\n"
+        << "| Stop reason | " << fit.stop_reason << " |\n"
+        << "| Accepted steps, last at iteration | " << fit.accepted_steps << ", "
+        << fit.last_accepted_iteration << " |\n"
+        << "| First-order measure, ‖Jᵀr‖∞ at the final point | " << fit.gradient_infinity_norm
+        << " |\n"
+        << "| The same over each parameter's declared range | "
+        << fit.gradient_over_bound_span_infinity_norm << " |\n"
+        << "| Sensitivity condition number | " << fit.jacobian_condition_number << " |\n\n";
+    out << "The table above answers five separate questions and no sixth one. That the routine "
+           "ran is not that the objective improved; that the objective improved is not that the "
+           "fit converged; that it converged is not that the parameters are identifiable; and "
+           "none of them is whether the fit is accurate enough for a use. There is deliberately "
+           "no convergence verdict here.\n\n";
+    out << "_Objective:_ " << fit.objective_definition << "\n\n";
+    out << "_Uncertainty:_ "
+        << (fit.uncertainty_is_estimable ? fit.uncertainty_assumptions
+                                         : "none reported — " + fit.uncertainty_assumptions)
+        << "\n\n";
+    out << "A completed fit is not a validation, and these coefficients are not measured "
+           "aircraft data. Whether the residual is small enough for any use is an engineering "
+           "judgement nothing here makes.\n\n";
+    return true;
+  }
+  if (artifact.kind == "validation") {
+    const auto& validation = artifact.payload_as<ValidationArtifact>("validation");
+    const identify::ValidationResult& result = validation.result;
+    // The label first and in words. It is the difference between a diagnostic
+    // and a claim, and a reader skimming a report must meet it before the
+    // numbers rather than after them.
+    out << "**Record separation: " << identify::to_string(result.separation) << "** — "
+        << result.separation_basis << "\n\n";
+    if (result.caller_declaration_was_contradicted) {
+      out << "> The study declared these records to hold different data and a check "
+             "contradicted it. The numbers below are a diagnostic, not a validation.\n\n";
+    }
+    out << "| Output | State | RMSE | Max abs error | Mean error | Fit fraction | Residual "
+           "lag-1 autocorrelation |\n";
+    out << "|---|---|---|---|---|---|---|\n";
+    for (const identify::ValidationOutput& output : result.outputs) {
+      out << "| `" << output.channel << "` | `" << output.state_name << "` | " << output.rmse
+          << " | " << output.max_absolute_error << " | " << output.mean_error << " | ";
+      if (output.fit_fraction_is_defined) {
+        out << output.fit_fraction;
+      } else {
+        out << "undefined — " << output.undefined_reason;
+      }
+      out << " | ";
+      if (output.autocorrelation_is_defined) {
+        out << output.residual_lag_one_autocorrelation;
+      } else {
+        out << "undefined";
+      }
+      out << " |\n";
+    }
+    out << "\nThe label above is about SAMPLE separation. It bounds what the fit could have "
+           "seen; it is not a claim of statistical independence, and two windows of one flight "
+           "share the aircraft, the trim, the air mass and every unmodelled effect that "
+           "persists across the cut.\n\n";
+    out << "Scored over " << result.sample_count << " sample(s). Validation record sha256 "
+        << result.validation_record_sha256 << "; estimation record sha256 "
+        << result.estimation_record_sha256 << ".\n\n";
+    out << "_Assumptions:_ " << result.assumptions << "\n\n";
+    return true;
+  }
+  if (artifact.kind == "gramians") {
+    const auto& analysis = artifact.payload_as<analyze::GramianAnalysis>("gramians");
+    const auto subspace =
+        [&out](const char* title, const char* verb, const analyze::SubspaceAnalysis& s) {
+          out << "### " << title << "\n\n";
+          out << "| Quantity | Value |\n|---|---|\n"
+              << "| Rank | " << s.rank << " of " << s.state_count << " |\n"
+              << "| Condition number of the retained directions | " << s.retained_condition_number
+              << " |\n\n";
+          if (s.missing_directions.empty()) {
+            out << "Every direction in the state space can be " << verb << ".\n\n";
+            return;
+          }
+          out << s.missing_directions.size() << " direction(s) cannot be " << verb
+              << ". Each is a unit vector in the model's own state coordinates; the states listed "
+                 "are those carrying more than a one-percent share of it.\n\n";
+          out << "| Direction | Dominant states (share) |\n|---|---|\n";
+          for (std::size_t k = 0; k < s.missing_directions.size(); ++k) {
+            out << "| " << (k + 1) << " | ";
+            const auto& names = s.missing_directions[k].dominant_states;
+            for (std::size_t i = 0; i < names.size(); ++i) {
+              out << (i == 0 ? "" : ", ") << "`" << names[i] << "`";
+            }
+            out << " |\n";
+          }
+          out << "\n";
+        };
+    subspace("Reachability", "moved by the declared inputs", analysis.reachability);
+    subspace("Observability", "seen by the declared outputs", analysis.observability);
+
+    out << "### Finite-horizon Gramians\n\n";
+    out << "| Quantity | Controllability | Observability |\n|---|---|---|\n"
+        << "| Largest eigenvalue | "
+        << (analysis.controllability_eigenvalues.empty()
+                ? 0.0
+                : analysis.controllability_eigenvalues.front())
+        << " | "
+        << (analysis.observability_eigenvalues.empty() ? 0.0
+                                                       : analysis.observability_eigenvalues.front())
+        << " |\n"
+        << "| Smallest eigenvalue | "
+        << (analysis.controllability_eigenvalues.empty()
+                ? 0.0
+                : analysis.controllability_eigenvalues.back())
+        << " | "
+        << (analysis.observability_eigenvalues.empty() ? 0.0
+                                                       : analysis.observability_eigenvalues.back())
+        << " |\n"
+        << "| Condition number | " << analysis.controllability_condition_number << " | "
+        << analysis.observability_condition_number << " |\n\n";
+    out << "Integrated over " << analysis.horizon_s << " s in " << analysis.steps
+        << " fixed RK4 steps. **These are not the infinite-horizon Gramians**";
+    if (analysis.spectrum_is_strictly_stable) {
+      out << ", which do exist for this model — its rightmost eigenvalue has real part "
+          << analysis.rightmost_eigenvalue_real_part << " — but are not computed here.\n\n";
+    } else {
+      out << ", and for this model they do not exist at all: the rightmost eigenvalue has real "
+             "part "
+          << analysis.rightmost_eigenvalue_real_part
+          << ", so the T to infinity limit diverges and the matrix a Lyapunov solve would "
+             "return for it would not be a Gramian of anything.\n\n";
+    }
+    out << "_Assumptions:_ " << analysis.assumptions << "\n\n";
+    return true;
+  }
   if (artifact.kind == "robust_bounds") {
     const auto& bounds = artifact.payload_as<RobustBounds>("robust_bounds");
     out << "### Sensitivity S = (I + L)^-1\n\n";
@@ -657,7 +1080,130 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
     const auto& run = artifact.payload_as<LinearRun>("linear_trajectory");
     out << "Completed " << run.trajectory.step_count << " steps at " << run.trajectory.step_s
         << " s. Fixed-step RK4; compare with a smaller step to assess integration error.\n\n";
+    if (!run.history.empty()) {
+      out << "Driven by a declared input history: " << run.history
+          << ". Timestamps are seconds from the start of the run; each recorded input is the "
+             "value in force after any event at that instant, and report.csv carries it per "
+             "sample.\n\n";
+    }
     matrix_table(out, "Final state", run.trajectory.states.back(), run.system.state_names);
+    return true;
+  }
+  // A sampled run's report is about the CONTROLLER as much as the trajectory:
+  // what the law asked for, how much of it the vehicle was allowed, and at what
+  // rate and delay it asked. A report showing only the final state would
+  // describe a flight without saying it was flown by a loop that samples.
+  if (artifact.kind == "sampled_trajectory") {
+    const auto& sampled = artifact.payload_as<SampledRun>("sampled_trajectory");
+    const SampledControlRecord& control = sampled.control;
+    out << "| Quantity | Value |\n|---|---|\n"
+        << "| Controller period | " << control.controller_period_s << " s |\n"
+        << "| Ticks executed | " << control.tick_times_s.size() << " |\n"
+        << "| Delay | " << control.delay_periods << " period(s) |\n"
+        << "| Integration step | " << sampled.plant.step_s << " s |\n"
+        << "| Integration steps | " << sampled.plant.step_count << " |\n"
+        << "| Reference translates with the trim velocity | "
+        << (control.reference_follows_trim_velocity ? "yes" : "no") << " |\n"
+        << "| Ticks at which saturation changed the command | " << control.saturated_tick_count
+        << " |\n"
+        << "| Worst single-channel saturation residual | "
+        << control.worst_saturation_residual_rad_s << " rad/s |\n";
+    const bool discrete = control.law_time_domain == "discrete_design";
+    out << "| Law | "
+        << (discrete ? "discrete design, executed at the period it was designed for"
+                     : "continuous design, executed at a rate (emulation)")
+        << " |\n"
+        << "| Design sample time | ";
+    if (discrete) {
+      out << control.design_sample_time_s << " s";
+    } else {
+      out << "none — a continuous design has no sample time";
+    }
+    out << " |\n| Hold | " << control.hold << " |\n\n";
+    if (control.saturated_tick_count > 0) {
+      out << "The law asked for authority it did not get at " << control.saturated_tick_count
+          << " tick(s). The residual above is the honest measure of how much: a run reported "
+             "only through its applied commands would not show it.\n\n";
+    }
+    if (discrete) {
+      const LinearPredictionRecord& prediction = control.prediction;
+      out << "### The discrete design's own prediction\n\n";
+      if (!prediction.available) {
+        out << "No comparison was made: " << prediction.unavailable_reason << ".\n\n";
+      } else {
+        out << "| Quantity | Value |\n|---|---|\n"
+            << "| Worst discrepancy over the prediction's peak, in the design's cost-to-go norm "
+               "| ";
+        if (prediction.relative_discrepancy_defined) {
+          out << prediction.relative_discrepancy;
+        } else {
+          out << "undefined — the prediction is identically zero, because the run started at "
+                 "the reference";
+        }
+        out << " |\n| At tick | " << prediction.worst_tick << " |\n"
+            << "| Smallest over largest eigenvalue of the cost-to-go X | "
+            << prediction.cost_to_go_eigenvalue_ratio << " |\n"
+            << "| Declared small-perturbation budget | ";
+        if (prediction.budget_declared) {
+          // An undefined comparison is neither inside nor outside a budget. A
+          // run that starts at the reference predicts nothing but zero, and
+          // printing OUTSIDE beside "undefined" would contradict the row above.
+          out << prediction.budget << " |\n| Verdict | "
+              << (!prediction.relative_discrepancy_defined
+                      ? "none — the comparison is undefined, so the budget can be neither met nor "
+                        "missed"
+                  : prediction.within_budget ? "within the declared budget"
+                                             : "**OUTSIDE the declared budget**");
+        } else {
+          out << "none declared; reported without a verdict";
+        }
+        out << " |\n\n";
+        if (prediction.premise_violated_by_saturation) {
+          out << "**The run saturated, and the prediction has no actuator limits.** The "
+                 "comparison above is outside the premise it rests on.\n\n";
+        }
+        out << "| Chart coordinate | Peak of the prediction | Worst absolute discrepancy |\n"
+               "|---|---:|---:|\n";
+        for (std::size_t j = 0; j < prediction.chart_names.size(); ++j) {
+          const auto index = static_cast<Eigen::Index>(j);
+          double peak = 0.0;
+          double miss = 0.0;
+          for (std::size_t k = 0; k < prediction.predicted_chart.size(); ++k) {
+            peak = std::fmax(peak, std::fabs(prediction.predicted_chart[k](index)));
+            miss = std::fmax(miss,
+                             std::fabs(prediction.measured_chart[k](index)
+                                       - prediction.predicted_chart[k](index)));
+          }
+          out << "| " << prediction.chart_names[j] << " | " << peak << " | " << miss << " |\n";
+        }
+        out << "\nThe prediction is the design's own discrete model, iterated with the same "
+               "gain, the same whole-period delay and the same hold from the same initial chart "
+               "state. It has no nonlinearity and no actuator limits, so the discrepancy is the "
+               "linearisation's error plus whatever else the run did that the design did not "
+               "model. The chart coordinates mix units, which is why the headline uses the "
+               "design's own cost-to-go norm and the table above shows each coordinate in its "
+               "own unit.\n\n";
+      }
+    }
+    matrix_table(
+        out, "Final state", sampled.plant.trajectory.states.back(), sampled.plant.state_names);
+    if (discrete) {
+      out << "This is the NONLINEAR plant, flown by a law designed in discrete time for this "
+             "period and this hold. A Riccati solution whose closed loop lies inside the unit "
+             "circle and a run that converged are both statements about the nominal loop: "
+             "neither is a gain, phase, delay or disk margin of the sampled loop, and the "
+             "sampled loop's own robustness is a separate question no capability here answers. "
+             "The design modelled no delay, so the "
+          << control.delay_periods
+          << " period(s) of delay this run applied are a plant it did not see. Use report.csv "
+             "for the requested, applied, measured and predicted values at every tick.\n\n";
+    } else {
+      out << "This is the NONLINEAR plant, executed with zero-order hold and a whole-period "
+             "delay. Gain and phase margins computed from the continuous linearisation describe "
+             "the continuous loop and not this one; the sampled loop's own robustness is a "
+             "separate question no capability here answers. Use report.csv for the requested "
+             "and applied commands at every tick.\n\n";
+    }
     return true;
   }
   if (artifact.kind == "nonlinear_trajectory") {

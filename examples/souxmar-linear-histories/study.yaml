@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Declared input histories driving a LINEAR model: the native Souxmar plant's
+# hover linearisation, under a held rotor doublet and an interpolated
+# spool-up with a building headwind.
+#
+#   galata run examples/souxmar-linear-histories/study.yaml
+#
+# `sim.linear` reads the same `input_schedule` schema `sim.plant` reads for the
+# nonlinear plant, so a history's timing means the same thing on either path.
+# Its VALUES are the model's own inputs — here deviations from the hover trim,
+# because a linearisation's inputs are.
+#
+# Neither the hold nor the extrapolation has a default. The semantics of both,
+# and of an event, are written beside the integrator in
+# include/galata/sim/linear.hpp and summarised in the README.
+#
+# WHAT THIS IS NOT. Not a comparison with the nonlinear plant: both runs are of
+# the linearisation. Not evidence about the aircraft: the Souxmar coefficients
+# are an independent implementation's nominal set, not measured data.
+
+version: 1
+
+stages:
+  - id: plant
+    capability: model.quadrotor
+    input:
+      path: ../../models/souxmar-quad/souxmar-quad.yaml
+
+  - id: hover
+    capability: trim.hover
+    input:
+      quadrotor: {from: plant}
+      altitude_m: 120.0
+
+  # Sixteen chart states, the rotor speeds and their lag among them, and seven
+  # inputs: four rotor-speed commands and three wind components.
+  - id: linear
+    capability: linearize.extended
+    input:
+      trim: {from: hover}
+      evidence_path: operating-point.yaml
+
+  - id: rotors
+    capability: model.channels
+    input:
+      system: {from: linear}
+      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]
+      outputs: [altitude_m]
+
+  - id: all_inputs
+    capability: model.channels
+    input:
+      system: {from: linear}
+      inputs:
+        [
+          omega_command_0,
+          omega_command_1,
+          omega_command_2,
+          omega_command_3,
+          wind_north_m_s,
+          wind_east_m_s,
+          wind_down_m_s
+        ]
+      outputs: [position_north_m, altitude_m]
+
+  # A COLLECTIVE DOUBLET, HELD. Every rotor command steps up by 3 rad/s at
+  # 0.1 s, down to 3 rad/s below trim at 0.3 s, and back to trim at 0.5 s.
+  # Each change is an EVENT: it falls on the 1 ms step lattice, as a zero-order
+  # event must, and the recorded input at 0.1 s is the value after the step.
+  - id: doublet
+    capability: sim.linear
+    input:
+      system: {from: rotors}
+      step_s: 0.001
+      steps: 1000
+      input_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0, 0.0]}
+          - {time_s: 0.1, values: [3.0, 3.0, 3.0, 3.0]}
+          - {time_s: 0.3, values: [-3.0, -3.0, -3.0, -3.0]}
+          - {time_s: 0.5, values: [0.0, 0.0, 0.0, 0.0]}
+
+  # A SPOOL-UP INTO A BUILDING HEADWIND, INTERPOLATED. The rotor commands ramp
+  # from trim to 3 rad/s above it between 0.1 s and 0.3 s; the north wind builds
+  # from still air to 2 m/s between 0.2 s and 0.7 s. Every change of slope is a
+  # sample, and every sample is on the step lattice, so RK4 keeps its order.
+  # The extrapolation is `refuse`, and the run ends exactly at the last sample:
+  # a longer run would be refused before its first step.
+  - id: spoolup
+    capability: sim.linear
+    input:
+      system: {from: all_inputs}
+      step_s: 0.001
+      steps: 1500
+      input_schedule:
+        hold: linear
+        extrapolation: refuse
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+          - {time_s: 0.1, values: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}
+          - {time_s: 0.2, values: [1.5, 1.5, 1.5, 1.5, 0.0, 0.0, 0.0]}
+          - {time_s: 0.3, values: [3.0, 3.0, 3.0, 3.0, 0.4, 0.0, 0.0]}
+          - {time_s: 0.7, values: [3.0, 3.0, 3.0, 3.0, 2.0, 0.0, 0.0]}
+          - {time_s: 1.5, values: [3.0, 3.0, 3.0, 3.0, 2.0, 0.0, 0.0]}
+
+  - id: doublet_csv
+    capability: report.csv
+    input:
+      trajectory: {from: doublet}
+      path: doublet.csv
+
+  - id: spoolup_csv
+    capability: report.csv
+    input:
+      trajectory: {from: spoolup}
+      path: spoolup.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Declared input histories through the Souxmar hover linearisation
+      sections: [{from: doublet}, {from: spoolup}]
+      path: histories.md

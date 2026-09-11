@@ -21,12 +21,15 @@ target_link_libraries(galata_determinism_tests
     galata::trim
     galata::linearize
     galata::analyze
+    galata::data
+    galata::identify
     galata::warnings
     GTest::gtest_main
 )
 
 target_compile_definitions(galata_determinism_tests
   PRIVATE GALATA_MODELS_DIR="${CMAKE_SOURCE_DIR}/models"
+  PRIVATE GALATA_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples"
   PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Determinism
 )
 

@@ -7,16 +7,32 @@
 // runs is worse than no example: it is the first thing a new reader tries, and
 // its failure is the first thing they learn about the project.
 
+#include "galata/analyze/gramians.hpp"
+#include "galata/analyze/margins.hpp"
+#include "galata/core/constants.hpp"
+#include "galata/core/quaternion.hpp"
+#include "galata/core/state.hpp"
+#include "galata/model/discrete_system.hpp"
+#include "galata/model/linear_system.hpp"
+#include "galata/model/quadrotor.hpp"
+#include "galata/numerics/matrix_exponential.hpp"
+#include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/sim/discrete.hpp"
+#include "galata/synth/control.hpp"
+#include "galata/synth/discrete_control.hpp"
 
 #include "integration_config.hpp"
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -258,6 +274,1384 @@ TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedMod
 
   // The state matrix is printed, so a reader can check it by hand.
   EXPECT_NE(text.find("State matrix A"), std::string::npos);
+}
+
+// ===========================================================================
+// The quadrotor programme's two end-to-end examples
+// ===========================================================================
+//
+// These run the SHIPPED study files, not a copy of them. An example that stops
+// running is worse than no example, and these two are the only place the
+// identification path and the sampled-control path are exercised through the
+// public capabilities a user actually has.
+
+TEST(ExampleQuadrotorSampledControl, RunsEndToEnd) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 12U);
+  EXPECT_EQ(result.stages[0].capability, "model.quadrotor");
+  EXPECT_EQ(result.stages[1].capability, "trim.hover");
+  EXPECT_EQ(result.stages[2].capability, "linearize.extended");
+  EXPECT_EQ(result.stages[3].capability, "model.channels");
+  EXPECT_EQ(result.stages[4].capability, "synth.lqr");
+  EXPECT_EQ(result.stages[5].capability, "analyze.gramians");
+  EXPECT_EQ(result.stages[6].capability, "model.control_system");
+  EXPECT_EQ(result.stages[7].capability, "analyze.margins");
+  EXPECT_EQ(result.stages[8].capability, "analyze.diskmargin");
+  EXPECT_EQ(result.stages[9].capability, "sim.sampled");
+  for (const auto& stage : result.stages) {
+    EXPECT_NE(stage.artifact.produced_by_build.find("galata "), std::string::npos);
+  }
+}
+
+// The two analyses the audit found unavailable on this plant, exercised through
+// the shipped study rather than through a test harness. What is asserted is
+// that each is AVAILABLE and says what it does not establish; the values are
+// properties of this study's declared weights and horizon and are not pinned.
+TEST(ExampleQuadrotorSampledControl, ReportsWhatTheModelCanReachAndWhatTheLoopTolerates) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+
+  const galata::pipeline::Artifact* reach = result.find("reachability");
+  ASSERT_NE(reach, nullptr);
+  const auto& analysis = reach->payload_as<galata::analyze::GramianAnalysis>("gramians");
+  EXPECT_EQ(analysis.reachability.rank, analysis.reachability.state_count);
+  // The heading is unobservable in the observation model this study declares —
+  // a statement about that output set, not about any airframe's sensors — and
+  // the study reports it by name before any design is trusted.
+  EXPECT_LT(analysis.observability.rank, analysis.observability.state_count);
+  EXPECT_FALSE(analysis.spectrum_is_strictly_stable)
+      << "a hover linearisation has integrator eigenvalues, so no infinite-horizon Gramian "
+         "exists and the report must not imply one was computed";
+
+  const galata::pipeline::Artifact* margins = result.find("margins_0");
+  ASSERT_NE(margins, nullptr);
+  EXPECT_NE(margins->summary.find("PM "), std::string::npos) << margins->summary;
+  const galata::pipeline::Artifact* disk = result.find("disk_0");
+  ASSERT_NE(disk, nullptr);
+  EXPECT_NE(disk->summary.find("alpha"), std::string::npos) << disk->summary;
+
+  // And the report says, in the reader's path, that none of it is a statement
+  // about the SAMPLED loop.
+  const galata::pipeline::Artifact* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+  EXPECT_NE(text.find("sampled loop's own robustness"), std::string::npos)
+      << "the report must not let a continuous-loop margin be read as a sampled-loop one";
+}
+
+// The point of the example: a law designed on the linearisation, executed at a
+// declared rate against the NONLINEAR plant, removes the displacement it was
+// started from. A budget rather than a tolerance — a metre of the two-metre
+// initial offset would be a failure, and so would a run that diverged.
+TEST(ExampleQuadrotorSampledControl, TheLawDrivesTheDisplacementOut) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  const galata::pipeline::Artifact* closed = result.find("closed");
+  ASSERT_NE(closed, nullptr);
+  const auto& sampled = closed->payload_as<galata::pipeline::SampledRun>("sampled_trajectory");
+
+  const Eigen::VectorXd& first = sampled.plant.trajectory.states.front();
+  const Eigen::VectorXd& last = sampled.plant.trajectory.states.back();
+  const galata::pipeline::Artifact* hover = result.find("hover");
+  ASSERT_NE(hover, nullptr);
+  const auto& trimmed = hover->payload_as<galata::pipeline::HoverTrimArtifact>("hover_trim");
+  const Eigen::Vector3d reference = trimmed.point.extended_state.head<3>();
+
+  const double started = (first.head<3>() - reference).norm();
+  const double ended = (last.head<3>() - reference).norm();
+  EXPECT_GT(started, 2.0) << "the study must actually displace the vehicle";
+  EXPECT_LT(ended, 0.1 * started)
+      << "the sampled law must remove at least nine tenths of the displacement it started "
+         "from; started "
+      << started << " m, ended " << ended << " m";
+  EXPECT_EQ(sampled.control.delay_periods, 2);
+}
+
+TEST(ExampleQuadrotorIdentification, RunsEndToEnd) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 12U);
+  EXPECT_EQ(result.stages[1].capability, "data.import.csv");
+  EXPECT_EQ(result.stages[2].capability, "data.window");
+  EXPECT_EQ(result.stages[4].capability, "identify.greybox");
+  EXPECT_EQ(result.stages[5].capability, "model.quadrotor.export");
+  EXPECT_EQ(result.stages[6].capability, "trim.hover");
+  EXPECT_EQ(result.stages[9].capability, "identify.validate");
+}
+
+// THE SELF-TEST. The example commits its own truth model, so this compares the
+// recovered parameters against the file that generated the record rather than
+// against a number typed here. A fit that converged to the wrong root passes a
+// residual gate and fails this one.
+TEST(ExampleQuadrotorIdentification, RecoversTheParametersItsTruthModelDeclares) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  ASSERT_TRUE(fitted.identity.is_fitted());
+  ASSERT_NE(fitted.identity.fit, nullptr);
+
+  const galata::model::Quadrotor truth = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-truth.yaml")
+          .string());
+
+  // The record is the truth model's own output to round-off, so the budget is
+  // set by the fit's own reported precision rather than by engineering
+  // judgement: eight significant figures on each parameter.
+  EXPECT_NEAR(fitted.model.mass.mass_kg, truth.mass.mass_kg, 1e-8 * truth.mass.mass_kg);
+  EXPECT_NEAR(fitted.model.angular_drag_n_m_s(1),
+              truth.angular_drag_n_m_s(1),
+              1e-6 * truth.angular_drag_n_m_s(1));
+  // And the base model it started from was genuinely wrong about both, so the
+  // recovery is not an accident of the starting point.
+  const galata::model::Quadrotor base = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-base.yaml")
+          .string());
+  EXPECT_GT(std::fabs(base.mass.mass_kg - truth.mass.mass_kg), 0.1);
+  EXPECT_GT(std::fabs(base.angular_drag_n_m_s(1) - truth.angular_drag_n_m_s(1)), 1e-3);
+}
+
+// "Unfitted parameters are preserved" has to be a checked statement. This
+// compares every parameter the study did not name against the BASE model, and
+// requires the provenance to list each of them by name.
+TEST(ExampleQuadrotorIdentification, PreservesEveryParameterItWasNotAskedToFit) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  const galata::model::Quadrotor base = galata::model::load_quadrotor(
+      (std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification" / "quad-base.yaml")
+          .string());
+
+  ASSERT_EQ(fitted.model.rotor_count(), base.rotor_count());
+  for (std::size_t r = 0; r < base.rotors.size(); ++r) {
+    EXPECT_EQ(fitted.model.rotors[r].thrust_coefficient_n_s2,
+              base.rotors[r].thrust_coefficient_n_s2)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].torque_coefficient_n_m_s2,
+              base.rotors[r].torque_coefficient_n_m_s2)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].speed_time_constant_s, base.rotors[r].speed_time_constant_s)
+        << "rotor " << r;
+    EXPECT_EQ(fitted.model.rotors[r].position_cg_to_hub_body_m,
+              base.rotors[r].position_cg_to_hub_body_m)
+        << "rotor " << r;
+  }
+  EXPECT_EQ(fitted.model.drag_linear_n_s_m, base.drag_linear_n_s_m);
+  EXPECT_EQ(fitted.model.drag_quadratic_n_s2_m2, base.drag_quadratic_n_s2_m2);
+  EXPECT_EQ(fitted.model.angular_drag_n_m_s(0), base.angular_drag_n_m_s(0));
+  EXPECT_EQ(fitted.model.angular_drag_n_m_s(2), base.angular_drag_n_m_s(2));
+  EXPECT_EQ(fitted.model.mass.inertia_cg_body_kg_m2, base.mass.inertia_cg_body_kg_m2);
+
+  // Twenty-two parameter paths exist on a four-rotor model; two were fitted.
+  const auto& provenance = *fitted.identity.fit;
+  EXPECT_EQ(provenance.fitted.size(), 2U);
+  EXPECT_EQ(provenance.preserved_parameter_paths.size(), 20U);
+  for (const auto& parameter : provenance.fitted) {
+    EXPECT_FALSE(parameter.unit.empty()) << parameter.path << " has no unit";
+    EXPECT_EQ(std::count(provenance.preserved_parameter_paths.begin(),
+                         provenance.preserved_parameter_paths.end(),
+                         parameter.path),
+              0)
+        << parameter.path << " is listed both as fitted and as preserved";
+  }
+}
+
+// THE ONE THAT MATTERS FOR THE LABEL. Two stages of the same study run the same
+// model against two windows of the same file. Their verdicts must differ, and
+// neither may have been decided by comparing digests — the digests are equal in
+// both cases, because both windows came from one import.
+TEST(ExampleQuadrotorIdentification, LabelsTheHeldOutWindowAndTheTrainingWindowDifferently) {
+  const auto result = run_example("quadrotor-identification", "study.yaml");
+  const galata::pipeline::Artifact* held = result.find("check_heldout");
+  const galata::pipeline::Artifact* trained = result.find("check_estimation");
+  ASSERT_NE(held, nullptr);
+  ASSERT_NE(trained, nullptr);
+
+  const auto& held_out = held->payload_as<galata::pipeline::ValidationArtifact>("validation");
+  const auto& on_training = trained->payload_as<galata::pipeline::ValidationArtifact>("validation");
+
+  EXPECT_EQ(held_out.result.separation, galata::identify::RecordSeparation::VerifiedDisjoint);
+  EXPECT_EQ(on_training.result.separation, galata::identify::RecordSeparation::NotHeldOut);
+  // Both records came from one import, so the digests are EQUAL in both stages.
+  // A classification that read the digests could not have separated them.
+  EXPECT_EQ(held_out.result.estimation_record_sha256, held_out.result.validation_record_sha256);
+  EXPECT_EQ(on_training.result.estimation_record_sha256,
+            on_training.result.validation_record_sha256);
+  EXPECT_FALSE(held_out.result.separation_basis.empty());
+  EXPECT_NE(held_out.result.separation_basis, on_training.result.separation_basis);
+
+  // The estimation digest was read from the fitted model's own provenance, not
+  // declared in the study — study.yaml states no digest anywhere.
+  const galata::pipeline::Artifact* fit = result.find("fit");
+  ASSERT_NE(fit, nullptr);
+  const auto& fitted = fit->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  ASSERT_NE(fitted.identity.fit, nullptr);
+  EXPECT_EQ(held_out.result.estimation_record_sha256,
+            fitted.identity.fit->estimation_record_sha256);
+}
+
+// The other half of the delay COMPARISON, on the SHIPPED study rather than on a
+// throwaway design. `QuadrotorWorkflow.AFasterDesignRunsOutOfDelayMarginAtTheSameSampleRate`
+// shows the comparison can fail; this shows this study's design falls the right
+// side of it, with room.
+//
+// It is a comparison and not a stability condition, in either direction. The
+// half-period term is an APPROXIMATION of the zero-order hold's low-frequency
+// lag, not a model of it; a continuous delay margin bounds a continuous
+// perturbation; and a sampled loop can be stable past the margin or unstable
+// inside it. The figures are properties of THIS design and THIS loop
+// construction, not of the plant or of the sample rate. Discrete-time analysis
+// is what would settle the question and galata has none.
+TEST(ExampleQuadrotorSampledControl, TheTransportDelayIsWellInsideTheContinuousDelayMargin) {
+  const auto result = run_example("quadrotor-sampled-control", "study.yaml");
+  const galata::pipeline::Artifact* law_stage = result.find("lqr");
+  ASSERT_NE(law_stage, nullptr);
+  const auto& law = law_stage->payload_as<galata::synth::LqrDesign>("control_law");
+
+  // What the study declares, restated here rather than parsed out of it: a study
+  // that quietly raised its delay must fail this instead of moving the
+  // reference alongside itself.
+  const double controller_period_s = 0.004;
+  const double equivalent_lag_s = 2.0 * controller_period_s + 0.5 * controller_period_s;
+  // The budget, fixed before the numbers are read. Five, because the comparison
+  // is weak — the half-period term approximates the hold rather than modelling
+  // it — and because a factor nothing could fail is not a gate.
+  constexpr double kRequiredFactor = 5.0;
+
+  for (int channel = 0; channel < law.plant.input_count(); ++channel) {
+    const galata::model::LinearSystem loop = galata::synth::single_loop_others_closed(law, channel);
+    const auto margins = galata::analyze::stability_margins(loop, 0, 0, {});
+    const std::string& name = law.plant.input_names[static_cast<std::size_t>(channel)];
+    ASSERT_TRUE(margins.has_delay_margin) << name;
+    EXPECT_GT(margins.delay_margin_s, kRequiredFactor * equivalent_lag_s)
+        << name << ": the continuous loop tolerates " << margins.delay_margin_s
+        << " s of delay and the sampled implementation applies an equivalent lag of "
+        << equivalent_lag_s
+        << " s. This comparison proves nothing about the sampled loop in either direction, "
+           "but a shipped example whose design sat the wrong side of it would be one nobody "
+           "should copy";
+  }
+}
+
+// ===========================================================================
+// A discrete design on the native Souxmar plant
+// ===========================================================================
+//
+// `examples/souxmar-sampled-lqr` designs in DISCRETE time, flies the design at
+// the period it was designed for against the nonlinear plant, and compares the
+// run with the design's own prediction of its loop.
+//
+// Each test runs into ITS OWN directory. gtest_discover_tests makes every test
+// a separate ctest entry, entries run concurrently, and RFC-0002's housekeeping
+// section records the race a shared per-example directory caused.
+
+namespace souxmar {
+
+using galata::pipeline::LinearPredictionRecord;
+using galata::pipeline::RunResult;
+using galata::pipeline::SampledRun;
+
+const std::string kExample = "souxmar-sampled-lqr";
+// The perturbation the study declares, restated rather than parsed, so that a
+// study that quietly changed it fails the text match below instead of moving
+// the comparison along with it.
+const std::string kDeclaredPerturbation =
+    "[0.2, -0.1, 0.15, 0, 0, 0, 0.01, -0.01, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+const std::string kHalvedPerturbation =
+    "[0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+// What the study declares, restated for the same reason.
+constexpr double kDeclaredBudget = 0.05;
+constexpr double kControllerPeriodS = 0.004;
+
+std::filesystem::path scratch(const std::string& test) {
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / (kExample + "-" + test);
+  std::filesystem::create_directories(directory);
+  return directory;
+}
+
+RunResult run_shipped(const std::string& test) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample;
+  return galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "study.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      scratch(test).string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+}
+
+// The shipped study with ONE edit: the perturbation. The model path is made
+// absolute because the copy does not live beside the models directory; every
+// other byte of the text is the shipped study's.
+RunResult run_with_perturbation(const std::string& test, const std::string& perturbation) {
+  std::string text =
+      read_file(std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample / "study.yaml");
+  const auto replace = [&text](const std::string& from, const std::string& to) {
+    const auto at = text.find(from);
+    if (at == std::string::npos) {
+      ADD_FAILURE() << "the shipped study no longer contains '" << from << "'";
+      return;
+    }
+    text.replace(at, from.size(), to);
+  };
+  replace(
+      "../../models/souxmar-quad/souxmar-quad.yaml",
+      (std::filesystem::path(GALATA_MODELS_DIR) / "souxmar-quad" / "souxmar-quad.yaml").string());
+  replace(kDeclaredPerturbation, perturbation);
+  const auto directory = scratch(test);
+  const auto copy = directory / "study.yaml";
+  {
+    std::ofstream file(copy);
+    file << text;
+  }
+  return galata::pipeline::run_pipeline(galata::pipeline::load_pipeline(copy.string()),
+                                        galata::pipeline::builtin_registry(),
+                                        directory.string(),
+                                        (directory / "output").string(),
+                                        nullptr,
+                                        galata::pipeline::RunOptions{.overwrite = true});
+}
+
+const SampledRun& sampled_run(const galata::pipeline::RunResult& result) {
+  const galata::pipeline::Artifact* closed = result.find("closed");
+  if (closed == nullptr) {
+    throw std::runtime_error("the study has no stage 'closed'");
+  }
+  return closed->payload_as<SampledRun>("sampled_trajectory");
+}
+
+const galata::synth::SampledLqrDesign& design_of(const galata::pipeline::RunResult& result) {
+  const galata::pipeline::Artifact* sampled = result.find("sampled");
+  if (sampled == nullptr) {
+    throw std::runtime_error("the study has no stage 'sampled'");
+  }
+  return sampled->payload_as<galata::synth::SampledLqrDesign>("sampled_control_law");
+}
+
+// The design's cost-to-go norm, recomputed here from the recorded vectors and
+// the design's own X rather than read back from the record.
+double x_norm(const Eigen::VectorXd& value, const Eigen::MatrixXd& x) {
+  return std::sqrt(std::fmax(0.0, value.dot(x * value)));
+}
+
+double worst_miss(const std::vector<Eigen::VectorXd>& measured,
+                  const std::vector<Eigen::VectorXd>& predicted,
+                  const Eigen::MatrixXd& x) {
+  double worst = 0.0;
+  for (std::size_t k = 0; k < measured.size(); ++k) {
+    worst = std::fmax(worst, x_norm(measured[k] - predicted[k], x));
+  }
+  return worst;
+}
+
+double peak(const std::vector<Eigen::VectorXd>& predicted, const Eigen::MatrixXd& x) {
+  double largest = 0.0;
+  for (const Eigen::VectorXd& value : predicted) {
+    largest = std::fmax(largest, x_norm(value, x));
+  }
+  return largest;
+}
+
+// THE ORDER GATE, fixed before any run and derived from the two hypotheses it
+// separates. A prediction that is right to first order misses by O(delta^2),
+// so halving the perturbation divides the miss by four: observed order 2. A
+// prediction that is structurally wrong misses by O(delta): order 1. The gate
+// is the midpoint. What it can see is a structural error LARGER than the
+// second-order term at the tested perturbation — see the two tests below for
+// one it sees and one it does not.
+constexpr double kOrderGate = 1.5;
+
+double observed_order(double miss_at_delta, double miss_at_half_delta) {
+  return std::log2(miss_at_delta / miss_at_half_delta);
+}
+
+}  // namespace souxmar
+
+TEST(ExampleSouxmarSampledLqr, RunsEndToEndOnTheNativePlant) {
+  const auto result = souxmar::run_shipped("end-to-end");
+  ASSERT_EQ(result.stages.size(), 9U);
+  const std::vector<std::string> expected = {"model.quadrotor",
+                                             "trim.hover",
+                                             "linearize.extended",
+                                             "model.channels",
+                                             "model.discretize",
+                                             "synth.sampled_lqr",
+                                             "sim.sampled",
+                                             "report.csv",
+                                             "report.markdown"};
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(result.stages[i].capability, expected[i]) << "stage " << i;
+  }
+
+  // The NATIVE model, read from the models directory and not from a copy.
+  const auto& plant =
+      result.find("plant")->payload_as<galata::pipeline::QuadrotorArtifact>("quadrotor");
+  EXPECT_NE(plant.identity.path.find("models/souxmar-quad/souxmar-quad.yaml"), std::string::npos)
+      << plant.identity.path;
+
+  // The explicit adapter and the design discretise the same plant the same way.
+  const auto& design = souxmar::design_of(result);
+  const auto& discretised =
+      result.find("discrete")->payload_as<galata::model::Discretisation>("discrete_linear_system");
+  EXPECT_EQ(discretised.system.a, design.discretisation.system.a);
+  EXPECT_EQ(discretised.system.b, design.discretisation.system.b);
+  EXPECT_LT(design.riccati.spectral_radius, 1.0);
+  EXPECT_LE(design.riccati.relative_residual, design.riccati.residual_budget);
+
+  // THE CROSS TERM, retained from the discretised cost through to the file. The
+  // study declares no continuous cross term, so any nonzero N is the hold's.
+  EXPECT_EQ(design.continuous_n.norm(), 0.0);
+  EXPECT_GT(design.cost.n.norm(), 0.0);
+  const std::string evidence = read_file(souxmar::scratch("end-to-end") / "sampled-lqr.yaml");
+  EXPECT_NE(evidence.find("discretised_cost:"), std::string::npos);
+  EXPECT_NE(evidence.find("the cross term n is the hold's own and is RETAINED"), std::string::npos);
+  EXPECT_NE(evidence.find("not_established:"), std::string::npos);
+
+  // Flown at the period it was designed for, with the timing the study states.
+  const auto& control = souxmar::sampled_run(result).control;
+  EXPECT_EQ(control.law_time_domain, "discrete_design");
+  EXPECT_EQ(control.design_sample_time_s, souxmar::kControllerPeriodS);
+  EXPECT_EQ(control.controller_period_s, souxmar::kControllerPeriodS);
+  EXPECT_EQ(control.hold, "zero_order");
+  EXPECT_EQ(control.delay_periods, 1);
+  EXPECT_EQ(control.saturated_tick_count, 0)
+      << "the prediction has no actuator limits, so a run that saturated would be outside the "
+         "premise the comparison rests on";
+
+  const galata::pipeline::LinearPredictionRecord& prediction = control.prediction;
+  ASSERT_TRUE(prediction.available) << prediction.unavailable_reason;
+  ASSERT_TRUE(prediction.budget_declared);
+  EXPECT_EQ(prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_EQ(prediction.predicted_chart.front(), prediction.measured_chart.front())
+      << "the prediction starts from exactly the chart state the run started from";
+  // The headline, re-derived here from the vectors rather than trusted.
+  EXPECT_NEAR(
+      prediction.relative_discrepancy,
+      souxmar::worst_miss(prediction.measured_chart, prediction.predicted_chart, design.riccati.x)
+          / souxmar::peak(prediction.predicted_chart, design.riccati.x),
+      1e-12);
+
+  // And the report does not let the comparison be read as a margin.
+  const std::string report = read_file(souxmar::scratch("end-to-end") / "sampled-lqr.md");
+  EXPECT_NE(report.find("sampled loop's own robustness"), std::string::npos);
+  EXPECT_NE(report.find("no capability here computes one"), std::string::npos);
+}
+
+// THE CHECK THAT GIVES THE BUDGET ITS MEANING. The study's budget is a number;
+// what makes a number of that kind worth having is that the prediction it
+// bounds is right to first order, and that is a property the perturbation's
+// SCALING exposes and its size does not.
+TEST(ExampleSouxmarSampledLqr, TheDisagreementIsSecondOrderInThePerturbation) {
+  const auto full = souxmar::run_shipped("order-full");
+  const auto half = souxmar::run_with_perturbation("order-half", souxmar::kHalvedPerturbation);
+  const auto& x = souxmar::design_of(full).riccati.x;
+  const auto& at_full = souxmar::sampled_run(full).control.prediction;
+  const auto& at_half = souxmar::sampled_run(half).control.prediction;
+  ASSERT_TRUE(at_full.available && at_half.available);
+  EXPECT_EQ(souxmar::sampled_run(half).control.saturated_tick_count, 0);
+
+  const double order = souxmar::observed_order(
+      souxmar::worst_miss(at_full.measured_chart, at_full.predicted_chart, x),
+      souxmar::worst_miss(at_half.measured_chart, at_half.predicted_chart, x));
+  EXPECT_GT(order, souxmar::kOrderGate)
+      << "halving the perturbation must divide the miss by about four; observed order " << order
+      << ". An order near one means the prediction is structurally wrong, not merely "
+         "linearised";
+}
+
+namespace souxmar {
+
+// The observed order of the miss between the two runs and a prediction the
+// CALLER builds from the recorded initial chart state — the control tests'
+// way of asking the gate about a prediction the capability did not make.
+template <typename Predict>
+double order_against(const galata::pipeline::RunResult& full,
+                     const galata::pipeline::RunResult& half,
+                     const Eigen::MatrixXd& x,
+                     Predict predict) {
+  const auto miss = [&](const galata::pipeline::RunResult& result) {
+    const auto& prediction = sampled_run(result).control.prediction;
+    const auto wrong = predict(prediction.measured_chart.front(),
+                               static_cast<int>(prediction.measured_chart.size()) - 1);
+    return worst_miss(prediction.measured_chart, wrong.states, x);
+  };
+  return observed_order(miss(full), miss(half));
+}
+
+}  // namespace souxmar
+
+// THE NEGATIVE CONTROL, without which the order gate above would measure
+// nothing. The same two runs, against a prediction made at the WRONG PERIOD:
+// the design's gain on the plant discretised at 8 ms, while the law was designed
+// for and flown at 4 ms. That is exactly the mismatch `sim.sampled` refuses to
+// execute, its error is first order in the perturbation, and the gate must see
+// it.
+TEST(ExampleSouxmarSampledLqr, APredictionAtTheWrongPeriodFailsTheSameOrderTest) {
+  const auto full = souxmar::run_shipped("period-full");
+  const auto half = souxmar::run_with_perturbation("period-half", souxmar::kHalvedPerturbation);
+  const auto& design = souxmar::design_of(full);
+  const auto& continuous =
+      full.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system");
+  const galata::model::Discretisation wrong_period =
+      galata::model::discretize_zoh(continuous, 2.0 * souxmar::kControllerPeriodS);
+
+  const double order = souxmar::order_against(
+      full, half, design.riccati.x, [&](const Eigen::VectorXd& start, int ticks) {
+        return galata::sim::predict_sampled_loop(
+            wrong_period.system, design.riccati.k, 1, start, ticks);
+      });
+  EXPECT_LT(order, souxmar::kOrderGate)
+      << "a prediction at twice the design period must fail the order gate; observed order "
+      << order << ". If this passes, the gate cannot tell a right prediction from a wrong one";
+}
+
+// WHAT THE COMPARISON CANNOT SEE, recorded so that nobody reads it as more than
+// it is. The same two runs, against a prediction wrong by exactly one tick of
+// delay — the study flies one period and this prediction assumes none. At 250
+// Hz, on a loop this slow, one tick of delay moves the prediction by less than
+// the linearisation's own second-order error at the declared perturbation, so
+// the miss still scales as a second-order one and the gate passes it.
+//
+// This test was written as the negative control and FAILED as one; it was kept
+// and inverted rather than deleted, because the limitation is the finding. The
+// comparison does not certify the delay line. What does is exact re-derivation:
+// `QuadrotorWorkflow.TheDiscreteLawIsExecutedAsDesigned` checks every applied
+// command against the one computed a period earlier, and
+// `DiscretePrediction.AMultivariableDelayedLoopMatchesTheAugmentedStateMatrix`
+// checks the prediction's queue against the augmented-state matrix.
+//
+// If this starts failing, the comparison has begun to resolve a one-tick
+// delay — a smaller perturbation or a faster loop — and the README's account of
+// what it can see must be revisited.
+TEST(ExampleSouxmarSampledLqr, AOneTickDelayErrorIsBelowThisComparisonsResolution) {
+  const auto full = souxmar::run_shipped("delay-full");
+  const auto half = souxmar::run_with_perturbation("delay-half", souxmar::kHalvedPerturbation);
+  const auto& design = souxmar::design_of(full);
+  ASSERT_EQ(souxmar::sampled_run(full).control.delay_periods, 1);
+
+  const double order = souxmar::order_against(
+      full, half, design.riccati.x, [&](const Eigen::VectorXd& start, int ticks) {
+        return galata::sim::predict_sampled_loop(
+            design.discretisation.system, design.riccati.k, 0, start, ticks);
+      });
+  EXPECT_GT(order, souxmar::kOrderGate)
+      << "a prediction one tick out in delay now FAILS the order gate (observed order " << order
+      << "), so the comparison resolves a one-tick delay error at this perturbation. Revisit "
+         "examples/souxmar-sampled-lqr/README.md";
+}
+
+// A LABELLED REGRESSION LOCK, NOT A VALIDATION. Its bounds come from galata's
+// own output when it was written, which charter rule 3 permits only when it is
+// said.
+//
+// THE FINDING IT HOLDS. The study's budget was derived before the first run,
+// from each nonlinearity measured against its OWN linear part. The first run
+// fell just outside it, and the discrepancy was then localised rather than
+// absorbed. It is second order (the test above). It is not the quadratic drag:
+// zeroing the drag coefficients leaves it unchanged. It is the rigid-body
+// kinematics the hover linearisation drops, which the derivation never listed,
+// and `TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops`
+// below closes that account term by term. An earlier version of this comment
+// blamed the rotor-speed curvature. The trace shows that term carries almost
+// none of it. The budget is left where it was set.
+//
+// Two-sided, as every lock here is. If the run comes inside the declared budget
+// the finding is stale and the README must be revisited; if the discrepancy
+// grows, something changed that nobody meant to change.
+TEST(ExampleSouxmarSampledLqr, TheOverBudgetDiscrepancyIsHeldByATwoSidedLock) {
+  const auto result = souxmar::run_shipped("lock");
+  const galata::pipeline::LinearPredictionRecord& prediction =
+      souxmar::sampled_run(result).control.prediction;
+  ASSERT_TRUE(prediction.available && prediction.relative_discrepancy_defined);
+
+  // Measured at 5.05e-2 when this lock was written.
+  EXPECT_GT(prediction.relative_discrepancy, souxmar::kDeclaredBudget)
+      << "the run now falls INSIDE the budget its study declared. The recorded finding no longer "
+         "holds: work out why, and revisit examples/souxmar-sampled-lqr/README.md";
+  EXPECT_LT(prediction.relative_discrepancy, 0.06)
+      << "the discrepancy between the run and its own prediction has grown to "
+      << prediction.relative_discrepancy;
+  EXPECT_FALSE(prediction.within_budget);
+
+  // Where it SHOWS. The rotor-speed block is the last four chart coordinates.
+  // At the worst tick their miss is common to all four, at about twenty to one
+  // against the part that differs between them. That is the feedback answering
+  // the vertical miss through the gain — the trace below checks that the rotor
+  // equations are forced by nothing the linearisation drops — so it is a
+  // symptom, held because a change in it would mean the mechanism had moved.
+  const std::size_t worst = static_cast<std::size_t>(prediction.worst_tick);
+  const Eigen::VectorXd miss =
+      (prediction.measured_chart[worst] - prediction.predicted_chart[worst]).tail(4);
+  const double common = miss.mean();
+  const double differential = (miss.array() - common).matrix().norm();
+  EXPECT_GT(std::fabs(common), 5.0 * differential)
+      << "the rotor-speed miss at the worst tick is no longer common to the four rotors: common "
+      << common << " rad/s against differential " << differential << " rad/s";
+}
+
+// ===========================================================================
+// The trace behind that lock, the envelope, and the proposal
+// ===========================================================================
+
+namespace souxmar {
+
+// The chart `sim.sampled` records and the design is taken on: NED position
+// deviation (0-2), body velocity (3-5), attitude error as a rotation vector on
+// the right of the trim attitude (6-8), body rate (9-11) and rotor-speed
+// deviation (12-15).
+constexpr int kVelocity = 3;
+constexpr int kAttitude = 6;
+constexpr int kRate = 9;
+constexpr int kRotorSpeed = 12;
+
+// The rate of a right-multiplicative rotation-vector chart, J_r^-1(e) w, with
+// J_r the right Jacobian of SO(3) (Sola, Deray & Atchuthan, "A micro Lie theory
+// for state estimation in robotics", arXiv:1812.01537, 2018). Its linear part
+// is w.
+Eigen::Vector3d chart_attitude_rate(const Eigen::Vector3d& e, const Eigen::Vector3d& w) {
+  const double angle = e.norm();
+  // Below a microradian the closed form cancels, and the series' leading term
+  // is exact far beyond anything this test resolves.
+  const double c = angle < 1e-6 ? 1.0 / 12.0
+                                : 1.0 / (angle * angle)
+                                      - (1.0 + std::cos(angle)) / (2.0 * angle * std::sin(angle));
+  return w + 0.5 * e.cross(w) + c * e.cross(e.cross(w));
+}
+
+struct NamedTerm {
+  std::string name;
+  bool kinematic = false;       // rigid-body kinematics and gravity
+  bool rotor_squaring = false;  // the thrust and torque laws' curvature in rotor speed
+  Eigen::VectorXd rate;         // chart-rate units, row by row
+};
+
+// Each physical term of the chart dynamics, less its part in the hover
+// linearisation, at chart state c. Written from the rigid-body equations about
+// the centre of gravity and the model's own parameters — not from galata's
+// derivative routine — and valid only at a still-air hover, level and at zero
+// heading, which the test asserts before using it. Every term is second order
+// at leading order; the EXACT remainder is kept, so a higher order stays with
+// the term that owns it. The linear drag, the angular drag and the rotor lag
+// are linear and have none.
+std::vector<NamedTerm> named_remainders(const galata::model::Quadrotor& model,
+                                        const Eigen::VectorXd& c) {
+  const double g = galata::core::kStandardGravity;
+  const double mass = model.mass.mass_kg;
+  const Eigen::Matrix3d& inertia = model.mass.inertia_cg_body_kg_m2;
+  const Eigen::Matrix3d inverse_inertia = inertia.inverse();
+  const Eigen::Vector3d v = c.segment<3>(kVelocity);
+  const Eigen::Vector3d e = c.segment<3>(kAttitude);
+  const Eigen::Vector3d w = c.segment<3>(kRate);
+  const Eigen::Matrix3d ned_from_body =
+      galata::core::dcm_ned_from_body(galata::core::quaternion_from_rotation_vector(e));
+
+  double collective_n = 0.0;
+  Eigen::Vector3d thrust_moment_n_m = Eigen::Vector3d::Zero();
+  double yaw_moment_n_m = 0.0;
+  for (int i = 0; i < model.rotor_count(); ++i) {
+    const galata::model::Rotor& rotor = model.rotors[static_cast<std::size_t>(i)];
+    const double squared = c(kRotorSpeed + i) * c(kRotorSpeed + i);
+    const double thrust_n = rotor.thrust_coefficient_n_s2 * squared;
+    collective_n += thrust_n;
+    thrust_moment_n_m +=
+        rotor.position_cg_to_hub_body_m.cross(Eigen::Vector3d(0.0, 0.0, -thrust_n));
+    yaw_moment_n_m -= rotor.spin_about_body_z * rotor.torque_coefficient_n_m_s2 * squared;
+  }
+
+  const auto in_rows = [&c](int first, const Eigen::Vector3d& value) {
+    Eigen::VectorXd rate = Eigen::VectorXd::Zero(c.size());
+    rate.segment<3>(first) = value;
+    return rate;
+  };
+  const Eigen::Vector3d gravity_linear_part(-g * e.y(), g * e.x(), g);
+  const Eigen::Vector3d quadratic_drag =
+      -(model.drag_quadratic_n_s2_m2.array() * v.array() * v.array().abs()).matrix() / mass;
+  return {
+      {"position rotation (R - I) v", true, false, in_rows(0, ned_from_body * v - v)},
+      {"transport -w x v", true, false, in_rows(kVelocity, -w.cross(v))},
+      {"gravity projection",
+       true,
+       false,
+       in_rows(kVelocity,
+               ned_from_body.transpose() * Eigen::Vector3d(0.0, 0.0, g) - gravity_linear_part)},
+      {"attitude chart kinematics",
+       false,
+       false,
+       in_rows(kAttitude, chart_attitude_rate(e, w) - w)},
+      {"quadratic drag", false, false, in_rows(kVelocity, quadratic_drag)},
+      {"gyroscopic", false, false, in_rows(kRate, -(inverse_inertia * w.cross(inertia * w)))},
+      {"thrust curvature",
+       false,
+       true,
+       in_rows(kVelocity, Eigen::Vector3d(0.0, 0.0, -collective_n / mass))},
+      {"roll and pitch moment curvature",
+       false,
+       true,
+       in_rows(
+           kRate,
+           inverse_inertia * Eigen::Vector3d(thrust_moment_n_m.x(), thrust_moment_n_m.y(), 0.0))},
+      {"yaw torque curvature",
+       false,
+       true,
+       in_rows(kRate, inverse_inertia * Eigen::Vector3d(0.0, 0.0, yaw_moment_n_m))},
+  };
+}
+
+// A forcing held across each tick is carried through it by
+// Gamma = integral_0^T exp(A s) ds — the integral the zero-order hold puts in
+// front of B — and then through the loop the design predicts, delay included:
+//   e[k+1] = Ad e[k] - Bd K e[k-1] + Gamma f(m[k]),   e[0] = 0.
+// Holding each forcing at its tick-start value is the one approximation, and
+// the closure gate below allows for it.
+std::vector<Eigen::VectorXd> through_the_loop(const Eigen::MatrixXd& ad,
+                                              const Eigen::MatrixXd& bd_k,
+                                              const std::vector<Eigen::VectorXd>& forcing) {
+  std::vector<Eigen::VectorXd> error(forcing.size() + 1, Eigen::VectorXd::Zero(ad.rows()));
+  for (std::size_t k = 0; k < forcing.size(); ++k) {
+    error[k + 1] = ad * error[k] + forcing[k];
+    if (k >= 1) {
+      error[k + 1] -= bd_k * error[k - 1];
+    }
+  }
+  return error;
+}
+
+// Nine tenths of the declared perturbation, entry by entry.
+const std::string kNineTenthsPerturbation =
+    "[0.18, -0.09, 0.135, 0, 0, 0, 0.009, -0.009, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+// The horizontal part of the halved perturbation alone.
+const std::string kHalvedHorizontalOnly = "[0.1, -0.05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
+const std::string kProposalMarker =
+    "# ---- study.yaml follows, unchanged except for initial_chart_perturbation ----\n";
+
+}  // namespace souxmar
+
+// THE TRACE BEHIND THE LOCK ABOVE. Every term the hover linearisation drops is
+// evaluated along the recorded run, carried through the design's own delayed
+// loop, and set against the discrepancy the run actually shows.
+//
+//   CLOSURE      Together the terms account for the discrepancy to within a
+//                tenth, in the X norm, at every tick. The tenth was fixed before
+//                the trace was first run. It allows for the one approximation,
+//                a forcing held across each 4 ms tick.
+//   ATTRIBUTION  At the worst tick the rigid-body kinematic group — the
+//                rotation of body velocity into NED position, the transport
+//                -w x v, and gravity projected onto a tilted body — carries the
+//                discrepancy to within a tenth, and the transport term is the
+//                largest single contributor. The rotor-speed curvature and the
+//                quadratic drag each carry under a twentieth: a term carrying
+//                under a twentieth of a discrepancy is not its mechanism.
+//   ROTOR ROWS   The rotor-speed equations are the linear lag and nothing else,
+//                so their one-step residual is RK4's error on that lag, of
+//                order (h / tau)^5 / 120 of the rotor-speed deviation per step
+//                and orders of magnitude below the vertical velocity's. The gate
+//                is a thousandth of the latter. The rotor speeds' common miss is
+//                then the loop's response, not a cause.
+//
+// Shares are signed projections onto the discrepancy, e_term' X e / e' X e, so
+// they sum to the closure and one term can offset another.
+TEST(ExampleSouxmarSampledLqr,
+     TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops) {
+  const auto result = souxmar::run_shipped("trace");
+  const auto& design = souxmar::design_of(result);
+  const auto& run = souxmar::sampled_run(result);
+  const auto& prediction = run.control.prediction;
+  ASSERT_TRUE(prediction.available && prediction.relative_discrepancy_defined);
+  ASSERT_EQ(run.control.delay_periods, 1);
+  ASSERT_EQ(run.control.saturated_tick_count, 0);
+
+  // The remainders are written for a still-air hover, level, at zero heading.
+  const auto& hover =
+      result.find("hover")->payload_as<galata::pipeline::HoverTrimArtifact>("hover_trim");
+  const Eigen::VectorXd& trim_state = hover.point.extended_state;
+  ASSERT_NEAR(std::fabs(trim_state(galata::core::kQuaternionW)), 1.0, 1e-12);
+  ASSERT_LT(trim_state.segment<3>(galata::core::kQuaternionX).norm(), 1e-12);
+  ASSERT_EQ(hover.point.wind_ned_m_s.norm(), 0.0);
+  ASSERT_EQ(hover.model.rotor_count(), 4);
+
+  const Eigen::MatrixXd& a =
+      result.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system").a;
+  const Eigen::Index n = a.rows();
+  const double period_s = run.control.controller_period_s;
+  Eigen::MatrixXd block = Eigen::MatrixXd::Zero(2 * n, 2 * n);
+  block.topLeftCorner(n, n) = a * period_s;
+  block.topRightCorner(n, n) = Eigen::MatrixXd::Identity(n, n) * period_s;
+  const Eigen::MatrixXd exponential = galata::numerics::matrix_exponential(block).value;
+  const Eigen::MatrixXd gamma = exponential.topRightCorner(n, n);
+  const Eigen::MatrixXd& ad = design.discretisation.system.a;
+  const Eigen::MatrixXd& bd = design.discretisation.system.b;
+  ASSERT_LT((exponential.topLeftCorner(n, n) - ad).cwiseAbs().maxCoeff(), 1e-12)
+      << "Gamma must come from the A the design discretised";
+  const Eigen::MatrixXd bd_k = bd * design.riccati.k;
+  const Eigen::MatrixXd& x = design.riccati.x;
+
+  const std::vector<Eigen::VectorXd>& measured = prediction.measured_chart;
+  const std::size_t ticks = measured.size() - 1;
+  ASSERT_GE(run.control.applied_rad_s.size(), ticks);
+
+  // Each term's forcing at every tick, then carried through the loop on its own.
+  const std::vector<souxmar::NamedTerm> terms =
+      souxmar::named_remainders(hover.model, measured.front());
+  std::vector<std::vector<Eigen::VectorXd>> forcing(terms.size());
+  for (std::size_t k = 0; k < ticks; ++k) {
+    const std::vector<souxmar::NamedTerm> at_tick =
+        souxmar::named_remainders(hover.model, measured[k]);
+    for (std::size_t t = 0; t < at_tick.size(); ++t) {
+      forcing[t].push_back(gamma * at_tick[t].rate);
+    }
+  }
+  std::vector<std::vector<Eigen::VectorXd>> carried;
+  for (const auto& term_forcing : forcing) {
+    carried.push_back(souxmar::through_the_loop(ad, bd_k, term_forcing));
+  }
+
+  // CLOSURE.
+  double unexplained = 0.0;
+  double largest = 0.0;
+  for (std::size_t k = 0; k <= ticks; ++k) {
+    const Eigen::VectorXd discrepancy = measured[k] - prediction.predicted_chart[k];
+    Eigen::VectorXd accounted = Eigen::VectorXd::Zero(n);
+    for (const auto& term : carried) {
+      accounted += term[k];
+    }
+    unexplained = std::fmax(unexplained, souxmar::x_norm(accounted - discrepancy, x));
+    largest = std::fmax(largest, souxmar::x_norm(discrepancy, x));
+  }
+  ASSERT_GT(largest, 0.0);
+  EXPECT_LT(unexplained / largest, 0.1)
+      << "the named terms no longer account for the discrepancy: the part they leave "
+         "unexplained reaches "
+      << unexplained / largest << " of its largest value";
+
+  // ATTRIBUTION, at the worst tick.
+  const auto worst = static_cast<std::size_t>(prediction.worst_tick);
+  const Eigen::VectorXd at_worst = measured[worst] - prediction.predicted_chart[worst];
+  const double total = at_worst.dot(x * at_worst);
+  double kinematic = 0.0;
+  double rotor_squaring = 0.0;
+  double drag = 0.0;
+  double largest_share = 0.0;
+  std::string largest_term;
+  std::ostringstream shares;
+  for (std::size_t t = 0; t < terms.size(); ++t) {
+    const double share = carried[t][worst].dot(x * at_worst) / total;
+    shares << terms[t].name << ' ' << share << "; ";
+    if (terms[t].kinematic) {
+      kinematic += share;
+    }
+    if (terms[t].rotor_squaring) {
+      rotor_squaring += share;
+    }
+    if (terms[t].name == "quadratic drag") {
+      drag = share;
+    }
+    if (std::fabs(share) > std::fabs(largest_share)) {
+      largest_share = share;
+      largest_term = terms[t].name;
+    }
+  }
+  EXPECT_NEAR(kinematic, 1.0, 0.1)
+      << "the rigid-body kinematic group no longer carries the discrepancy. Shares: "
+      << shares.str();
+  EXPECT_EQ(largest_term, "transport -w x v") << "Shares: " << shares.str();
+  EXPECT_LT(std::fabs(rotor_squaring), 0.05)
+      << "the rotor-speed curvature now carries a material part of the discrepancy, and the "
+         "README's account must be revisited. Shares: "
+      << shares.str();
+  EXPECT_LT(std::fabs(drag), 0.05) << "Shares: " << shares.str();
+  RecordProperty("unexplained_fraction", unexplained / largest);
+  RecordProperty("shares_at_worst_tick", shares.str());
+
+  // ROTOR ROWS.
+  const Eigen::VectorXd& trim_command = hover.point.command_rad_s;
+  double rotor_residual = 0.0;
+  double vertical_residual = 0.0;
+  for (std::size_t k = 0; k < ticks; ++k) {
+    const Eigen::VectorXd one_step =
+        measured[k + 1] - ad * measured[k] - bd * (run.control.applied_rad_s[k] - trim_command);
+    rotor_residual = std::fmax(rotor_residual, one_step.tail(4).cwiseAbs().maxCoeff());
+    vertical_residual = std::fmax(vertical_residual, std::fabs(one_step(souxmar::kVelocity + 2)));
+  }
+  EXPECT_LT(rotor_residual, 1e-3 * vertical_residual)
+      << "the rotor-speed rows now carry a one-step residual of " << rotor_residual
+      << " rad/s against the vertical velocity's " << vertical_residual
+      << " m/s: something the linearisation drops is acting on the rotors";
+}
+
+// THE ENVELOPE, along the declared direction. The absolute miss is second order
+// and the prediction's peak first order, so the relative discrepancy grows in
+// proportion to the perturbation, and along the declared direction there is one
+// scale below which the budget holds. This run, at nine tenths of the declared
+// perturbation, must be inside it; the lock above holds the declared
+// perturbation itself outside. Together they bracket the boundary.
+TEST(ExampleSouxmarSampledLqr, TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation) {
+  const auto near = souxmar::run_with_perturbation("envelope", souxmar::kNineTenthsPerturbation);
+  const auto& control = souxmar::sampled_run(near).control;
+  ASSERT_TRUE(control.prediction.available && control.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(control.saturated_tick_count, 0);
+  EXPECT_EQ(control.prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_TRUE(control.prediction.within_budget)
+      << "at nine tenths of the declared perturbation the run is now outside the budget too ("
+      << control.prediction.relative_discrepancy
+      << "); the envelope the README describes has moved";
+  RecordProperty("relative_discrepancy", control.prediction.relative_discrepancy);
+}
+
+// THE PROPOSAL, AND ITS SAFEGUARDS. A PROPOSAL: the agreed case is study.yaml,
+// and its result stays outside the budget.
+//
+// proposed-acceptance.yaml must be study.yaml with the initial perturbation
+// halved and nothing else changed. That is checked first, as text, so the
+// proposal cannot drift into a different comparison. Then it must pass the
+// unchanged budget. And because a perturbation can be made to pass by adding
+// excitation the linearisation handles well — a vertical offset raises the
+// prediction's peak and barely adds to the miss — its most demanding
+// constituent, the horizontal offset alone, must pass too, and must be the
+// harder of the two.
+TEST(ExampleSouxmarSampledLqr, TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / souxmar::kExample;
+  std::string expected = read_file(directory / "study.yaml");
+  const auto declared = expected.find(souxmar::kDeclaredPerturbation);
+  ASSERT_NE(declared, std::string::npos);
+  expected.replace(declared, souxmar::kDeclaredPerturbation.size(), souxmar::kHalvedPerturbation);
+  const std::string proposal = read_file(directory / "proposed-acceptance.yaml");
+  const auto body = proposal.find(souxmar::kProposalMarker);
+  ASSERT_NE(body, std::string::npos) << "proposed-acceptance.yaml has lost its marker line";
+  EXPECT_EQ(proposal.substr(body + souxmar::kProposalMarker.size()), expected)
+      << "proposed-acceptance.yaml is no longer study.yaml with only the perturbation halved";
+
+  const auto proposed = galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "proposed-acceptance.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      souxmar::scratch("proposed").string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+  const auto& control = souxmar::sampled_run(proposed).control;
+  ASSERT_TRUE(control.prediction.available && control.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(control.saturated_tick_count, 0);
+  EXPECT_EQ(control.prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_TRUE(control.prediction.within_budget)
+      << "the proposed case is outside the unchanged budget: "
+      << control.prediction.relative_discrepancy;
+
+  const auto horizontal =
+      souxmar::run_with_perturbation("proposed-horizontal", souxmar::kHalvedHorizontalOnly);
+  const auto& alone = souxmar::sampled_run(horizontal).control;
+  ASSERT_TRUE(alone.prediction.available && alone.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(alone.saturated_tick_count, 0);
+  EXPECT_TRUE(alone.prediction.within_budget)
+      << "the proposed case's horizontal offset alone is outside the budget: "
+      << alone.prediction.relative_discrepancy;
+  EXPECT_GT(alone.prediction.relative_discrepancy, control.prediction.relative_discrepancy)
+      << "the horizontal offset alone is no longer the harder case, so the README's account of "
+         "why the mix is diluted no longer holds";
+  RecordProperty("proposed_relative_discrepancy", control.prediction.relative_discrepancy);
+  RecordProperty("horizontal_only_relative_discrepancy", alone.prediction.relative_discrepancy);
+}
+
+// ===========================================================================
+// Declared input histories through sim.linear, on the Souxmar linearisation
+// ===========================================================================
+//
+// `examples/souxmar-linear-histories` drives the hover linearisation with a
+// held doublet and an interpolated spool-up. The references are exact solutions
+// of the same linear model by the block matrix exponential (Van Loan, IEEE TAC
+// 23(3), 1978), so they share the model with the run and nothing of its
+// integrator. Each test runs into its own directory, for the reason the
+// sampled-LQR tests above give.
+
+namespace histories {
+
+const std::string kExample = "souxmar-linear-histories";
+constexpr double kStepS = 0.001;
+constexpr int kDoubletSteps = 1000;
+constexpr int kSpoolUpSteps = 1500;
+constexpr Eigen::Index kRotors = 4;
+constexpr Eigen::Index kSpoolUpInputs = 7;
+
+struct Run {
+  galata::pipeline::RunResult result;
+  std::filesystem::path output;
+};
+
+Run run(const std::string& test) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample;
+  const auto output =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / (kExample + "-" + test);
+  std::filesystem::create_directories(output);
+  return {galata::pipeline::run_pipeline(
+              galata::pipeline::load_pipeline((directory / "study.yaml").string()),
+              galata::pipeline::builtin_registry(),
+              directory.string(),
+              output.string(),
+              nullptr,
+              galata::pipeline::RunOptions{.overwrite = true}),
+          output};
+}
+
+// A report.csv file: its header with the quoting removed, and every row.
+struct Table {
+  std::vector<std::string> header;
+  std::vector<std::vector<double>> rows;
+
+  [[nodiscard]] std::vector<std::size_t> columns_starting(const std::string& prefix) const {
+    std::vector<std::size_t> found;
+    for (std::size_t i = 0; i < header.size(); ++i) {
+      if (header[i].rfind(prefix, 0) == 0) {
+        found.push_back(i);
+      }
+    }
+    return found;
+  }
+};
+
+Table read_table(const std::filesystem::path& path) {
+  std::ifstream file(path);
+  Table table;
+  std::string line;
+  std::getline(file, line);
+  std::stringstream header(line);
+  for (std::string cell; std::getline(header, cell, ',');) {
+    cell.erase(std::remove(cell.begin(), cell.end(), '"'), cell.end());
+    table.header.push_back(cell);
+  }
+  while (std::getline(file, line)) {
+    std::vector<double> row;
+    std::stringstream stream(line);
+    for (std::string cell; std::getline(stream, cell, ',');) {
+      row.push_back(std::stod(cell));
+    }
+    table.rows.push_back(std::move(row));
+  }
+  return table;
+}
+
+// The two histories study.yaml declares, restated in whole steps rather than
+// parsed, so the references are built from the declaration and not from the
+// code that reads it. RunsEndToEnd holds the study's recorded inputs to these
+// at every sample.
+//
+// The doublet: the value in force across step k.
+Eigen::VectorXd doublet_input(int step) {
+  Eigen::VectorXd u = Eigen::VectorXd::Zero(kRotors);
+  if (step >= 100 && step < 300) {
+    u.setConstant(3.0);
+  } else if (step >= 300 && step < 500) {
+    u.setConstant(-3.0);
+  }
+  return u;
+}
+
+// The spool-up, four rotor commands and then wind north, east and down: the
+// value at the start of step k, and its rate of change across the step.
+Eigen::VectorXd spoolup_input(int step) {
+  Eigen::VectorXd u = Eigen::VectorXd::Zero(kSpoolUpInputs);
+  u.head(kRotors).setConstant(step < 100 ? 0.0 : step < 300 ? 3.0 * (step - 100) / 200.0 : 3.0);
+  u(4) = step < 200 ? 0.0 : step < 700 ? 2.0 * (step - 200) / 500.0 : 2.0;
+  return u;
+}
+
+Eigen::VectorXd spoolup_rate(int step) {
+  Eigen::VectorXd rate = Eigen::VectorXd::Zero(kSpoolUpInputs);  // per second
+  if (step >= 100 && step < 300) {
+    rate.head(kRotors).setConstant(15.0);
+  }
+  if (step >= 200 && step < 700) {
+    rate(4) = 4.0;
+  }
+  return rate;
+}
+
+// M = [[A, B, 0], [0, 0, I], [0, 0, 0]] for z = [x; u; du/dt]: a system whose
+// input is constant or linear across a step is autonomous in z across it.
+Eigen::MatrixXd augmented(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b) {
+  const Eigen::Index n = a.rows();
+  const Eigen::Index p = b.cols();
+  Eigen::MatrixXd m = Eigen::MatrixXd::Zero(n + 2 * p, n + 2 * p);
+  m.topLeftCorner(n, n) = a;
+  m.block(0, n, n, p) = b;
+  m.block(n, n + p, p, p) = Eigen::MatrixXd::Identity(p, p);
+  return m;
+}
+
+double infinity_norm(const Eigen::MatrixXd& m) {
+  return m.cwiseAbs().rowwise().sum().maxCoeff();
+}
+
+struct Reference {
+  std::vector<Eigen::VectorXd> states;  // at every step boundary, from rest
+  double largest_augmented = 0.0;       // the largest |[x; u; du/dt]|, infinity norm
+};
+
+// x[k+1] = the top rows of exp(hM) [x[k]; u[k]; du/dt[k]]: the exact solution
+// for an input held, or linear, across each step.
+template <typename Input, typename Rate>
+Reference exact_solution(const Eigen::MatrixXd& a,
+                         const Eigen::MatrixXd& b,
+                         int steps,
+                         Input input,
+                         Rate rate) {
+  const Eigen::Index n = a.rows();
+  const Eigen::Index p = b.cols();
+  const Eigen::MatrixXd step =
+      galata::numerics::matrix_exponential(augmented(a, b) * kStepS).value.topRows(n);
+  Reference reference;
+  Eigen::VectorXd z = Eigen::VectorXd::Zero(n + 2 * p);
+  reference.states.push_back(z.head(n));
+  for (int k = 0; k < steps; ++k) {
+    z.segment(n, p) = input(k);
+    z.tail(p) = rate(k);
+    reference.largest_augmented = std::fmax(reference.largest_augmented, z.cwiseAbs().maxCoeff());
+    const Eigen::VectorXd next = step * z;
+    z.head(n) = next;
+    reference.states.push_back(next);
+  }
+  reference.largest_augmented =
+      std::fmax(reference.largest_augmented, z.head(n).cwiseAbs().maxCoeff());
+  return reference;
+}
+
+// THE A PRIORI BUDGET, from the model, the step and the declared history alone,
+// and fixed before either comparison it gates.
+//
+// With u held or linear across each step, RK4 on x' = A x + B u(t) is RK4 on
+// z' = M z, because the stage values of a linear u are its values at the stage
+// times; one step applies exp(hM)'s Taylor polynomial to fourth order. What
+// that drops is (hM)^5 times a series whose norm is at most e^{h|M|} / 120, so
+// a step taken from the exact state errs by at most |(hM)^5| e^{h|M|} / 120 |z|.
+// RK4's own propagator R carries each such error forward, so after N steps the
+// error is at most N max_j |R^j| times the worst of them. Infinity norms of the
+// raw vectors throughout.
+double rk4_budget(const Eigen::MatrixXd& a,
+                  const Eigen::MatrixXd& b,
+                  int steps,
+                  double largest_augmented) {
+  const Eigen::MatrixXd hm = augmented(a, b) * kStepS;
+  Eigen::MatrixXd fifth = hm;
+  for (int i = 1; i < 5; ++i) {
+    fifth = (fifth * hm).eval();
+  }
+  const double local =
+      infinity_norm(fifth) * std::exp(infinity_norm(hm)) / 120.0 * largest_augmented;
+
+  const Eigen::Index n = a.rows();
+  const Eigen::MatrixXd ha = a * kStepS;
+  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
+  const Eigen::MatrixXd r =
+      identity + ha * (identity + ha / 2.0 * (identity + ha / 3.0 * (identity + ha / 4.0)));
+  double growth = 1.0;
+  Eigen::MatrixXd power = identity;
+  for (int j = 1; j < steps; ++j) {
+    power = (power * r).eval();
+    growth = std::fmax(growth, infinity_norm(power));
+  }
+  return steps * growth * local;
+}
+
+// The largest state deviation from a reference, over every recorded sample.
+double worst_deviation(const Table& table, const std::vector<Eigen::VectorXd>& states) {
+  const std::vector<std::size_t> columns = table.columns_starting("state:");
+  double worst = 0.0;
+  for (std::size_t k = 0; k < table.rows.size(); ++k) {
+    for (std::size_t j = 0; j < columns.size(); ++j) {
+      worst = std::fmax(
+          worst, std::fabs(table.rows[k][columns[j]] - states[k](static_cast<Eigen::Index>(j))));
+    }
+  }
+  return worst;
+}
+
+}  // namespace histories
+
+TEST(ExampleSouxmarLinearHistories, RunsEndToEndAndHonoursEveryDeclaredEvent) {
+  const auto run = histories::run("end-to-end");
+  const std::vector<std::string> expected = {"model.quadrotor",
+                                             "trim.hover",
+                                             "linearize.extended",
+                                             "model.channels",
+                                             "model.channels",
+                                             "sim.linear",
+                                             "sim.linear",
+                                             "report.csv",
+                                             "report.csv",
+                                             "report.markdown"};
+  ASSERT_EQ(run.result.stages.size(), expected.size());
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(run.result.stages[i].capability, expected[i]) << "stage " << i;
+  }
+
+  // Three value changes, each an event; a linear hold has none.
+  const std::string& doublet_summary = run.result.find("doublet")->summary;
+  const std::string& spoolup_summary = run.result.find("spoolup")->summary;
+  EXPECT_NE(doublet_summary.find("3 event(s) inside the run"), std::string::npos)
+      << doublet_summary;
+  EXPECT_NE(spoolup_summary.find("0 event(s) inside the run"), std::string::npos)
+      << spoolup_summary;
+
+  // At every sample the recorded input is the declared value in force there:
+  // right-continuous at the doublet's three events, and interpolated between the
+  // spool-up's samples.
+  const histories::Table doublet = histories::read_table(run.output / "doublet.csv");
+  const std::vector<std::size_t> doublet_inputs = doublet.columns_starting("input:");
+  ASSERT_EQ(doublet_inputs.size(), static_cast<std::size_t>(histories::kRotors));
+  ASSERT_EQ(doublet.rows.size(), static_cast<std::size_t>(histories::kDoubletSteps) + 1);
+  for (std::size_t k = 0; k < doublet.rows.size(); ++k) {
+    const Eigen::VectorXd declared = histories::doublet_input(static_cast<int>(k));
+    for (std::size_t j = 0; j < doublet_inputs.size(); ++j) {
+      EXPECT_EQ(doublet.rows[k][doublet_inputs[j]], declared(static_cast<Eigen::Index>(j)))
+          << "doublet sample " << k << ", input " << j;
+    }
+  }
+  const histories::Table spoolup = histories::read_table(run.output / "spoolup.csv");
+  const std::vector<std::size_t> spoolup_inputs = spoolup.columns_starting("input:");
+  ASSERT_EQ(spoolup_inputs.size(), static_cast<std::size_t>(histories::kSpoolUpInputs));
+  ASSERT_EQ(spoolup.rows.size(), static_cast<std::size_t>(histories::kSpoolUpSteps) + 1);
+  for (std::size_t k = 0; k < spoolup.rows.size(); ++k) {
+    const Eigen::VectorXd declared = histories::spoolup_input(static_cast<int>(k));
+    for (std::size_t j = 0; j < spoolup_inputs.size(); ++j) {
+      EXPECT_NEAR(spoolup.rows[k][spoolup_inputs[j]], declared(static_cast<Eigen::Index>(j)), 1e-12)
+          << "spool-up sample " << k << ", input " << j;
+    }
+  }
+}
+
+// The held doublet against the exact solution for a held input. The negative
+// control is the same comparison against the doublet moved one step late, which
+// must FAIL the same budget: without it, the budget could be one that no event
+// placement error reaches.
+TEST(ExampleSouxmarLinearHistories, TheDoubletMatchesTheExactHeldSolutionWithinAnAPrioriBudget) {
+  const auto run = histories::run("doublet");
+  const auto& rotors =
+      run.result.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system");
+  const auto held = [](int) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Zero(histories::kRotors);
+  };
+  const histories::Reference exact = histories::exact_solution(
+      rotors.a, rotors.b, histories::kDoubletSteps, histories::doublet_input, held);
+  const double budget =
+      histories::rk4_budget(rotors.a, rotors.b, histories::kDoubletSteps, exact.largest_augmented);
+
+  const histories::Table table = histories::read_table(run.output / "doublet.csv");
+  ASSERT_EQ(table.rows.size(), exact.states.size());
+  const double deviation = histories::worst_deviation(table, exact.states);
+  EXPECT_LE(deviation, budget) << "the doublet run departs from the exact held solution by "
+                               << deviation << " against an a priori budget of " << budget;
+
+  const histories::Reference late = histories::exact_solution(
+      rotors.a,
+      rotors.b,
+      histories::kDoubletSteps,
+      [](int step) { return histories::doublet_input(step - 1); },
+      held);
+  EXPECT_GT(histories::worst_deviation(table, late.states), budget)
+      << "a doublet one step late is inside the budget, so the budget cannot see an event in "
+         "the wrong place";
+  RecordProperty("deviation", deviation);
+  RecordProperty("budget", budget);
+  RecordProperty("one_step_late_deviation", histories::worst_deviation(table, late.states));
+}
+
+// The interpolated spool-up against the exact solution for a linearly varying
+// input. The negative control is a reference that HOLDS each value across the
+// step instead of interpolating it, which must fail the same budget.
+TEST(ExampleSouxmarLinearHistories,
+     TheSpoolUpMatchesTheExactInterpolatedSolutionWithinAnAPrioriBudget) {
+  const auto run = histories::run("spoolup");
+  const auto& inputs =
+      run.result.find("all_inputs")->payload_as<galata::model::LinearSystem>("linear_system");
+  const histories::Reference exact = histories::exact_solution(inputs.a,
+                                                               inputs.b,
+                                                               histories::kSpoolUpSteps,
+                                                               histories::spoolup_input,
+                                                               histories::spoolup_rate);
+  const double budget =
+      histories::rk4_budget(inputs.a, inputs.b, histories::kSpoolUpSteps, exact.largest_augmented);
+
+  const histories::Table table = histories::read_table(run.output / "spoolup.csv");
+  ASSERT_EQ(table.rows.size(), exact.states.size());
+  const double deviation = histories::worst_deviation(table, exact.states);
+  EXPECT_LE(deviation, budget)
+      << "the spool-up run departs from the exact interpolated solution by " << deviation
+      << " against an a priori budget of " << budget;
+
+  const histories::Reference held = histories::exact_solution(
+      inputs.a,
+      inputs.b,
+      histories::kSpoolUpSteps,
+      histories::spoolup_input,
+      [](int) -> Eigen::VectorXd { return Eigen::VectorXd::Zero(histories::kSpoolUpInputs); });
+  EXPECT_GT(histories::worst_deviation(table, held.states), budget)
+      << "a held reference is inside the budget, so the budget cannot tell the declared hold "
+         "from the other one";
+  RecordProperty("deviation", deviation);
+  RecordProperty("budget", budget);
+  RecordProperty("held_reference_deviation", histories::worst_deviation(table, held.states));
+}
+
+// THE NONLINEAR PATH'S COMMAND HISTORY, THROUGH A STUDY. `make-record.yaml`
+// flies the identification example's truth model through a declared zero-order
+// rotor-command history, and it is the only study that drives `sim.plant`'s
+// `command_schedule`. Its record is committed as `flight.csv`, so regenerating
+// it checks two things at once. The schedule reaches the plant as declared: the
+// command columns must equal the declared value in force at every sample,
+// exactly, right-continuous at each event. And the committed record is what its
+// own study produces: the states must agree to ADR-0004's cross-platform bound,
+// one part in 1e9 of each column's peak, because the record was written on one
+// platform and the platforms' libm differ in the last bits.
+TEST(ExampleQuadrotorIdentification, TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification";
+  const auto output = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                      / "quadrotor-identification-make-record";
+  std::filesystem::create_directories(output);
+  (void)galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "make-record.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      output.string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+  const histories::Table regenerated = histories::read_table(output / "flight.csv");
+  const histories::Table committed = histories::read_table(directory / "flight.csv");
+  ASSERT_EQ(regenerated.header, committed.header);
+  ASSERT_EQ(regenerated.rows.size(), committed.rows.size());
+
+  // The declared history, restated in samples: sample k is at t = 0.02 k, and
+  // the events at 0.2, 0.6, 1.2 and 1.6 s fall on samples 10, 30, 60 and 80.
+  const auto declared = [](std::size_t k) -> std::vector<double> {
+    if (k < 10) {
+      return {632.0, 632.0, 632.0, 632.0};
+    }
+    if (k < 30) {
+      return {610.0, 660.0, 660.0, 610.0};
+    }
+    if (k < 60) {
+      return {660.0, 610.0, 610.0, 660.0};
+    }
+    if (k < 80) {
+      return {645.0, 645.0, 620.0, 620.0};
+    }
+    return {620.0, 620.0, 645.0, 645.0};
+  };
+  const std::vector<std::size_t> commands = committed.columns_starting("command:");
+  ASSERT_EQ(commands.size(), 4U);
+  for (std::size_t k = 0; k < regenerated.rows.size(); ++k) {
+    const std::vector<double> in_force = declared(k);
+    for (std::size_t j = 0; j < commands.size(); ++j) {
+      EXPECT_EQ(regenerated.rows[k][commands[j]], in_force[j]) << "sample " << k << ", rotor " << j;
+    }
+  }
+
+  for (const std::size_t column : committed.columns_starting("state:")) {
+    double column_peak = 0.0;
+    for (const auto& row : committed.rows) {
+      column_peak = std::fmax(column_peak, std::fabs(row[column]));
+    }
+    for (std::size_t k = 0; k < committed.rows.size(); ++k) {
+      EXPECT_LE(std::fabs(regenerated.rows[k][column] - committed.rows[k][column]),
+                1e-9 * column_peak)
+          << committed.header[column] << " at sample " << k;
+    }
+  }
 }
 
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {

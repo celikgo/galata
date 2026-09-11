@@ -209,6 +209,54 @@ const std::vector<Case>& validation_cases() {
        "torque-signs case earns its keep on the axes that must stay SILENT — a transposed "
        "cross product leaves the driven axis looking healthy."},
 
+      {
+          "identify.recovery_under_noise",
+          "Grey-box identification against a record carrying declared Gaussian noise",
+          {"identify.greybox", "identify.validate"},
+          "Exact invariants of the identification arithmetic, on records this repository "
+          "generated; no published source and no measured data",
+          Status::SelfConsistent,
+          {E{kValidation,
+             "IdentificationRecovery."
+             "RecoversDeclaredParametersFromANoisyRecordWithinItsOwnIntervals"},
+           E{kValidation,
+             "IdentificationRecovery.TheReportedIntervalWidensWithTheNoiseTheRecordCarries"},
+           E{kValidation,
+             "IdentificationRecovery.TheSameParameterSetIsRefusedOnARecordThatCannotSeparateIt"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AWeaklyExcitedParameterIsReportedAsRestingOnItsBoundNotRefused"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AWrongModelIsCaughtByTheShapeOfItsHeldOutResidualNotOnlyItsSize"},
+           E{kValidation,
+             "IdentificationRecovery."
+             "AFitFromOneWindowIsScoredOnAnotherAndTheLabelIsNotIndependence"}},
+          "RFC-0002's WP4 verification, and self-consistent rather than validated because the "
+          "records are galata's own output with a declared pseudo-random sequence added — the "
+          "reference is the arithmetic of the estimator, not a document. THE ACCEPTANCE CRITERION "
+          "IS THE FIT'S OWN REPORTED INTERVAL rather than a tolerance chosen by the test: three "
+          "standard errors, fixed before any number was read, with a ceiling on the interval's "
+          "width so a fit cannot widen its way to passing. A fit can be accurate and overconfident "
+          "at once, and only the first case catches that. The second case is what makes the "
+          "interval worth quoting at all: an estimator reporting a constant would pass the first "
+          "whenever it happened to be accurate, so the interval is required to track a four-fold "
+          "noise increase to within a factor of two either way. The third and fourth separate the "
+          "two ways a parameter can be poorly determined, on ONE parameter set: refused outright "
+          "on a purely vertical record whose body rates are identically zero, so the sensitivity "
+          "column is exactly zero rather than merely small; and reported as resting on a declared "
+          "bound when a rotor-lag transient makes the same coefficient barely visible. "
+          "Identifiability is a property of the record and not of the model, and showing both "
+          "halves is what makes the refusal informative. The fifth is wrong-model detection by the "
+          "SHAPE of the held-out residual and not its size — a large residual could be a noisy "
+          "sensor; a residual correlated with itself is a missing dynamic effect, and the correct "
+          "model on the same window is required to leave a residual that is not. What none of this "
+          "establishes: the noise is independent and Gaussian because that is what the reported "
+          "covariance assumes, and real sensor error is coloured, quantised, occasionally missing "
+          "and correlated with the manoeuvre. There is no aircraft, no bench run and no flight "
+          "log.",
+      },
+
       {"quadrotor.cross_implementation",
        "Multirotor plant against an independent implementation, open loop with wind",
        {"model.quadrotor"},
@@ -656,6 +704,37 @@ const std::vector<Case>& validation_cases() {
        "are checked under step halving and shrinking perturbations against a full linearization "
        "with actuator lags. Flight-data validation remains absent."},
 
+      {"simulation.linear_input_histories",
+       "Declared input histories through the linear simulation: held and interpolated inputs, "
+       "events and extrapolation",
+       {"sim.linear"},
+       "Closed-form polynomial and exponential responses; exact held and linearly interpolated "
+       "solutions by the block-matrix exponential (Van Loan, IEEE TAC 23(3), 1978)",
+       Status::SelfConsistent,
+       {E{kUnit, "LinearSimulation.AZeroOrderHistoryMatchesTheClosedFormAcrossEveryEvent"},
+        E{kUnit,
+          "LinearSimulation.ALinearHistoryIsEvaluatedAtEveryStageAndIsExactOnADoubleIntegrator"},
+        E{kUnit,
+          "LinearSimulation.AHistoryThatHoldsOneValueReproducesTheConstantInputRunBitForBit"},
+        E{kIntegration,
+          "LinearHistoryWorkflow.AZeroOrderHistoryIsExactOnADoubleIntegratorThroughTheSchema"},
+        E{kIntegration,
+          "LinearHistoryWorkflow."
+          "AConstantRunIsUnchangedAndAOneValueHistoryReproducesItBitForBit"},
+        E{kIntegration,
+          "ExampleSouxmarLinearHistories."
+          "TheDoubletMatchesTheExactHeldSolutionWithinAnAPrioriBudget"},
+        E{kIntegration,
+          "ExampleSouxmarLinearHistories."
+          "TheSpoolUpMatchesTheExactInterpolatedSolutionWithinAnAPrioriBudget"}},
+       "Every reference is independent of the integrator it checks: polynomial and exponential "
+       "closed forms, and exact solutions of the same model by a matrix exponential, each "
+       "within a budget derived from the model, the step and the history before the "
+       "comparison. Negative controls show those budgets failing an event moved by one step "
+       "and a hold of the wrong kind. The references check the integration of a declared "
+       "history, not the model: nothing here compares the linear response with the nonlinear "
+       "plant or with a measurement."},
+
       {"model.continuous_scalar",
        "Experimental continuous scalar graph compilation and simulation",
        {"model.compile", "sim.model"},
@@ -672,6 +751,62 @@ const std::vector<Case>& validation_cases() {
        "aircraft blocks, sampled/hybrid execution and aircraft-model validity remain open; "
        "successful execution does not assess numerical accuracy for an arbitrary run."},
 
+      {"sampled.discrete_references",
+       "Exact zero-order-hold discretisation, the discrete Riccati equation and sampled LQR",
+       {"model.discretize", "synth.dare", "synth.sampled_lqr"},
+       "Closed-form scalar DARE; Riccati value iteration (Anderson & Moore, Optimal Control: "
+       "Linear Quadratic Methods, 1990, ch. 3); the hand-integrated cost of one held interval; "
+       "Van Loan, IEEE TAC 23(3), 1978, for the block-matrix exponential",
+       Status::SelfConsistent,
+       {E{kUnit, "DiscreteControl.TheScalarDareMatchesItsClosedFormSolution"},
+        E{kUnit, "DiscreteControl.ADareWithACrossTermAgreesWithValueIteration"},
+        E{kUnit, "DiscreteControl.TheDiscretisedCostMatchesTheHandIntegratedInterval"},
+        E{kUnit, "DiscreteSystem.AHeldInputTrajectoryAgreesWithTheExactContinuousSolution"},
+        E{kIntegration, "DiscreteWorkflow.TheScalarDareThroughThePipelineMatchesItsClosedForm"},
+        E{kIntegration,
+          "DiscreteWorkflow.ASampledDesignThroughThePipelineAgreesWithValueIteration"}},
+       "Every reference is independent of the routine it checks: an algebraic closed form, a "
+       "Riccati iteration that forms no symplectic matrix and no Schur decomposition, and an "
+       "interval cost integrated by hand, which is what shows the hold's cross term exists and "
+       "pins its size. None is a published DARE benchmark; the DAREX collection has not been "
+       "transcribed, so none of these capabilities claims validation. The refusals F14 names "
+       "are held beside these, through the pipeline as well as the library."},
+      {"sampled.small_perturbation",
+       "A discrete design's own prediction against the nonlinear plant it was designed from",
+       {"sim.sampled", "synth.sampled_lqr"},
+       "First-order agreement with a second-order remainder under small perturbation; Astrom & "
+       "Wittenmark, Computer-Controlled Systems, 3rd ed., 1997, section 2.3, for a whole-period "
+       "delay represented exactly by extra states",
+       Status::SelfConsistent,
+       {E{kUnit, "DiscretePrediction.AMultivariableDelayedLoopMatchesTheAugmentedStateMatrix"},
+        E{kIntegration, "ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution"},
+        E{kIntegration, "ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr."
+          "TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget"}},
+       "The prediction is shown right to first order by the scaling of its miss, and a negative "
+       "control shows the same test failing a prediction made at the wrong period. It does NOT "
+       "resolve a one-tick delay error at this perturbation, which is recorded by its own test; "
+       "the delay line is certified by exact re-derivation instead. At the example's declared "
+       "perturbation the run falls just outside the budget the study set before its first run, "
+       "and that result stands, held by a two-sided labelled lock rather than absorbed. The "
+       "excess is traced term by term, with a closure check, to the rigid-body kinematics the "
+       "hover linearisation drops: the transport of forward speed into body vertical velocity "
+       "as the vehicle pitches, partly offset by the tilt's loss of vertical gravity. It is not "
+       "the rotor-speed curvature an earlier version of this note named. The budget holds at "
+       "nine tenths of the declared perturbation. A case at half the excitation passes the "
+       "unchanged budget, in the declared mix and in its most demanding constituent alone; it "
+       "is PROPOSED in the example's proposed-acceptance.yaml, not adopted. No margin of the "
+       "sampled loop is computed or implied."},
+
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
        "Full CAREX and DAREX benchmark collections and generalised-pencil solvers",
@@ -679,8 +814,11 @@ const std::vector<Case>& validation_cases() {
        "",
        Status::NotImplemented,
        {},
-       "Only the bounded continuous-time Schur solver and small worked comparisons exist. "
-       "Singular or indefinite costs and discrete-time Riccati equations remain unsupported."},
+       "Bounded continuous- and discrete-time Schur solvers exist, with small worked, "
+       "closed-form and value-iteration comparisons. The benchmark collections have not been "
+       "transcribed. Singular or indefinite costs remain unsupported, and so does a discrete "
+       "problem whose transition A - B R^-1 N' is too ill-conditioned to invert, which a "
+       "pencil-based QZ solver would handle and which is refused by name instead."},
 
   };
   return cases;

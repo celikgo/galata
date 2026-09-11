@@ -11,9 +11,13 @@ add_library(galata_pipeline
   registry.cpp
   pipeline.cpp
   capabilities.cpp
+  data_capabilities.cpp
+  identify_capabilities.cpp
   design_capabilities.cpp
   model_capabilities.cpp
   quadrotor_capabilities.cpp
+  discrete_capabilities.cpp
+  input_schedule_parse.cpp
   linear_graph_capability.cpp
   files.cpp
   sha256.cpp
@@ -33,6 +37,8 @@ target_link_libraries(galata_pipeline
     galata::trim
     galata::linearize
     galata::synth
+    galata::data
+    galata::identify
     galata::simulation
     Eigen3::Eigen
   PRIVATE

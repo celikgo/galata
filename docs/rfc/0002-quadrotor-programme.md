@@ -2,11 +2,20 @@
 
 # RFC-0002: Quadrotor programme support — native plant, hover trim, generic linearisation, measured-data import, identification, sampled control
 
-- **Status:** partly delivered. WP1 and WP2 are implemented and their delivery records are
-  at the foot of this document; WP3, WP4 and WP5 are not started. The line this replaced said
-  "nothing below is implemented", which WP1 left standing and which stopped being true when it
-  landed. The README's Status table, generated from the capability registry, remains the
-  authority on what exists; nothing here is a release commitment.
+- **Status:** partly delivered. WP1 through WP5 are implemented and their delivery records
+  are at the foot of this document. Every capability is registered as
+  implemented-unvalidated: none of them is anchored to a published reference, for the reason
+  the acceptance section gives, and a completed run of any of them is not a validation.
+  What is NOT delivered is named in each record rather than left to be inferred — chiefly
+  the sampled loop's own robustness, simultaneous robustness across channels, and any evidence
+  at all from real hardware, which does not exist. This line has been wrong four times: it said
+  "nothing below is implemented" after WP1 landed, "WP3, WP4 and WP5 are not started" after all
+  three had, it named the Gramians as outstanding after `analyze.gramians` registered, and it
+  named discrete-time synthesis as undelivered after the WP5 addendum delivered it. The README's Status
+  table, generated from the capability registry, remains the authority on what exists, and it
+  is the authority precisely because a hand-maintained status line drifts; nothing here is a
+  release commitment. The per-item evidence, and the four statuses kept apart, are in
+  [the acceptance record](../reports/quadrotor-programme-acceptance.md).
 - **Date:** 2026-09-08
 - **Requested by:** the Souxmar forest-ISR quadrotor programme (GitLab `souxmar`, a Python repository; not the CAE project of the same name that ADR-0001 cites)
 - **Affects:** `src/model/`, `src/trim/`, `src/linearize/`, `src/sim/`, `src/pipeline/capabilities.cpp`, `docs/product/FEATURES.md`, `docs/ROADMAP.md`, `docs/VERIFICATION.md`, ADR-0002, ADR-0006
@@ -688,7 +697,15 @@ evidence  build/dev/souxmar-cross-check/cross-check-7dd36f7.xml
           it too. The digest is what makes it citable: the file is named after
           the revision it tested, and the digest says which bytes carry that name.
 
-cmake -S . -B build/dev -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
+# The toolchain file is NOT optional and was missing from this block until
+# 2026-09-10. Without it a from-scratch configure fails at
+# cmake/GalataInstall.cmake with "Set GALATA_EIGEN_LICENSE_FILE"; it appeared to
+# work only for a reader whose build/dev already carried the preset's cache,
+# which is the environment-dependent trap this record exists to avoid.
+cmake -S . -B build/dev \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DGALATA_SOUXMAR_FIXTURE_DIR=<fixture dir>
 cmake --build build/dev --target galata_validation_tests
 ./build/dev/tests/validation/galata_validation_tests \
   --gtest_filter='*Souxmar*' \
@@ -872,3 +889,356 @@ hover, because the double-integrator chains are defective. `model.channels` can
 select or drop the wind columns because they are named, but no case here
 exercises that path. Gusts and turbulence stay out of scope until a wind model
 owns the `-R^T dw/dt` term, exactly as WP1 left them.
+
+### WP3 — measured-data import, 2026-09-10
+
+`data.import.csv` and `data.import.ulog` register as implemented-unvalidated, with
+`data.window` beside them. `include/galata/data/record.hpp` is the contract every fitting
+capability reads: a channel carries the unit and the frame a human wrote down, plus what the
+source held before conversion and the scale and offset applied, so a coefficient can be traced
+back to the exact bytes that produced it. The readers refuse rather than repair — an unmapped
+and unignored column, a missing unit, a missing frame, a non-monotonic timestamp, a ragged row
+— and what they had to drop is counted and reported rather than absorbed. ADR-0016 records why
+ULog is parsed in-repo rather than by a dependency.
+
+**One capability the request did not ask for.** `data.window` cuts a record to a half-open
+interval of itself, keeping the file's identity and adding the interval. It exists because of a
+defect WP4 found in its own held-out semantics, described below; it is not a convenience.
+
+**Acceptance** is held in the `unit` tier by `CsvImport.*` and `UlogImport.*`, and the ULog
+fixture is generated from `tests/data/make_ulog_fixture.py` rather than committed, because a
+binary blob nobody can read is a fixture nobody can check.
+
+**ADR-0016's obligation is now discharged in full.** Choosing an in-repo parser over a
+dependency came with a condition: the reader must be checked against an implementation that is
+not ours. `--verify` on the fixture generator discharged half — pyulog can read the fixture, so
+the fixture is valid ULog — and said nothing about the READER.
+`scripts/compare-ulog-against-pyulog.py` compares the two decodings: timestamps as integer
+microseconds, topic instances, the integer fields between float arrays, every array element by
+name, and every value at EXACT equality with no tolerance. `report.record` was added so that
+what galata decoded can be seen at all; it is the counterpart to `data.import.*` and was
+missing.
+
+Two things about that comparison are recorded rather than left implicit. The fixture now logs
+`sensor_combined` TWICE, at multi_id 0 and 1 offset by exactly 100, because a reader that
+ignored multi_id would merge the instances into a channel that is neither and would pass every
+single-instance test. And the comparison's own channel table drives BOTH sides, so it detects a
+decoding disagreement and cannot detect a mis-specified channel — measured, by injecting four
+defects and recording which two were caught. The specification is held by `UlogImport.*`
+instead, which asserts against what the generator visibly wrote.
+
+**What WP3 does not deliver.** No frame conversion is performed anywhere: PX4's NED and FRD
+already match ADR-0002, and a record in FLU stays in FLU and says so. There is no smoothing,
+no interpolation on demand and no gap repair, by design. And NO REAL PX4 FLIGHT LOG HAS BEEN
+READ BY EITHER IMPLEMENTATION. A real log carries topics, formats, appended data and corruption
+this fixture does not; the parser comparison above is independent and is not a substitute for
+one. That limitation is separate and stays open.
+
+### WP4 — identification, 2026-09-10
+
+`identify.static_fit`, `identify.greybox` and `identify.validate` register as
+implemented-unvalidated, with `model.quadrotor.export` beside them, and
+`examples/quadrotor-identification/` runs the whole path through public capabilities.
+
+**The grey box is grey.** `identify.greybox` fits a DECLARED subset of `model::Quadrotor`'s
+parameters by simulating that same plant through the same `Quadrotor::derivative` and
+`numerics::integrate_fixed_step` pair `sim.plant` uses, so a fit and a simulation cannot
+disagree about what the model does. A parameter the study did not name is held at the value the
+model file gave it, and the exported provenance lists every such parameter BY NAME so that
+"unfitted parameters are preserved" is a checkable statement rather than a promise.
+
+**Three things kept apart, because ADR-0008 requires them to be separable.** The optimiser
+finished; the parameters are identifiable; the fit is acceptable. The first is nearly
+worthless on its own — the iteration count is declared, so it is true even of a run that moved
+nothing — which is why `objective_improved` and `accepted_steps` are reported beside it and
+carried in the headline. The second is a REFUSAL: a parameter direction the Jacobian cannot see
+is a parameter this record did not measure, and the run stops rather than reporting where the
+optimiser happened to stop. The third is not made here and is not implied.
+
+**ADR-0018 records the fitted-model artefact decision**, which the request did not anticipate
+and without which the fit produced numbers nothing downstream could consume. A fit emits the
+same `quadrotor` artefact kind `model.quadrotor` emits, so `trim.hover`, `linearize.extended`
+and `sim.plant` take it with no adapter and no special case; `model.quadrotor.export` writes it
+as a model file the loader reads back, with a required evidence file carrying the base-model
+identity, the estimation-record identity, every fitted parameter with its unit, bounds and
+standard error, the objective in words, and the optimiser diagnostics. The base model is never
+rewritten, and that is enforced by the executor rather than promised by the capability: the
+model file is a recorded run input and `RunFiles::check_input_collision` refuses any output
+that would overwrite one.
+
+**A DEFECT IN THE FIRST HELD-OUT SEMANTICS, FOUND AND CORRECTED HERE.** The first version of
+`identify.validate` set a boolean `is_held_out` to `validation_digest != estimation_digest`.
+The negative half of that is sound — the same bytes are the same observations — and the
+positive half is not, because a digest identifies BYTES and held-out is a claim about DATA. A
+file reformatted, exported twice, or written to a different number of decimal places has a
+different digest and the same observations in it; a segment copied between two files shares
+every sample it copied; two exports of one flight at two sample rates describe the same seconds
+of the same aircraft. Every one of those would have passed as validation, and each is a model
+being scored on its own training data under a label saying otherwise.
+
+Independence is now classified, and the classification says on what grounds.
+`VerifiedDisjoint` is reserved for the one case this code can prove — two windows of ONE
+imported file over intervals that do not meet, which is why `data.window` exists — and is
+confirmed by scanning the shared channels for a sample instant occurring in both.
+`CallerDeclared` is what an honest study gets when it knows two files are different flights and
+galata cannot check that: recorded as the caller's claim, in the caller's name, and downgraded
+the moment a check contradicts it. `Unknown` is what silence gets. `NotHeldOut` beats every
+positive branch, so a caller cannot declare away a proof of overlap. And `identify.validate`
+now reads the estimation record's identity out of the fitted model's own provenance rather than
+off a string the study typed, refusing a study that contradicts it, and refusing a record wired
+in as the training data whose lineage is not the lineage the fit recorded — which a digest
+comparison could not have caught, since a window keeps its parent's digest.
+
+**Acceptance, by test name.** `unit`: `StaticFit.*`, `Greybox.*`, `Validate.*` and
+`Independence.*` — the last being the eight cases the old boolean could not have had, each one
+a pair of records whose digest comparison gives the wrong answer. `QuadrotorSerialisation.*`
+holds the model file round trip bit for bit, and `RecordWindow.*` the half-open interval and
+the surviving source identity. `integration`: `IdentifyWorkflow.*` holds the strict schemas,
+the durable export, the refused overwrite of the source model and the provenance-driven
+identity; `ExampleQuadrotorIdentification.*` runs the shipped example and compares the
+recovered parameters against the committed truth model. `determinism`:
+`Determinism.AGreyboxFitIsBitIdenticalAcrossRuns` holds ADR-0004 tier 1 over the longest
+floating-point chain in the tree, and over the exported bytes as well as the parameters.
+
+**What WP4 does not deliver, stated plainly.** The synthetic self-test is noiseless to
+round-off, so it demonstrates that the machinery recovers a parameter it can SEE and nothing
+about behaviour against a sensor. No record here was measured; no bench produced any
+coefficient; there is no aircraft. The reported standard errors on that record are correct and
+useless in magnitude — they say the record demonstrates no scatter. The request's ULog topic
+list is imported but no PX4 log from the built aircraft exists to import, so the physical
+half of WP3's and WP4's verification is outstanding and is blocked on hardware rather than on
+software.
+
+**One gate was silently skipping this whole vertical.** `scripts/check-si-boundary.sh` listed
+`src/ident` and `include/galata/ident` among the numerical-core directories; the code landed at
+`src/identify` and `include/galata/identify`, so the gate reported them as "not yet present,
+skipped" while they existed, and passed. The list now names the real directories. A gate that
+skips is not a gate that passes, and this one said so in its own output without anybody reading
+it.
+
+### WP5 — sampled control and time-varying inputs, 2026-09-10
+
+`sim.plant`, `sim.sampled` and the declared input histories register as
+implemented-unvalidated, under vehicle-neutral names as the acceptance section decided, with
+the quadrotor as the case that had to pass.
+
+**`sim.plant` closed a gap the audit called the most basic one.** Before it, the nonlinear
+multirotor was reachable only from C++: this repository could integrate a quadrotor in its own
+tests and a user could not integrate one at all. `sim.nonlinear` is the fixed-wing path — it
+takes a `trim.level` point and actuators named elevator, aileron, rudder and thrust — and is
+untouched.
+
+**Declared input histories.** A command or wind history is a declared sample list with a stated
+hold and a stated extrapolation rule, and the recorded trajectory carries the command and wind
+AT EACH SAMPLE rather than the constants the run was configured with, because a schedule makes
+those constants a half-truth. A discontinuity strictly inside an integration step is refused
+rather than rounded to the nearest step, which would move the event and say nothing about
+having done so.
+
+*Correction, 2026-09-11.* This paragraph was headed "for both the linear and the nonlinear
+path". For the linear path that was false when it was written. WP5 gave `sim.plant` its command
+and wind histories, and `sim.sampled` its wind history. `sim.linear` still took one constant
+input: the gap WP5's own package description names. The linear path was delivered afterwards.
+[c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10)
+added the integrator, and
+[b8f3c26](https://github.com/celikgo/galata/commit/b8f3c263f9a64164191d3fbc4ed4316e5b5db328)
+added the `input_schedule` key, in the same schema `sim.plant` reads. The semantics are stated
+in `include/galata/sim/linear.hpp`: timestamps, zero-order events, linear interpolation,
+extrapolation, and what is recorded. `examples/souxmar-linear-histories` runs it. Until those
+commits, the acceptance record's item 5 should have recorded the linear path as missing. It now
+says so.
+
+**`sim.sampled` executes a state-feedback law at a declared rate**, with zero-order hold, a
+whole number of periods of delay, and per-rotor saturation, feeding back on the attitude-error
+chart coordinates ADR-0017 made publicly invertible. Requested and applied commands are both
+recorded: a run reported only through its applied commands hides a controller that spent the
+whole run against its limits, and one reported only through its requested commands describes a
+vehicle that was never flown. A controller period that is not a whole number of integration
+steps is refused rather than rounded, because unlike a wind step it cannot be split around —
+the tick is where the command is DEFINED to change.
+
+**Acceptance, by test name.** `unit`: `InputSchedule.*` and `ChartMapping.*`. `integration`:
+`QuadrotorWorkflow.*` re-derives the sampled logic — the law, the saturation and the delay line
+— from the states the run recorded, so a loop that sampled at the wrong instant or shifted its
+delay by one tick fails there rather than passing on a plausible trajectory;
+`ExampleQuadrotorSampledControl.*` runs the shipped example and requires the closed loop to
+remove at least nine tenths of the displacement it was started from.
+
+**The companion the request asked for, delivered.** `analyze.gramians` reports the reachable
+and observable subspaces of a linear model for a declared input and output set, and names the
+directions that fall outside them by state — which is what the request asked for in one
+sentence: "so that an exported model's defective integrator chains and any unobservable
+direction are reported rather than discovered from a failed synthesis". On the hover
+linearisation it finds the heading unobservable, because the observation model carries body
+rates, position, altitude, ground velocity and specific force and none of them measures an
+absolute yaw angle.
+
+Two things about it are worth recording rather than leaving in the header.
+*The infinite-horizon Gramians do not exist for this class of model at all.* Six eigenvalues
+sit at the origin, so the T-to-infinity limit diverges and the matrix a Lyapunov solve would
+return for it is not a Gramian of anything. The capability integrates over a DECLARED finite
+horizon instead, refuses to default that horizon, and says in its own summary and report which
+quantity it computed. *The rank is taken from an orthogonal staircase and not from a Krylov
+matrix.* `[B, AB, ..., A^15 B]` on a model with rotor-lag poles near -1/tau and integrators at
+zero spans the fifteenth power of that spread, which no floating-point rank test can resolve;
+re-orthonormalising at each step forms no power of A at all. `Gramians.*` in the `unit` tier
+holds the arithmetic against closed forms — a first-order system's exponential integral, a
+double integrator's `[T^3/3, T^2/2; T^2/2, T]` — rather than against a previous run.
+
+**And the frequency-domain margins the audit found unavailable are now available, without
+widening anything.** The audit recorded `analyze.margins` and `analyze.diskmargin` refusing on
+this plant with "internal stability unresolved: eigenvectors are ill-conditioned", and the
+refusal was CORRECT. Handing one channel of the MIMO return ratio `L(s) = K(sI-A)^-1 B` to a
+SISO margin routine breaks that channel and leaves the other three OPEN — a vehicle flying with
+most of its controller disconnected. A multirotor at hover needs all four, so that closure
+leaves four modes at the origin, its Nyquist encirclement count means nothing, and refusing was
+the only honest answer. Nothing about the check was wrong and nothing in it was relaxed.
+
+What was missing was the OTHER reading. `model.control_system` gains `use: single_loop` with a
+required `channel`, which builds the loop seen at one plant input with the other loops still
+CLOSED: `A_k = A - BK + b_k k_k^T`, so that closing unit negative feedback around it returns
+exactly `A - BK`, the design's own closed loop. Internal stability of the Nyquist test is then
+the stability of the design, which an LQR solution guarantees, and the margin is well posed.
+`synth::single_loop_others_closed` checks that identity to round-off rather than asserting it,
+because if it ever stopped holding then every margin read from that system would be a margin of
+a different aircraft. `channel` is required and not defaulted: there is one such loop per input,
+they are different loops with different margins, and picking one for the caller would be
+choosing which number to report.
+
+`QuadrotorWorkflow.SingleLoopMarginsAreAvailableWhereTheBrokenLoopIsRefused` holds both halves —
+the other-loops-open reading refused with its cause named, and the loop-at-a-time reading
+yielding a margin — and `examples/quadrotor-sampled-control` now runs both analyses in the
+shipped study.
+
+**What WP5 still does not deliver.** A set of loop-at-a-time margins does NOT bound simultaneous
+variation: each can be generous while a small perturbation applied to two channels at once
+destabilises the loop, and no loop-at-a-time figure sees it. `analyze.diskmargin` is the
+capability for that question and the headers say so where the confusion would occur.
+`c2d`-style discretisation of a continuous design and a sampled DARE remain absent:
+`sim.sampled` executes a continuously-designed law at a discrete rate, which is the honest
+description of what it does and is not the same thing as designing in discrete time. And the
+SAMPLED loop's own robustness is unanswered — every margin in this repository describes the
+continuous loop, and no claim of sampled-loop robustness is made anywhere from one. Per
+`docs/product/FEATURES.md`, this implements the proposed work of F14 and part of F17 and
+delivers neither row; both stay open.
+
+### WP5 addendum — discrete-time synthesis through the public interface, 2026-09-11
+
+The paragraph above records `c2d`-style discretisation and a sampled DARE as absent. They are
+now present, and this addendum supersedes that one sentence of it and nothing else: the
+sampled loop's own robustness is **still unanswered**, and the per-F-row position below is
+unchanged.
+
+**What is delivered.** Three capabilities under vehicle-neutral ids, as the acceptance section
+decided, each registered with a closed input vocabulary and each implemented and unvalidated:
+
+| Capability | Takes | Produces | Refuses |
+|---|---|---|---|
+| `model.discretize` | a continuous `linear_system`, a required `sample_time_s`, a required `hold: zero_order` | a `discrete_linear_system` carrying its sample time, its hold and the discretisation's evidence | a discrete model; any other hold; a missing or non-positive sample time |
+| `synth.dare` | a `discrete_linear_system`, or bare `a` and `b` with a required `sample_time_s`; per-sample `q`, `r` and optional `n` | a `dare_solution` carrying the sample time it belongs to | a continuous model, naming `model.discretize`; both entry forms at once, or neither; a second sample time beside a model's own |
+| `synth.sampled_lqr` | a continuous `linear_system`, `sample_time_s`, `hold`, continuous `q`, `r`, optional `n`, and a required `evidence_path` | a `sampled_control_law` | a discrete model, naming `synth.dare`; any hold other than `zero_order` |
+
+Continuous and discrete models are **different artefact kinds**, not one kind with a flag, so
+every continuous capability already in the registry refuses a discrete one by the kind check,
+with both kinds named. `model.control_system` refuses a `sampled_control_law` for the same
+reason, so no continuous-domain margin can be read off a discrete design.
+
+**The cost.** `synth.sampled_lqr` discretises the plant AND the continuous cost under one hold
+at one sample time, by Van Loan's block exponential, and solves the discrete Riccati equation
+for that discretised problem. The hold produces a state-input cross term even where the
+declared continuous cost has none, and it is kept at every step: it goes to the solver, into
+the artefact, into the report section, and into the required evidence file beside the declared
+continuous weights. The cost is the sum over ticks of `x' Q x + 2 x' N u + u' R u`, with
+weights per sample. The gain is applied as `u[k] = -K x[k]`, with
+`K = (R + B'XB)^-1 (B'XA + N')`. The residual is that of the equation as posed, cross term
+included, relative to the norms of its terms, against a budget no caller can widen. Every
+closed-loop eigenvalue must lie strictly inside the unit circle and the symplectic spectrum
+must stay off it. Each of these is a refusal when it fails, never a returned result with a
+flag, and each is stated in the report section and in the evidence file.
+
+**Execution.** `sim.sampled` accepts a `sampled_control_law` beside the `control_law` it always
+took, and treats them differently:
+
+- It executes a discrete design **only at the period it was designed for**, and refuses every
+  other period. No transformation between rates is supported, so the refusal names the remedy,
+  which is a redesign at the execution period.
+- It requires the `hold` and the `delay_periods` to be declared rather than defaulted.
+- For both kinds of law, it refuses a gain whose inputs are not the vehicle's rotor commands in
+  the model's order, or whose chart does not match the vehicle's.
+
+With a discrete design, `sim.sampled` also computes the design's own prediction of its loop:
+the same discrete model, gain, whole-period delay and hold, from the same initial chart state.
+It reports the nonlinear run's discrepancy from that prediction in the design's cost-to-go
+norm, against an optional declared small-perturbation budget.
+
+**The acceptance case.** `examples/souxmar-sampled-lqr` runs the whole chain on the native
+Souxmar plant: trim, linearisation, discretisation and sampled synthesis, then nonlinear sampled
+simulation, with rotor lag, a declared one-period delay and per-rotor speed limits. Its
+small-perturbation budget was fixed in the study file before the study first ran, and the run
+lands **just outside** it. That is the acceptance case's result, and it is a FAIL. It was
+localised rather than absorbed:
+
+- The discrepancy is second order in the perturbation.
+- It is not the quadratic drag.
+- It is the rigid-body kinematics the hover linearisation drops. Above all it is the transport
+  term `−ω × v` in the body vertical velocity while the vehicle pitches with forward speed,
+  partly offset by gravity projected onto the tilted body. The budget's derivation never
+  listed these terms.
+
+*Correction, 2026-09-11.* The third point originally said the discrepancy was carried by the
+collective channel, where the thrust's ω² curvature turns differential rotor commands into
+collective thrust. A term-by-term trace with a closure check,
+[803326a](https://github.com/celikgo/galata/commit/803326a1fbadadd27bce21e8e7b71d2d8d7d621b),
+shows that the curvature carries almost none of it, and with the opposite sign. The rotor
+speeds' common miss is the loop's response to the vertical miss. No defect was found in the
+plant, the discretisation, the gain, the delay line or the prediction.
+
+The budget holds at nine tenths of the declared perturbation and fails at the perturbation
+itself. A case at half the excitation, with the budget and everything else unchanged, passes,
+and so does its horizontal offset alone. It is **proposed, not adopted**, in
+`examples/souxmar-sampled-lqr/proposed-acceptance.yaml`. Until it is adopted, the agreed case
+stands as a FAIL.
+
+A two-sided labelled lock holds the finding. The negative control first chosen — a prediction
+one tick out in delay — turned out to be below the comparison's resolution at this
+perturbation. That is recorded by its own test. The delay line is certified by exact
+re-derivation instead, and the negative control is now a prediction at the wrong period. The
+example's README carries all of it.
+
+**Evidence.**
+
+- `DiscreteControl`, `DiscreteSystem` and `DiscretePrediction` in the `unit` tier hold the
+  closed forms, value iteration, the hand-integrated interval cost and the augmented-state
+  delay.
+- `DiscreteWorkflow` in the `integration` tier holds the three schemas against the same
+  references. It also holds the refusals between the time domains, the declared hold and
+  sample time, unknown keys, and evidence that a linearisation's record survives
+  discretisation and design as the same object.
+- The discrete-law tests in `QuadrotorWorkflow` hold the period refusal and the declared
+  timing, re-derive the executed commands from the discrete gain, and refuse a permuted
+  basis.
+- `ExampleSouxmarSampledLqr` runs the example and traces its discrepancy term by term. It
+  brackets the envelope, and it checks that the proposed case is the agreed study with only
+  the perturbation halved.
+- `ExampleSouxmarLinearHistories`, `LinearHistoryWorkflow` and `LinearSimulation` hold the
+  linear path's declared histories. The correction above records them.
+- `Determinism.ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns` and the fingerprint
+  battery's sampled-design section cover determinism.
+- The case registry records `sampled.discrete_references` and `sampled.small_perturbation`,
+  both self-consistent and neither validated.
+
+**What this still does not deliver.**
+
+- **No margin of the sampled loop** — gain, phase, delay or disk. It is not computed, and
+  nothing here implies one. A DARE solution whose closed loop lies inside the unit circle
+  says the nominal sampled loop converges. A run that converged is one trajectory. Neither is
+  a margin.
+- No delay-aware design.
+- No constrained design.
+- No hold other than zero-order.
+- No pencil-based solver for a transition too ill-conditioned to invert; that case is refused
+  by name.
+- No validation against a published DARE benchmark.
+
+Per `docs/product/FEATURES.md`, this implements the proposed work of F14. It still delivers
+neither F14 nor F17: both rows stay open while their dependencies are unresolved.

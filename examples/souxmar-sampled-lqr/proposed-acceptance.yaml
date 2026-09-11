@@ -1,0 +1,220 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# PROPOSED - NOT THE AGREED ACCEPTANCE CASE. It awaits the approval of whoever
+# agreed that case. Until then study.yaml is the acceptance case, and its
+# result is OUTSIDE the budget it declared.
+#
+#   galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <dir>
+#
+# WHAT IS PROPOSED. One change: the initial chart perturbation is halved. The
+# budget, the metric, the plant, the design, the period, the hold, the delay
+# and the limits are all study.yaml's, byte for byte.
+# ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget
+# requires this file to be study.yaml with that one vector changed.
+#
+# WHY. The agreed perturbation lies just past the edge of the envelope in which
+# this linear-versus-nonlinear comparison can hold a five percent budget. What
+# sets that edge is what the hover linearisation drops, the rigid-body
+# kinematics of a vehicle that pitches while it moves, and not a defect; the
+# README's trace closes the whole discrepancy on those terms. At half the
+# excitation the comparison passes. So does its most demanding constituent, the
+# horizontal offset alone, so the pass does not rest on the vertical and
+# attitude entries diluting the metric.
+#
+# WHAT IT COSTS. A smaller excitation is a weaker test of the prediction. The
+# miss is second order, so halving the perturbation quarters the miss the
+# comparison can see, and its resolution against a structural error falls with
+# it. The README's one-tick-delay limit applies here more strongly, not less.
+#
+# ---- study.yaml follows, unchanged except for initial_chart_perturbation ----
+# SPDX-License-Identifier: Apache-2.0
+#
+# A controller DESIGNED in discrete time, flown against the nonlinear plant it
+# was designed from, and compared with what the design itself predicted.
+#
+#   galata run examples/souxmar-sampled-lqr/study.yaml
+#
+# The chain: the native Souxmar plant, its hover equilibrium, a linearisation
+# about it, an exact zero-order-hold discretisation, a sampled LQR designed on
+# the discretised plant AND the discretised cost, and that law executed at the
+# period it was designed for against the nonlinear plant — rotor lag, a
+# declared hold, a declared one-period delay and per-rotor speed limits
+# included.
+#
+# WHAT THIS IS NOT. Not a sampled-loop margin: no gain, phase, delay or disk
+# margin of this loop is computed anywhere in this study, and neither the
+# Riccati solution's spectral radius nor the converging run is one. Not evidence
+# about the aircraft: the Souxmar coefficients are an independent
+# implementation's nominal set, not measured data, and models/souxmar-quad's
+# PROVENANCE.md says so.
+
+version: 1
+
+stages:
+  # The NATIVE plant, read from the repository's model directory rather than
+  # copied beside the study, so this example cannot drift from the model file
+  # every other Souxmar check reads. Its rotors carry a first-order speed lag;
+  # that lag is four of the sixteen linearised states, so it is in the model
+  # the design discretises and in the plant the law is flown against.
+  - id: plant
+    capability: model.quadrotor
+    input:
+      path: ../../models/souxmar-quad/souxmar-quad.yaml
+
+  - id: hover
+    capability: trim.hover
+    input:
+      quadrotor: {from: plant}
+      altitude_m: 120.0
+
+  - id: linear
+    capability: linearize.extended
+    input:
+      trim: {from: hover}
+      evidence_path: operating-point.yaml
+
+  # The design sees the rotor commands only; the wind columns are dropped,
+  # because a law fed back on a disturbance it cannot measure is not a law
+  # anybody can fly.
+  - id: rotors
+    capability: model.channels
+    input:
+      system: {from: linear}
+      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]
+      outputs: [position_north_m, position_east_m, altitude_m]
+
+  # The explicit adapter from the continuous to the discrete time domain. Both
+  # the hold and the sample time are declared; neither has a default. The report
+  # section this produces sets the fastest continuous mode beside the Nyquist
+  # frequency of the chosen rate, so the aliasing question can be asked.
+  - id: discrete
+    capability: model.discretize
+    input:
+      system: {from: rotors}
+      sample_time_s: 0.004
+      hold: zero_order
+
+  # THE SAMPLED DESIGN. The weights are CONTINUOUS — per second, the same
+  # objective a continuous LQR would be given — and the capability discretises
+  # them exactly under the same hold at the same period as the plant. The hold
+  # produces a state-input cross term that this continuous cost does not have;
+  # it is retained in the solve and written to the evidence file.
+  #
+  # Position held forty times harder than velocity, attitude twenty, and the
+  # rotor-speed states almost free because they are the actuator and not the
+  # objective. The study's choice, declared rather than defaulted.
+  - id: sampled
+    capability: synth.sampled_lqr
+    input:
+      system: {from: rotors}
+      sample_time_s: 0.004
+      hold: zero_order
+      evidence_path: sampled-lqr.yaml
+      q:
+        [
+          [40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.001]
+        ]
+      r:
+        [
+          [0.02, 0, 0, 0],
+          [0, 0.02, 0, 0],
+          [0, 0, 0.02, 0],
+          [0, 0, 0, 0.02]
+        ]
+
+  # FLOWN AT THE PERIOD IT WAS DESIGNED FOR. `sim.sampled` refuses any other
+  # period for a discrete design, and requires the hold and the delay to be
+  # declared rather than inherited.
+  #
+  #   hold          zero-order, the hold the design was discretised under
+  #   delay         one whole period — the command computed at a tick reaches
+  #                 the rotors at the next one. The DESIGN modelled no delay, so
+  #                 this is a plant the design did not see; the PREDICTION
+  #                 below includes it exactly, as one extra period of input
+  #                 memory.
+  #   limits        each rotor clamped to its own [minimum, maximum] speed from
+  #                 the model file. The prediction has no limits, so a run that
+  #                 saturates is outside the comparison's premise and the
+  #                 report says so.
+  #   integration   1 ms RK4, four steps per 4 ms controller period.
+  #
+  # THE SMALL-PERTURBATION BUDGET, fixed before this study was first run.
+  #
+  # The prediction is the design's own discrete model iterated with the same
+  # gain, hold and delay from the same initial chart state. It differs from the
+  # nonlinear run only by what the linearisation drops, and that is second
+  # order in the perturbation: the discrepancy relative to the response is of
+  # the order of the largest RELATIVE nonlinearity the motion excites. From the
+  # model file, not from a run, those are the rotor thrust k w^2, whose
+  # linearisation is wrong by dw / (2 w_hover) of the thrust increment; the
+  # quadratic drag, wrong by (c2 / c1) |v| of the linear drag, with c2 / c1 at
+  # most 0.21 s/m in this model; and the attitude kinematics and gravity
+  # projection, wrong by about theta^2 / 6. The perturbation below — decimetres
+  # of position and a hundredth of a radian of attitude — keeps each of those
+  # at a few percent for a loop that removes it in about a second, and the
+  # budget is set at five percent of the prediction's peak, in the design's own
+  # cost-to-go norm.
+  #
+  # What stops the budget being vacuous is not its value but its ORDER: halving
+  # the perturbation must roughly halve the relative discrepancy, which a
+  # prediction that was structurally wrong — a tick of delay out, a hold
+  # mismatched, a gain applied to the wrong coordinates — cannot do.
+  # `ExampleSouxmarSampledLqr` holds both, and holds the negative control that
+  # shows the order test can fail.
+  #
+  # WHAT THE FIRST RUN FOUND. The paragraph above is the derivation the budget
+  # was set from, left as it was written, and the run lands just OUTSIDE the
+  # budget. The discrepancy is second order, and it was traced term by term to
+  # what the derivation never listed: the rigid-body kinematics. While the loop
+  # removes the horizontal offset, the vehicle pitches and rolls with forward
+  # and sideways speed on it. The products of those are what the hover
+  # linearisation drops — above all the transport term q u - p v in the body
+  # vertical velocity, partly offset by the tilt's loss of vertical gravity. An
+  # earlier version of this comment blamed the rotor-speed curvature. That term
+  # carries almost none of the discrepancy. The budget was not moved and this
+  # perturbation was not changed; a smaller one is PROPOSED, not adopted, in
+  # proposed-acceptance.yaml. And the order test above turned out NOT to see a
+  # tick of delay at this perturbation — the delay changes the prediction by
+  # less than the second-order term — so the delay line is certified by exact
+  # re-derivation instead, and the negative control is a prediction at the
+  # wrong period. See the README.
+  - id: closed
+    capability: sim.sampled
+    input:
+      trim: {from: hover}
+      law: {from: sampled}
+      controller_period_s: 0.004
+      hold: zero_order
+      delay_periods: 1
+      step_s: 0.001
+      steps: 3000
+      initial_chart_perturbation: [0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]
+      linear_agreement_budget: 0.05
+
+  - id: history
+    capability: report.csv
+    input:
+      trajectory: {from: closed}
+      path: sampled-run.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: A sampled LQR on the native Souxmar plant, flown against the nonlinear model
+      sections: [{from: discrete}, {from: sampled}, {from: closed}]
+      path: sampled-lqr.md

@@ -14,6 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -179,6 +182,23 @@ void Quadrotor::validate() const {
       throw std::invalid_argument(
           "quadrotor: battery speed_at_full_voltage_rad_s must be positive");
     }
+    require_finite(cell.motor_and_esc_efficiency, "battery motor_and_esc_efficiency");
+    require_finite(cell.auxiliary_load_w, "battery auxiliary_load_w");
+    if (!(cell.motor_and_esc_efficiency > 0.0) || cell.motor_and_esc_efficiency > 1.0) {
+      throw std::invalid_argument(
+          "quadrotor: battery motor_and_esc_efficiency must be in (0, 1]. Above one is a motor "
+          "that produces more shaft power than the pack delivers");
+    }
+    if (cell.auxiliary_load_w < 0.0) {
+      throw std::invalid_argument(
+          "quadrotor: battery auxiliary_load_w must be non-negative; a negative load is a "
+          "generator, which this model does not carry");
+    }
+    if (cell.sag == Battery::SagModel::Resistive && !(cell.internal_resistance_ohm > 0.0)) {
+      throw std::invalid_argument(
+          "quadrotor: the resistive sag model needs a positive internal_resistance_ohm; with "
+          "zero resistance there is no sag to model and `open_circuit` says so directly");
+    }
   }
 }
 
@@ -219,6 +239,66 @@ double Quadrotor::terminal_voltage_v(double state_of_charge, double current_a) c
   return open_circuit_voltage_v(state_of_charge) - battery->internal_resistance_ohm * current_a;
 }
 
+bool Quadrotor::power_is_limited_at(double state_of_charge, double shaft_power) const {
+  if (!has_battery() || !(battery->internal_resistance_ohm > 0.0)) {
+    return false;
+  }
+  const double electrical_w =
+      shaft_power / battery->motor_and_esc_efficiency + battery->auxiliary_load_w;
+  return electrical_w > maximum_deliverable_power_w(state_of_charge);
+}
+
+double Quadrotor::maximum_deliverable_power_w(double state_of_charge) const {
+  if (!has_battery()) {
+    throw std::invalid_argument("quadrotor: the model carries no battery");
+  }
+  if (!(battery->internal_resistance_ohm > 0.0)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  const double open_circuit = open_circuit_voltage_v(state_of_charge);
+  return open_circuit * open_circuit / (4.0 * battery->internal_resistance_ohm);
+}
+
+double Quadrotor::terminal_voltage_under_load_v(double state_of_charge,
+                                                double shaft_power_w) const {
+  if (!has_battery()) {
+    throw std::invalid_argument("quadrotor: the model carries no battery");
+  }
+  const double open_circuit = open_circuit_voltage_v(state_of_charge);
+  if (!(battery->internal_resistance_ohm > 0.0)) {
+    return open_circuit;
+  }
+  const double electrical_w =
+      shaft_power_w / battery->motor_and_esc_efficiency + battery->auxiliary_load_w;
+  const double discriminant =
+      open_circuit * open_circuit - 4.0 * battery->internal_resistance_ohm * electrical_w;
+  // BEYOND THE MATCHED LOAD, the pack saturates rather than failing. The
+  // discriminant vanishes at P = V_oc^2 / (4 R), where the terminal voltage is
+  // V_oc / 2 and the delivered power is the most this pack can ever give. A
+  // demand past that point does not produce "no answer": the motors simply do
+  // not receive what they asked for and the rotors fall short, which is a real
+  // flight condition and not an error.
+  //
+  // An earlier draft refused here, on the argument that a demand a battery
+  // cannot meet is not a smaller demand. That argument is right about reporting
+  // a voltage that does not exist and wrong about what the hardware does.
+  // Souxmar's own plant — fcs/plant/quadrotor.py — reaches the same closed form
+  // from the same physics and clamps at this point with a `limited` flag, and
+  // diverging from it would make the cross-check this model exists to support
+  // impossible.
+  //
+  // So it clamps, and `power_is_limited_at` exists so the clamp is VISIBLE. A
+  // silent saturation is the thing worth refusing; a reported one is a
+  // measurement.
+  if (discriminant < 0.0) {
+    return 0.5 * open_circuit;
+  }
+  // The larger root: the branch that tends to the open-circuit voltage as the
+  // load tends to zero. The smaller one is the high-current solution a pack
+  // does not sit at.
+  return 0.5 * (open_circuit + std::sqrt(discriminant));
+}
+
 double Quadrotor::speed_ceiling_rad_s(int rotor_index, double state_of_charge) const {
   if (rotor_index < 0 || rotor_index >= rotor_count()) {
     throw std::invalid_argument("quadrotor: rotor index out of range");
@@ -230,6 +310,34 @@ double Quadrotor::speed_ceiling_rad_s(int rotor_index, double state_of_charge) c
   // Speed scales with terminal voltage, which without a current model is the
   // open-circuit voltage. The ceiling is whichever limit binds first.
   const double voltage_ratio = open_circuit_voltage_v(state_of_charge) / battery->full_voltage_v;
+  return std::min(mechanical_limit, voltage_ratio * battery->speed_at_full_voltage_rad_s);
+}
+
+double Quadrotor::shaft_power_w(const Eigen::VectorXd& rotor_speed_rad_s) const {
+  if (rotor_speed_rad_s.size() != rotor_count()) {
+    throw std::invalid_argument("quadrotor: rotor speed vector has the wrong length");
+  }
+  double total = 0.0;
+  for (int index = 0; index < rotor_count(); ++index) {
+    const Rotor& rotor = rotors[static_cast<std::size_t>(index)];
+    const double speed = rotor_speed_rad_s(index);
+    total += rotor.torque_coefficient_n_m_s2 * speed * speed * std::abs(speed);
+  }
+  return total;
+}
+
+double Quadrotor::speed_ceiling_rad_s(int rotor_index,
+                                      double state_of_charge,
+                                      double shaft_power) const {
+  if (rotor_index < 0 || rotor_index >= rotor_count()) {
+    throw std::invalid_argument("quadrotor: rotor index out of range");
+  }
+  const double mechanical_limit = rotors[static_cast<std::size_t>(rotor_index)].maximum_speed_rad_s;
+  if (!has_battery() || battery->sag == Battery::SagModel::OpenCircuit) {
+    return speed_ceiling_rad_s(rotor_index, state_of_charge);
+  }
+  const double terminal = terminal_voltage_under_load_v(state_of_charge, shaft_power);
+  const double voltage_ratio = terminal / battery->full_voltage_v;
   return std::min(mechanical_limit, voltage_ratio * battery->speed_at_full_voltage_rad_s);
 }
 
@@ -298,12 +406,17 @@ Eigen::VectorXd Quadrotor::derivative(const Eigen::VectorXd& extended_state,
   // stays a smooth first-order system and the derivative has no kink at the
   // limit that a finite-difference Jacobian would average across.
   const double state_of_charge = has_battery() ? extended_state(battery_state_index()) : 1.0;
+  const double drawn_shaft_w = has_battery() ? shaft_power_w(speeds) : 0.0;
   for (int index = 0; index < rotor_count(); ++index) {
     const Rotor& rotor = rotors[static_cast<std::size_t>(index)];
     // max() before clamp(): a depleted battery can drive the ceiling below the
     // rotor's own floor, and std::clamp with lo > hi is undefined behaviour.
-    const double ceiling =
-        std::max(speed_ceiling_rad_s(index, state_of_charge), rotor.minimum_speed_rad_s);
+    // The ceiling under the load the rotors are ACTUALLY drawing. The load is a
+    // function of the current rotor states, not of the command, so there is no
+    // algebraic loop here: what the pack can give at this instant is decided by
+    // what it is already giving.
+    const double ceiling = std::max(speed_ceiling_rad_s(index, state_of_charge, drawn_shaft_w),
+                                    rotor.minimum_speed_rad_s);
     const double target = std::clamp(command_rad_s(index), rotor.minimum_speed_rad_s, ceiling);
     derivative(rotor_state_offset() + index) =
         (target - speeds(index)) / rotor.speed_time_constant_s;
@@ -317,13 +430,19 @@ Eigen::VectorXd Quadrotor::derivative(const Eigen::VectorXd& extended_state,
     // an efficiency this model cannot identify would be a fitted number wearing
     // a physical name — and it is why the header refuses to call this a battery
     // model in any electrochemical sense.
-    double shaft_power_w = 0.0;
-    for (int index = 0; index < rotor_count(); ++index) {
-      const Rotor& rotor = rotors[static_cast<std::size_t>(index)];
-      const double speed = speeds(index);
-      shaft_power_w += rotor.torque_coefficient_n_m_s2 * speed * speed * std::abs(speed);
+    // Under OpenCircuit this stays shaft power, which is what it always was and
+    // what the comment above describes: it understates the draw and overstates
+    // endurance, deliberately, because an efficiency this model cannot identify
+    // would be a fitted number wearing a physical name.
+    //
+    // Under Resistive the study has DECLARED an efficiency and an auxiliary
+    // load, so the electrical draw is known and used. It is still not a claim
+    // about any aircraft: it is arithmetic on numbers the study supplied.
+    double electrical_w = drawn_shaft_w;
+    if (battery->sag == Battery::SagModel::Resistive) {
+      electrical_w = drawn_shaft_w / battery->motor_and_esc_efficiency + battery->auxiliary_load_w;
     }
-    derivative(battery_state_index()) = -shaft_power_w / battery->energy_j;
+    derivative(battery_state_index()) = -electrical_w / battery->energy_j;
   }
 
   return derivative;
@@ -344,6 +463,20 @@ double Quadrotor::hover_speed_rad_s(double gravity_m_s2) const {
   if (!(coefficient > 0.0)) {
     throw std::invalid_argument("quadrotor: hover requires a positive thrust coefficient");
   }
+  return std::sqrt(mass.mass_kg * gravity_m_s2
+                   / (static_cast<double>(rotor_count()) * coefficient));
+}
+
+double Quadrotor::hover_speed_rad_s(int rotor_index, double gravity_m_s2) const {
+  if (rotor_index < 0 || rotor_index >= rotor_count()) {
+    throw std::invalid_argument("quadrotor: rotor index out of range");
+  }
+  const double coefficient = rotors[static_cast<std::size_t>(rotor_index)].thrust_coefficient_n_s2;
+  if (!(coefficient > 0.0)) {
+    throw std::invalid_argument("quadrotor: hover requires a positive thrust coefficient");
+  }
+  // Deliberately the same expression as the whole-vehicle form, in the same
+  // order, so a homogeneous model produces bit-identical numbers here.
   return std::sqrt(mass.mass_kg * gravity_m_s2
                    / (static_cast<double>(rotor_count()) * coefficient));
 }
@@ -463,7 +596,10 @@ Quadrotor parse_quadrotor(const std::string& bytes, const std::string& source_na
                    "full_voltage_v",
                    "empty_voltage_v",
                    "internal_resistance_ohm",
-                   "speed_at_full_voltage_rad_s"});
+                   "speed_at_full_voltage_rad_s",
+                   "sag",
+                   "motor_and_esc_efficiency",
+                   "auxiliary_load_w"});
     Battery cell;
     cell.energy_j = scalar(battery_node, battery_path, "energy_j");
     cell.full_voltage_v = scalar(battery_node, battery_path, "full_voltage_v");
@@ -471,11 +607,147 @@ Quadrotor parse_quadrotor(const std::string& bytes, const std::string& source_na
     cell.internal_resistance_ohm = scalar(battery_node, battery_path, "internal_resistance_ohm");
     cell.speed_at_full_voltage_rad_s =
         scalar(battery_node, battery_path, "speed_at_full_voltage_rad_s");
+    // Absent means the model this file described before the resistive option
+    // existed. A file written for the old behaviour keeps it, byte for byte;
+    // opting in is a change the author makes on purpose.
+    if (battery_node["sag"]) {
+      const std::string name = battery_node["sag"].as<std::string>();
+      if (name == "open_circuit") {
+        cell.sag = Battery::SagModel::OpenCircuit;
+      } else if (name == "resistive") {
+        cell.sag = Battery::SagModel::Resistive;
+      } else {
+        throw std::invalid_argument(battery_path + ".sag must be `open_circuit` or `resistive`; '"
+                                    + name + "' is neither");
+      }
+    }
+    if (battery_node["motor_and_esc_efficiency"]) {
+      cell.motor_and_esc_efficiency =
+          scalar(battery_node, battery_path, "motor_and_esc_efficiency");
+    }
+    if (battery_node["auxiliary_load_w"]) {
+      cell.auxiliary_load_w = scalar(battery_node, battery_path, "auxiliary_load_w");
+    }
     model.battery = cell;
   }
 
   model.validate();
   return model;
+}
+
+namespace {
+
+// A double written so the reader gets the same bits back. Shared by every number
+// below rather than set once on the stream, because the stream also carries the
+// integer rotor count and the quoted text.
+std::string number(double value) {
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+  return out.str();
+}
+
+// Refused rather than encoded, for the reason `serialize_linear_system` gives:
+// a description carrying a control character is a sign the caller has handed us
+// bytes from somewhere it should not have.
+std::string quote(const std::string& text) {
+  std::string out = "\"";
+  for (const char character : text) {
+    if (static_cast<unsigned char>(character) < 0x20) {
+      throw std::invalid_argument(
+          "serialize_quadrotor: a control character in a description or citation cannot be "
+          "written to this file format");
+    }
+    if (character == '"' || character == '\\') {
+      out.push_back('\\');
+    }
+    out.push_back(character);
+  }
+  out.push_back('"');
+  return out;
+}
+
+std::string vector3_text(const Eigen::Vector3d& value) {
+  return "[" + number(value.x()) + ", " + number(value.y()) + ", " + number(value.z()) + "]";
+}
+
+}  // namespace
+
+std::string serialize_quadrotor(const Quadrotor& model) {
+  // Refuse to write something the reader would refuse, so a malformed model is a
+  // failure here rather than a file that only fails when somebody loads it.
+  model.validate();
+
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+
+  if (!model.description.empty()) {
+    out << "description: " << quote(model.description) << "\n";
+  }
+  if (!model.citation.empty()) {
+    out << "citation: " << quote(model.citation) << "\n";
+  }
+  if (!model.description.empty() || !model.citation.empty()) {
+    out << "\n";
+  }
+
+  const Eigen::Matrix3d& inertia = model.mass.inertia_cg_body_kg_m2;
+  out << "mass:\n";
+  out << "  mass_kg: " << number(model.mass.mass_kg) << "\n";
+  out << "  inertia_xx_kg_m2: " << number(inertia(0, 0)) << "\n";
+  out << "  inertia_yy_kg_m2: " << number(inertia(1, 1)) << "\n";
+  out << "  inertia_zz_kg_m2: " << number(inertia(2, 2)) << "\n";
+  // The tensor's off-diagonal entries are the NEGATIVE products of inertia, per
+  // sim::MassProperties, so the negation the parser applies is undone here and
+  // exactly once. Written only when nonzero: a diagonal-inertia model must round
+  // trip to the file it came from, not to one carrying three explicit zeros.
+  if (inertia(0, 1) != 0.0) {
+    out << "  product_of_inertia_xy_kg_m2: " << number(-inertia(0, 1)) << "\n";
+  }
+  if (inertia(0, 2) != 0.0) {
+    out << "  product_of_inertia_xz_kg_m2: " << number(-inertia(0, 2)) << "\n";
+  }
+  if (inertia(1, 2) != 0.0) {
+    out << "  product_of_inertia_yz_kg_m2: " << number(-inertia(1, 2)) << "\n";
+  }
+
+  out << "\nrotors:\n";
+  for (const Rotor& rotor : model.rotors) {
+    out << "  - position_cg_to_hub_body_m: " << vector3_text(rotor.position_cg_to_hub_body_m)
+        << "\n";
+    out << "    spin_about_body_z: " << rotor.spin_about_body_z << "\n";
+    out << "    thrust_coefficient_n_s2: " << number(rotor.thrust_coefficient_n_s2) << "\n";
+    out << "    torque_coefficient_n_m_s2: " << number(rotor.torque_coefficient_n_m_s2) << "\n";
+    out << "    speed_time_constant_s: " << number(rotor.speed_time_constant_s) << "\n";
+    out << "    minimum_speed_rad_s: " << number(rotor.minimum_speed_rad_s) << "\n";
+    out << "    maximum_speed_rad_s: " << number(rotor.maximum_speed_rad_s) << "\n";
+  }
+
+  out << "\ndrag:\n";
+  out << "  linear_n_s_m: " << vector3_text(model.drag_linear_n_s_m) << "\n";
+  out << "  quadratic_n_s2_m2: " << vector3_text(model.drag_quadratic_n_s2_m2) << "\n";
+  out << "  angular_n_m_s: " << vector3_text(model.angular_drag_n_m_s) << "\n";
+
+  if (model.battery.has_value()) {
+    const Battery& cell = *model.battery;
+    out << "\nbattery:\n";
+    out << "  energy_j: " << number(cell.energy_j) << "\n";
+    out << "  full_voltage_v: " << number(cell.full_voltage_v) << "\n";
+    out << "  empty_voltage_v: " << number(cell.empty_voltage_v) << "\n";
+    out << "  internal_resistance_ohm: " << number(cell.internal_resistance_ohm) << "\n";
+    out << "  speed_at_full_voltage_rad_s: " << number(cell.speed_at_full_voltage_rad_s) << "\n";
+    // Always written, unlike the parser's optional read. The parser's default
+    // exists so a file predating the resistive option keeps its behaviour; a file
+    // this routine writes has no history to preserve, and leaving the sag model
+    // implicit in a file a fit produced is exactly the silence the round trip is
+    // supposed to remove.
+    out << "  sag: " << (cell.sag == Battery::SagModel::Resistive ? "resistive" : "open_circuit")
+        << "\n";
+    out << "  motor_and_esc_efficiency: " << number(cell.motor_and_esc_efficiency) << "\n";
+    out << "  auxiliary_load_w: " << number(cell.auxiliary_load_w) << "\n";
+  }
+
+  return out.str();
 }
 
 Quadrotor load_quadrotor(const std::string& path) {

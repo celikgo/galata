@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <filesystem>
@@ -263,6 +264,108 @@ TEST(QuadrotorHoverTrim, StillAirCrosswindCruiseAndUnequalRotorsSolveToTheirDecl
   RecordProperty("hover_rotor_margin_fraction", measured(hover.smallest_rotor_margin_fraction));
   RecordProperty("crosswind_pitch_rad", measured(blown.pitch_rad));
   RecordProperty("unequal_rotor_spread_rad_s", measured(spread));
+}
+
+// --- Heterogeneous rotors --------------------------------------------------
+//
+// WHAT IS BEING CHECKED. A vehicle whose four rotors have four DIFFERENT thrust
+// coefficients trims, and the trim is a real equilibrium rather than a solver
+// that stopped.
+//
+// WHY IT IS A SEPARATE CASE from the unequal-speed case above. That one varies
+// the TORQUE coefficient, which splits the speeds while every rotor still
+// produces the same thrust per unit speed squared. This one varies the THRUST
+// coefficient, which is the case a bench-measured aircraft actually presents:
+// four motors, four propellers, four fitted k_T. Until this case existed the
+// trim refused such a model outright — not in its equations, which have always
+// carried one unknown per rotor, but in the vehicle-wide hover speed it used to
+// build its starting point, which mismatched rotors do not have.
+//
+// THE BUDGET is the request's own 1e-10 on an acceleration norm, unchanged from
+// the homogeneous cases, because nothing about differing coefficients makes the
+// equilibrium harder to satisfy — only harder to guess.
+//
+// THE INDEPENDENT CHECK is the point of the case. The residual norm is the
+// solver's own opinion of its answer. Below it the force and moment balance are
+// REBUILT from the model file's own coefficients — thrust k_T w^2 along body
+// -z, moment r x F, reaction -spin k_Q w^2 about body z, weight m g rotated
+// into the body frame — and required to cancel. A solver that converged to the
+// wrong root, or a wrench with a transposed rotation in it, passes the residual
+// gate and fails this one.
+TEST(QuadrotorHoverTrim, FourDistinctThrustCoefficientsTrimToARealEquilibrium) {
+  Quadrotor heterogeneous = shipped_model();
+  // Four distinct positive coefficients, a +-8 percent spread about the nominal
+  // 1.0e-5. The magnitudes are this test's own and are not measured data.
+  const std::array<double, 4> factors = {0.92, 1.00, 1.05, 1.08};
+  for (std::size_t index = 0; index < factors.size(); ++index) {
+    heterogeneous.rotors[index].thrust_coefficient_n_s2 *= factors[index];
+  }
+  // Reaction-torque asymmetry on top of it, so the case exercises both together
+  // rather than one at a time.
+  heterogeneous.rotors[1].torque_coefficient_n_m_s2 *= 1.10;
+
+  HoverTrimRequest request;
+  request.altitude_m = 120.0;
+  const HoverTrim trim = galata::trim::trim_hover(heterogeneous, request);
+
+  EXPECT_LE(trim.residual_norm, trim.residual_tolerance);
+  EXPECT_EQ(trim.newton_iterations, request.iterations);
+  EXPECT_NEAR(trim.extended_state(galata::core::kPositionDown), -request.altitude_m, 1e-12);
+  EXPECT_NEAR(trim.roll_rad, 0.0, 1e-9);
+  EXPECT_NEAR(trim.pitch_rad, 0.0, 1e-9)
+      << "still air and a symmetric rotor LAYOUT leave the vehicle level however its "
+         "coefficients differ; only the speeds should move";
+
+  // The speeds must actually differ, or the case proves nothing.
+  const double spread = trim.command_rad_s.maxCoeff() - trim.command_rad_s.minCoeff();
+  EXPECT_GT(spread, 1.0) << "four different thrust coefficients must give four different speeds";
+  // The weakest rotor works hardest. factors[0] is the smallest coefficient.
+  EXPECT_GT(trim.command_rad_s(0), trim.command_rad_s(3))
+      << "the rotor with the smaller k_T must spin faster to carry its share";
+
+  // --- The independent check ------------------------------------------------
+  // Rebuilt from the model's coefficients, not from Quadrotor::derivative.
+  Eigen::Vector3d force_body_n = Eigen::Vector3d::Zero();
+  Eigen::Vector3d moment_body_n_m = Eigen::Vector3d::Zero();
+  for (int index = 0; index < heterogeneous.rotor_count(); ++index) {
+    const auto& rotor = heterogeneous.rotors[static_cast<std::size_t>(index)];
+    const double speed = trim.command_rad_s(index);
+    const double thrust_n = rotor.thrust_coefficient_n_s2 * speed * speed;
+    const Eigen::Vector3d rotor_force(0.0, 0.0, -thrust_n);
+    force_body_n += rotor_force;
+    moment_body_n_m += rotor.position_cg_to_hub_body_m.cross(rotor_force);
+    moment_body_n_m.z() += -static_cast<double>(rotor.spin_about_body_z)
+                           * rotor.torque_coefficient_n_m_s2 * speed * speed;
+  }
+  // Weight, in the body frame at the trimmed attitude. Still air, so no drag.
+  const galata::core::State state =
+      galata::core::State::from_vector(trim.extended_state.head<galata::core::kStateSize>());
+  const Eigen::Vector3d weight_body_n =
+      galata::core::dcm_ned_from_body(state.attitude_body_to_ned).transpose()
+      * Eigen::Vector3d(0.0, 0.0, heterogeneous.mass.mass_kg * kStandardGravity);
+  force_body_n += weight_body_n;
+
+  // A force of order m g ~ 16 N assembled in a handful of operations; 1e-9 N is
+  // six orders above its round-off floor and far below any force that would
+  // move the vehicle.
+  EXPECT_NEAR(force_body_n.norm(), 0.0, 1e-9)
+      << "the rebuilt force balance does not close: " << force_body_n.transpose();
+  EXPECT_NEAR(moment_body_n_m.norm(), 0.0, 1e-9)
+      << "the rebuilt moment balance does not close: " << moment_body_n_m.transpose();
+
+  RecordProperty("heterogeneous_residual", measured(trim.residual_norm));
+  RecordProperty("heterogeneous_speed_spread_rad_s", measured(spread));
+  RecordProperty("rebuilt_force_imbalance_n", measured(force_body_n.norm()));
+  RecordProperty("rebuilt_moment_imbalance_n_m", measured(moment_body_n_m.norm()));
+}
+
+// A rotor with a non-positive thrust coefficient has no hover speed, and the
+// per-rotor starting point must say so rather than returning a NaN that Newton
+// then fails to explain.
+TEST(QuadrotorHoverTrim, ANonPositiveThrustCoefficientIsRefusedByName) {
+  Quadrotor broken = shipped_model();
+  broken.rotors[2].thrust_coefficient_n_s2 = 0.0;
+  EXPECT_THROW((void)galata::trim::trim_hover(broken, HoverTrimRequest{}), std::invalid_argument);
 }
 
 // --- The pole structure ----------------------------------------------------

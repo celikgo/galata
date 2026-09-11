@@ -22,8 +22,15 @@ on:
       source_sha:
         description: Commit accepted by every required check.
         value: ${{ jobs.ci-ok.outputs.source_sha }}
+  # EVERY pull request, whatever its base. The `branches: [main, master]` filter
+  # that used to sit here meant a PR based on another feature branch never fired
+  # this workflow, and GitHub then reported ZERO checks rather than a failure —
+  # which reads on the PR page as "nothing to see" instead of "never tested".
+  # Measured on 2026-09-10: of the fifteen open quadrotor-programme PRs, the
+  # seven stacked ones had no checks at all, and those seven were the
+  # identification and sampled-control verticals. ADR-0019 records the decision
+  # and its cost.
   pull_request:
-    branches: [main, master]
   push:
     branches: [main, master]
   merge_group:
@@ -205,6 +212,13 @@ jobs:
           "build/${{ matrix.preset }}/src/cli/galata" run \
             examples/nt33a-lateral-modes/modal-study.yaml --output-dir "$RUNNER_TEMP"
           test -s "$RUNNER_TEMP/lateral-modes.md"
+          # The multirotor path, whose starting point differs from the fixed-wing
+          # one: four rotors with four different thrust coefficients.
+          "build/${{ matrix.preset }}/src/cli/galata" run \
+            examples/quadrotor-heterogeneous-rotors/study.yaml \
+            --output-dir "$RUNNER_TEMP/hetero"
+          test -s "$RUNNER_TEMP/hetero/heterogeneous-hover.md"
+          test -s "$RUNNER_TEMP/hetero/operating-point.yaml"
 
   # Charter gates. Seconds, not minutes — a PR that violates one should hear
   # about it before the compilers have finished warming up. Each step maps to a
@@ -241,6 +255,13 @@ jobs:
       - name: Rule 4 — every path and test name in every document resolves
         run: scripts/check-doc-references.sh
 
+      # ADR-0019. This gate checks the file it is running from, which is unusual
+      # and is the point: reinstating a base-branch filter on the pull_request
+      # trigger produces a regression no OTHER gate can see, because its symptom
+      # is an empty check column rather than a red one.
+      - name: ADR-0019 — every pull request fires the required graph
+        run: scripts/check-ci-coverage.sh
+
   # 120 minutes, not the 60 every other job gets. This job is measurably the
   # most expensive one: a Debug build under ASan and UBSan, and 466 tests run
   # one at a time. The tests that dominate are the ones exercising the isolated
@@ -252,7 +273,24 @@ jobs:
   sanitizer:
     name: Address and undefined-behaviour sanitizers
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # A WALL-CLOCK GUARD, NOT A NUMERICAL GATE, sized from measurement.
+    #
+    #   run 34521117651, ff8c0e3: ctest --preset asan took 6400 s for 637 tests
+    #   run 34538572894, e48a3e3: 3558 s for 690 tests
+    #   run 34547686368, 8042fb2: two attempts on two different workers were
+    #   each cut off at the former 120-minute limit, at tests 560 and 561 of
+    #   692. No test failed and there was no sanitizer diagnostic.
+    #
+    # Both 8042fb2 attempts ran every test a median 2.26-2.29x slower than
+    # e48a3e3, over 80 tests common to both logs. The uninstrumented engines
+    # in the same run were not comparably slower. The cause is not localised.
+    # It is not that head's change: the slowdown hit tests that run before the
+    # new ones, and code neither change touches. At that pace the whole suite
+    # needs about 8070 s (2.27 x 3558), past 7200 s.
+    #
+    # 180 minutes is 1.34x that projection. Raising it changes what no test
+    # asserts; it lets the job finish.
+    timeout-minutes: 180
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:

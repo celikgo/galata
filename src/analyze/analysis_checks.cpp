@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
 namespace galata::analyze::detail {
@@ -40,8 +41,50 @@ HurwitzAssessment assess_hurwitz(const Eigen::MatrixXd& a) {
   // sign is too sensitive to support this implementation's stability claim.
   constexpr double kMaxCondition = 1e8;
   if (!std::isfinite(condition) || condition > kMaxCondition) {
-    return {HurwitzStatus::Unresolved,
-            "internal stability unresolved: eigenvectors are ill-conditioned; rescale the model"};
+    // The verdict is unchanged and stays a refusal: with the eigenvectors this
+    // ill-conditioned, Bauer-Fike supports no stability claim and this function
+    // will not make one.
+    //
+    // The DIAGNOSTIC changes, because the old one named the wrong cause. It
+    // said "rescale the model", which is advice for a scaling problem, and the
+    // common case is not a scaling problem: it is a loop that leaves modes
+    // unstabilised, whose eigenvector matrix is near-singular precisely BECAUSE
+    // the unstabilised modes form defective chains at the origin. A caller told
+    // to rescale rescales, gets the same refusal, and learns nothing.
+    //
+    // So the computed spectrum is reported alongside the conditioning, as an
+    // OBSERVATION rather than a certified result — it is exactly the quantity
+    // the conditioning makes uncertain, and saying otherwise would be claiming
+    // the precision this branch exists to deny. It still distinguishes the two
+    // situations a caller confuses: poles sitting on the axis, and a genuinely
+    // well-separated spectrum that only the conditioning refuses.
+    const double axis_floor =
+        1024.0 * static_cast<double>(a.rows()) * std::numeric_limits<double>::epsilon() * scale;
+    int on_axis = 0;
+    int right_half = 0;
+    for (Eigen::Index i = 0; i < eigen.eigenvalues().size(); ++i) {
+      const double real_part = eigen.eigenvalues()(i).real();
+      if (real_part > axis_floor) {
+        ++right_half;
+      } else if (real_part > -axis_floor) {
+        ++on_axis;
+      }
+    }
+    std::ostringstream diagnostic;
+    diagnostic << "internal stability unresolved: eigenvectors are ill-conditioned (condition "
+               << condition << "), so no stability claim is supported. The computed spectrum — "
+               << "uncertain by exactly that conditioning, and reported as an observation — has "
+               << on_axis << " eigenvalue(s) within " << axis_floor << " of the imaginary axis and "
+               << right_half << " in the right half-plane";
+    if (on_axis > 0 || right_half > 0) {
+      diagnostic << ". That is what an unstabilised mode looks like, not what a badly scaled "
+                    "model looks like: rescaling will not resolve it. Check that the loop "
+                    "actually closes around every mode you need stabilised";
+    } else {
+      diagnostic << ". The spectrum is well separated from the axis, so the conditioning alone "
+                    "is what refuses this; rescaling the model may resolve it";
+    }
+    return {HurwitzStatus::Unresolved, diagnostic.str()};
   }
   // Normalize before multiplication to avoid manufacturing an overflow while
   // measuring the residual of a finite, well-scaled eigensystem.

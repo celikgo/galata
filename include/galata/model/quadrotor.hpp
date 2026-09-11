@@ -158,6 +158,37 @@ struct Battery {
   // Rotor speed available at full_voltage_v. The ceiling scales with terminal
   // voltage, which is the only way the battery reaches the dynamics at all.
   double speed_at_full_voltage_rad_s = 0.0;  // rad/s
+
+  // WHICH VOLTAGE THE CEILING SCALES WITH, declared rather than assumed.
+  //
+  // OpenCircuit ignores the pack's internal resistance: the ceiling follows
+  // V_oc(soc) and a pack under load has the same authority as an idle one. It
+  // is wrong in a known direction — it OVERSTATES available speed — and it is
+  // the default only because it is what this model did before the resistive
+  // option existed, and flipping the default would silently change every
+  // result computed from an existing battery file.
+  //
+  // Resistive solves for the terminal voltage under the load the rotors are
+  // actually drawing. See `terminal_voltage_under_load_v`.
+  enum class SagModel { OpenCircuit, Resistive };
+  SagModel sag = SagModel::OpenCircuit;
+
+  // Electrical losses between the pack and the shaft, and the load that never
+  // reaches a rotor at all.
+  //
+  // BOTH DEFAULT TO "NO LOSS", AND BOTH ARE DECLARED. An efficiency of 1 says
+  // the shaft receives every watt the pack delivers, which is false for any
+  // real motor and ESC; it is the default because inventing a plausible
+  // efficiency would be putting a fitted number where a measurement belongs,
+  // and this repository has no measurement of either quantity for any aircraft.
+  // A study that has bench data supplies them and says where they came from.
+  //
+  // The direction of the error when they are left alone is stated so a reader
+  // can tell whether the model is conservative: efficiency 1 and no auxiliary
+  // load UNDERSTATE the current draw, so they overstate endurance and overstate
+  // the speed still available late in a flight.
+  double motor_and_esc_efficiency = 1.0;  // dimensionless, (0, 1]
+  double auxiliary_load_w = 0.0;          // W, avionics and everything else
 };
 
 // Commanded rotor speeds, one per rotor, in rotor order.
@@ -222,7 +253,60 @@ class Quadrotor {
   // maximum. The current draw is not modelled, so the terminal voltage used
   // here is the open-circuit voltage; the internal resistance enters only
   // through `terminal_voltage_v`.
+  // The ceiling ignoring load: what the pack could give a rotor that was not
+  // drawing anything. Under `SagModel::OpenCircuit` this is the only ceiling
+  // there is; under `Resistive` it is an UPPER BOUND on the real one, and a
+  // caller that reports it as a margin is reporting authority the vehicle does
+  // not have while it is flying.
   [[nodiscard]] double speed_ceiling_rad_s(int rotor_index, double state_of_charge) const;
+
+  // The ceiling while the rotors draw `shaft_power_w`. Identical to the form
+  // above under `OpenCircuit`; under `Resistive` it is the one that matters,
+  // because the load that lowers the voltage is the same load the ceiling is
+  // being asked about.
+  [[nodiscard]] double speed_ceiling_rad_s(int rotor_index,
+                                           double state_of_charge,
+                                           double shaft_power_w) const;
+
+  // Mechanical power at the shafts for these rotor speeds, sum of Q_i omega_i.
+  [[nodiscard]] double shaft_power_w(const Eigen::VectorXd& rotor_speed_rad_s) const;
+
+  // The terminal voltage while the rotors are drawing `shaft_power_w`.
+  //
+  // THE COUPLING, AND WHY IT HAS A CLOSED FORM. The pack's terminal voltage
+  // depends on the current, the current depends on the power divided by the
+  // terminal voltage, and the ceiling depends on the terminal voltage. Written
+  // out, V = V_oc - I R with I = P / V gives
+  //
+  //     V^2 - V_oc V + P R = 0,    V = (V_oc + sqrt(V_oc^2 - 4 P R)) / 2
+  //
+  // taking the larger root, which is the branch that tends to V_oc as the load
+  // tends to zero. The smaller root is the high-current solution a real pack
+  // does not sit at.
+  //
+  // AND WHAT HAPPENS PAST IT. The discriminant vanishes at P = V_oc^2 / (4 R),
+  // the classic matched-load maximum, where the terminal voltage is V_oc / 2.
+  // Beyond that the pack saturates: it delivers the most it can and the rotors
+  // receive less than they asked for. This clamps there rather than refusing,
+  // because that is what the hardware does — and `power_is_limited_at` reports
+  // when it happened, since a silent saturation is the part worth objecting to.
+  //
+  // `shaft_power_w` is mechanical. The electrical draw is that divided by
+  // `motor_and_esc_efficiency`, plus `auxiliary_load_w`.
+  [[nodiscard]] double terminal_voltage_under_load_v(double state_of_charge,
+                                                     double shaft_power_w) const;
+
+  // Maximum power the pack can deliver at this charge, V_oc^2 / (4 R). Infinite
+  // for a pack with no internal resistance, which is a modelling choice rather
+  // than a battery.
+  [[nodiscard]] double maximum_deliverable_power_w(double state_of_charge) const;
+
+  // Whether the rotors are asking for more than the pack can deliver, in which
+  // case `terminal_voltage_under_load_v` returns the matched-load voltage
+  // V_oc / 2 and the rotors receive less than they asked for. Saturation is a
+  // real flight condition; a SILENT one is not acceptable, which is why this
+  // query exists beside the clamp.
+  [[nodiscard]] bool power_is_limited_at(double state_of_charge, double shaft_power) const;
 
   // Open-circuit voltage falling linearly from full to empty.
   [[nodiscard]] double open_circuit_voltage_v(double state_of_charge) const;
@@ -260,6 +344,22 @@ class Quadrotor {
   // because an "average" hover speed for mismatched rotors is not a hover.
   [[nodiscard]] double hover_speed_rad_s(double gravity_m_s2) const;
 
+  // The speed at which ONE rotor produces its equal share m g / n of the weight,
+  // sqrt(m g / (n k_T_i)). Unlike the whole-vehicle form above this is defined for
+  // every admissible model, because it asks a question about one rotor rather than
+  // about a vehicle-wide speed that mismatched rotors do not have.
+  //
+  // WHAT THIS IS NOT: it is not a trim. Equal thrust per rotor balances the force
+  // but not, in general, the moments — a vehicle whose rotors differ produces a
+  // residual couple at these speeds. It is the starting point a solver needs, not
+  // an equilibrium, and `trim::trim_hover` treats it as exactly that.
+  //
+  // For a model whose rotors DO share one coefficient this returns the same value
+  // as the whole-vehicle form, by the same expression, so a homogeneous vehicle
+  // starts its solve from bit-identical numbers to the ones it started from before
+  // this overload existed. ADR-0004 depends on that.
+  [[nodiscard]] double hover_speed_rad_s(int rotor_index, double gravity_m_s2) const;
+
   // Projection applied after every completed integrator step: renormalise the
   // attitude quaternion (ADR-0002) and clamp each rotor speed to its own
   // range and to the battery ceiling. Deterministic and branch-free in the
@@ -277,6 +377,29 @@ class Quadrotor {
 // Parse exactly these bytes; the pipeline records their digest before parsing.
 [[nodiscard]] Quadrotor parse_quadrotor(const std::string& bytes,
                                         const std::string& source_name = "model");
+
+// Writes the model as the YAML `parse_quadrotor` reads, so that a model galata
+// computed — an identified one — and a model galata was given are the same kind
+// of object, and the round trip is a testable property rather than a claim.
+//
+// Every number is written at `max_digits10`, the shortest precision at which a
+// binary64 survives a text round trip exactly, in the classic locale so a
+// comma-decimal machine cannot emit a file only it can read (ADR-0004). The
+// products of inertia are recovered from the tensor's off-diagonal entries by
+// undoing the negation `parse_quadrotor` applies, and are written only when
+// nonzero, so a diagonal-inertia model round-trips to the file it came from
+// rather than acquiring three explicit zeros.
+//
+// WHAT THIS IS NOT: not a provenance record, and this matters more here than it
+// does for a linear system. A model file written from a FIT looks exactly like a
+// model file written from a bench measurement, and nothing in the format
+// distinguishes them. `description` and `citation` are carried because the
+// format has them and a caller is expected to put the fit's own account there;
+// the machine-readable record of which parameters were estimated, from what, to
+// what uncertainty and which were carried over untouched belongs in the evidence
+// file the pipeline writes beside it. A reader who has only this file knows what
+// the model is and not how far to trust it.
+[[nodiscard]] std::string serialize_quadrotor(const Quadrotor& model);
 
 }  // namespace galata::model
 

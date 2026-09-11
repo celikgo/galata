@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE TRUTH MODEL of this example's synthetic self-test. `make-record.yaml`
+# simulates this plant to produce `flight.csv`; `study.yaml` then starts from
+# `quad-base.yaml` — the same model with two parameters deliberately wrong — and
+# must recover the two numbers below from the record alone.
+#
+# It is committed so the example is a CHECKABLE self-test rather than a
+# demonstration: without the answer in the tree, "the fit converged" is the only
+# thing a reader could verify, and that is not the claim.
+#
+# Everything here is models/souxmar-quad/souxmar-quad.yaml unchanged. See that
+# directory's PROVENANCE.md for the source of every number. It is an independent
+# implementation's nominal coefficient set, not measured aircraft data.
+#
+# THE TWO PARAMETERS THE FIT MUST RECOVER:
+#   mass.mass_kg          1.6     (quad-base.yaml has 1.45)
+#   drag.angular_n_m_s[1] 0.002   (quad-base.yaml has 0.004)
+
+description: "Truth model for the identification self-test — Souxmar nominal quadrotor, 1.6 kg, X configuration, fixed voltage"
+citation: "Souxmar forest-ISR programme, nonlinear quadrotor plant (fcs/plant/quadrotor.py), nominal coefficient set published in outputs/galata_bridge/reference_trajectory.json; an independent implementation, not measured aircraft data and not a published source"
+
+mass:
+  mass_kg: 1.6
+  inertia_xx_kg_m2: 0.023
+  inertia_yy_kg_m2: 0.023
+  inertia_zz_kg_m2: 0.042
+
+# Rotor order is the fixture's column order: front-left, rear-left, rear-right,
+# front-right. Hub positions are the X-configuration geometry of a 0.23 m arm,
+# 0.23 / sqrt(2) in each of body x and y, with the rotor plane through the CG.
+rotors:
+  - position_cg_to_hub_body_m: [0.16263455967290593, -0.16263455967290593, 0.0]
+    spin_about_body_z: 1
+    thrust_coefficient_n_s2: 1.0e-5
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [-0.16263455967290593, -0.16263455967290593, 0.0]
+    spin_about_body_z: -1
+    thrust_coefficient_n_s2: 1.0e-5
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [-0.16263455967290593, 0.16263455967290593, 0.0]
+    spin_about_body_z: 1
+    thrust_coefficient_n_s2: 1.0e-5
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+  - position_cg_to_hub_body_m: [0.16263455967290593, 0.16263455967290593, 0.0]
+    spin_about_body_z: -1
+    thrust_coefficient_n_s2: 1.0e-5
+    torque_coefficient_n_m_s2: 1.7e-7
+    speed_time_constant_s: 0.035
+    minimum_speed_rad_s: 0.0
+    maximum_speed_rad_s: 1102.4200493562662
+
+drag:
+  linear_n_s_m: [0.12, 0.12, 0.18]
+  quadratic_n_s2_m2: [0.025, 0.025, 0.035]
+  angular_n_m_s: [0.002, 0.002, 0.003]

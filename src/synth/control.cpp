@@ -261,6 +261,56 @@ LqrDesign design_lqr(const model::LinearSystem& plant,
   return design;
 }
 
+model::LinearSystem single_loop_others_closed(const LqrDesign& design, int channel) {
+  const model::LinearSystem& plant = design.plant;
+  if (channel < 0 || channel >= plant.input_count()) {
+    std::ostringstream message;
+    message << "single_loop_others_closed: channel " << channel << " is not one of the plant's "
+            << plant.input_count() << " input(s)";
+    throw std::invalid_argument(message.str());
+  }
+  const Eigen::Index k = channel;
+  const Eigen::MatrixXd& gain = design.riccati.k;
+
+  model::LinearSystem loop;
+  // A - BK is the design's own closed loop; adding back the k-th channel's
+  // contribution re-opens that one channel and leaves the rest connected.
+  loop.a = design.closed_loop.a + plant.b.col(k) * gain.row(k);
+  loop.b = plant.b.col(k);
+  loop.c = gain.row(k);
+  loop.d = Eigen::MatrixXd::Zero(1, 1);
+  loop.state_names = plant.state_names;
+  loop.input_names = {plant.input_names[static_cast<std::size_t>(k)]};
+  loop.output_names = {plant.input_names[static_cast<std::size_t>(k)]};
+  loop.units = plant.units;
+  loop.description = "LQR single loop at plant input '"
+                     + plant.input_names[static_cast<std::size_t>(k)]
+                     + "', other loops closed: " + plant.description;
+  loop.validate();
+
+  // The construction's whole justification is that closing unit negative
+  // feedback around this loop returns the design's closed loop. Checked rather
+  // than asserted, because if it ever stops holding then every margin computed
+  // from this system is a margin of a different aircraft. The budget is the
+  // matrix scale times a few epsilon: this is an exact algebraic identity, so
+  // only round-off separates the two sides.
+  const Eigen::MatrixXd reclosed = loop.a - loop.b * loop.c;
+  const double scale =
+      std::max(design.closed_loop.a.stableNorm(), std::numeric_limits<double>::min());
+  const double budget =
+      64.0 * static_cast<double>(loop.a.rows()) * std::numeric_limits<double>::epsilon() * scale;
+  const double deviation = (reclosed - design.closed_loop.a).stableNorm();
+  if (!(deviation <= budget)) {
+    std::ostringstream message;
+    message << "single_loop_others_closed: closing this loop does not return the design's own "
+               "closed loop — the two differ by "
+            << deviation << " against a round-off budget of " << budget
+            << ". Every margin read from this system would be a margin of a different system";
+    throw std::runtime_error(message.str());
+  }
+  return loop;
+}
+
 model::LinearSystem filtered_pid(double kp, double ki, double kd, double tau) {
   if (!std::isfinite(kp) || !std::isfinite(ki) || !std::isfinite(kd) || !std::isfinite(tau)
       || tau <= 0.0) {

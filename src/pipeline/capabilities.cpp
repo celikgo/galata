@@ -13,6 +13,7 @@
 #include "galata/analyze/modes.hpp"
 #include "galata/analyze/sensitivity.hpp"
 #include "galata/analyze/singular_values.hpp"
+#include "galata/core/sha256.hpp"
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/linear_system.hpp"
@@ -91,7 +92,17 @@ Artifact analyze_modes_capability(const StageContext& context) {
   table.system_citation = system.citation;
 
   std::ostringstream summary;
-  summary << table.decomposition.modes.size() << " modes";
+  // A conjugate pair is ONE mode, so this count is below the state count
+  // whenever the system oscillates. Saying only "12 modes" about a
+  // sixteen-state model reads as though four states went missing; it is the
+  // first thing a reader asks, and the answer costs one clause. The states are
+  // all still there — an oscillation is reported once rather than twice.
+  const std::size_t mode_count = table.decomposition.modes.size();
+  const auto state_count = static_cast<std::size_t>(system.a.rows());
+  summary << mode_count << " modes";
+  if (mode_count != state_count) {
+    summary << " over " << state_count << " states (a conjugate pair is one mode)";
+  }
   int labelled = 0;
   for (const auto& mode : table.decomposition.modes) {
     if (mode.label != analyze::ModeLabel::Unclassified) {
@@ -135,9 +146,10 @@ Artifact load_aircraft_model(const StageContext& context) {
 // --- model.quadrotor -------------------------------------------------------
 
 Artifact load_quadrotor_model(const StageContext& context) {
-  const std::string path = context.resolve_input_path(context.input->string_at("path"));
-  const model::Quadrotor quadrotor =
-      model::parse_quadrotor(context.read_input(context.input->string_at("path")), path);
+  const std::string declared = context.input->string_at("path");
+  const std::string path = context.resolve_input_path(declared);
+  const std::string bytes = context.read_input(declared);
+  const model::Quadrotor quadrotor = model::parse_quadrotor(bytes, path);
 
   std::ostringstream summary;
   summary << quadrotor.rotor_count() << " rotors, " << quadrotor.extended_state_size() << " states";
@@ -148,10 +160,20 @@ Artifact load_quadrotor_model(const StageContext& context) {
     summary << " — " << quadrotor.description;
   }
 
+  QuadrotorArtifact payload;
+  payload.model = quadrotor;
+  payload.identity.origin = "file";
+  payload.identity.path = declared;
+  // The bytes, not the path. Computed here rather than taken from the run
+  // manifest so that the identity travels with the artefact through every
+  // downstream stage, including into a fitted model's provenance.
+  payload.identity.sha256 = core::sha256(bytes);
+  payload.identity.summary = quadrotor.description;
+
   Artifact artifact;
   artifact.kind = "quadrotor";
   artifact.summary = summary.str();
-  artifact.payload = quadrotor;
+  artifact.payload = payload;
   return artifact;
 }
 
@@ -893,7 +915,7 @@ std::string markdown_document(const StageContext& context) {
       write_sensitivity_section(out, std::any_cast<const SensitivityArtifact&>(artifact.payload));
     } else if (artifact.kind == "disk_margin") {
       write_disk_margin_section(out, std::any_cast<const DiskMarginArtifact&>(artifact.payload));
-    } else if (!write_design_section(out, artifact)) {
+    } else if (!write_design_section(out, artifact) && !write_discrete_section(out, artifact)) {
       throw std::runtime_error("no report writer exists for artifact kind '" + artifact.kind + "'");
     }
     write_linearization_evidence(out, artifact);
@@ -1070,9 +1092,12 @@ Registry build_registry() {
                  {},
                  {"path"}});
 
+  register_data_capabilities(registry);
   register_design_capabilities(registry);
+  register_identify_capabilities(registry);
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);
+  register_discrete_capabilities(registry);
   return registry;
 }
 

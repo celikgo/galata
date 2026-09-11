@@ -22,13 +22,24 @@ cd "$(dirname "$0")/.."
 # core, and headers are where inline arithmetic tends to live.
 #
 # UI code and file-format adapters are deliberately absent: converting is their
-# job. include/galata/units.hpp is deliberately absent too — it is the definition
-# site, and it sits outside include/galata/core/ precisely so that this list does
-# not have to carve out an exception for it.
-CORE_DIRS="src/core src/modeling src/model src/numerics src/trim src/linearize src/synth src/analyze src/sim src/ident"
+# job. `src/data` and `include/galata/data` are adapters by that test — a source
+# file arrives in whatever units its author chose and the one place it becomes SI
+# is a declared scale and offset recorded on the channel it produced — so they
+# stay out. include/galata/units.hpp is deliberately absent too — it is the
+# definition site, and it sits outside include/galata/core/ precisely so that
+# this list does not have to carve out an exception for it.
+#
+# `src/identify` and `include/galata/identify` ARE core: a fit simulates the
+# plant and its coefficients are the plant's own, so a conversion factor there is
+# a conversion factor in the numerical core. This list said `src/ident` until
+# 2026-09-10, which is not the name the code landed under, so the whole
+# identification vertical was reported as "not yet present, skipped" while it
+# existed — a gate that skips is not a gate that passes, and the message said so
+# without anybody reading it.
+CORE_DIRS="src/core src/modeling src/model src/numerics src/trim src/linearize src/synth src/analyze src/sim src/identify"
 CORE_DIRS="$CORE_DIRS include/galata/core include/galata/modeling include/galata/model include/galata/numerics"
 CORE_DIRS="$CORE_DIRS include/galata/trim include/galata/linearize include/galata/synth"
-CORE_DIRS="$CORE_DIRS include/galata/analyze include/galata/sim include/galata/ident"
+CORE_DIRS="$CORE_DIRS include/galata/analyze include/galata/sim include/galata/identify"
 
 # Conversion factors from ADR-0003's table, plus the reciprocals and the
 # rounded forms that appear in hand-written code. Matched as substrings of a

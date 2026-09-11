@@ -23,6 +23,11 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = Path(os.environ.get("GALATA_PROJECT_CLI", ROOT / "build/dev/src/cli/galata")).resolve()
+# Wall-clock deadline for ONE CLI invocation: a hang guard, so a wedged worker
+# fails here naming its own command rather than arriving as an opaque ctest kill
+# of the whole module. 45 s is the uninstrumented default and is unchanged;
+# tests/CMakeLists.txt scales it for the sanitizer build and records why.
+TIMEOUT_S = float(os.environ.get("GALATA_PROJECT_TIMEOUT_S", "45"))
 
 
 def synthetic_model():
@@ -62,7 +67,7 @@ class ProjectWorkflow(unittest.TestCase):
 
     def invoke(self, *arguments):
         return subprocess.run([str(CLI), "project", *map(str, arguments)],
-                              cwd=self.scratch, capture_output=True, text=True, timeout=45)
+                              cwd=self.scratch, capture_output=True, text=True, timeout=TIMEOUT_S)
 
     def command(self, *arguments):
         result = self.invoke(*arguments)
@@ -145,6 +150,16 @@ class ProjectWorkflow(unittest.TestCase):
             process.communicate(timeout=10)
 
         self.addCleanup(cleanup)
+        # THIS DEADLINE IS CHECKED AT THE TOP OF THE LOOP, so the first
+        # `inspect()` always completes however long it takes, and under
+        # instrumentation it takes longer than the deadline by itself. The
+        # effective requirement is therefore "the first inspect sees the job
+        # running", and the message below is accurate only for the
+        # uninstrumented build. Left at 15 s deliberately: it has not failed,
+        # and scaling a guard that is passing would relax a requirement on no
+        # evidence. If it ever fires under the sanitizer, this is why, and the
+        # fix is to observe the worker's state without a second full CLI
+        # invocation rather than to raise the number.
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             for run in self.inspect()["runs"]:
@@ -480,7 +495,7 @@ class ProjectWorkflow(unittest.TestCase):
         # Cancellation is cooperative, including during provenance preflight.
         # Instrumented workers hash a much larger executable; permit the same
         # command deadline as invoke(), without relaxing the required outcome.
-        process.communicate(timeout=45)
+        process.communicate(timeout=TIMEOUT_S)
         self.assertNotEqual(process.returncode, 0)
         listed = next(run for run in self.inspect()["runs"] if run["id"] == running["id"])
         self.assertEqual(listed["status"], "cancelled", listed)

@@ -282,8 +282,12 @@ acceptance requirements below are targets, not measurements of current code.
 
 **Must v1 · M3 · Dependencies: F02, F03, F10, F13**
 
-- **Baseline and gap:** The product supports continuous control only; discrete
-  models, DARE and sampled LQR are not implemented.
+- **Baseline and gap:** Continuous control is supported. An exact zero-order-hold
+  discretisation, a bounded stabilising DARE and sampled LQR are implemented and
+  unvalidated as `model.discretize`, `synth.dare` and `synth.sampled_lqr` (RFC-0002
+  WP5). Other holds, a pencil-based solver for an ill-conditioned transition,
+  benchmark validation and any margin of the sampled loop are not. The row stays
+  open while its dependencies are unresolved.
 - **Proposed work:** Add explicit hold/discretisation methods, sample time,
   discrete state-space contracts and a bounded stabilising DARE/LQR path.
   Preserve the cost discretisation and input-hold assumptions in the design.

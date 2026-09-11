@@ -59,10 +59,12 @@
 #include "galata/linearize/finite_difference.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/numerics/integrator.hpp"
+#include "galata/sim/discrete.hpp"
 #include "galata/sim/linear.hpp"
 #include "galata/sim/nonlinear.hpp"
 #include "galata/sim/rigid_body.hpp"
 #include "galata/synth/control.hpp"
+#include "galata/synth/discrete_control.hpp"
 #include "galata/trim/level.hpp"
 
 #include <cmath>
@@ -290,6 +292,39 @@ void fingerprint_control_design(const Emit& emit) {
   }
 }
 
+void fingerprint_sampled_design(const Emit& emit) {
+  // The same analytic double integrator, designed in DISCRETE time at 50 Hz.
+  // Every step is arithmetic a platform's libm does not touch: the matrix
+  // exponential's Pade order is a table lookup and, at this norm, it takes no
+  // squaring and so no logarithm; the ordered complex Schur decomposition is the
+  // one the continuous CARE above already runs at tier 2; the prediction is a
+  // fixed loop of products. So these keys are compared across platforms, like
+  // the CARE's, and carry no "tier1." prefix.
+  model::LinearSystem plant;
+  plant.a = Eigen::Matrix2d::Zero();
+  plant.a(0, 1) = 1.0;
+  plant.b = Eigen::Vector2d(0.0, 1.0);
+  plant.state_names = {"position", "velocity"};
+  plant.input_names = {"force"};
+  const auto design = synth::design_sampled_lqr(
+      plant, Eigen::Matrix2d::Identity(), Eigen::MatrixXd::Identity(1, 1), {}, 0.02);
+  for (Eigen::Index i = 0; i < 2; ++i) {
+    emit("discrete.zoh.b." + std::to_string(i), design.discretisation.system.b(i, 0));
+    emit("synthesis.sampled_lqr.cost_n." + std::to_string(i), design.cost.n(i, 0));
+    emit("synthesis.sampled_lqr.k." + std::to_string(i), design.riccati.k(0, i));
+    for (Eigen::Index j = 0; j < 2; ++j) {
+      emit("discrete.zoh.a." + std::to_string(i) + "." + std::to_string(j),
+           design.discretisation.system.a(i, j));
+      emit("synthesis.dare.x." + std::to_string(i) + "." + std::to_string(j),
+           design.riccati.x(i, j));
+    }
+  }
+  const auto prediction = sim::predict_sampled_loop(
+      design.discretisation.system, design.riccati.k, 1, Eigen::Vector2d(1.0, 0.0), 100);
+  emit("simulation.sampled_prediction.2s.position", prediction.states.back()(0));
+  emit("simulation.sampled_prediction.2s.velocity", prediction.states.back()(1));
+}
+
 }  // namespace
 
 void fingerprint(const std::string& model_path, const Emit& emit) {
@@ -298,6 +333,7 @@ void fingerprint(const std::string& model_path, const Emit& emit) {
   fingerprint_modes(emit);
   fingerprint_trim_and_linearisation(model_path, emit);
   fingerprint_control_design(emit);
+  fingerprint_sampled_design(emit);
 }
 
 Amplification amplification_study() {
