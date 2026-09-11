@@ -791,7 +791,7 @@ const std::vector<Case>& validation_cases() {
         E{kIntegration,
           "ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation"},
         E{kIntegration,
-          "ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget"}},
+          "ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget"}},
        "The prediction is shown right to first order by the scaling of its miss, and a negative "
        "control shows the same test failing a prediction made at the wrong period. It does NOT "
        "resolve a one-tick delay error at this perturbation, which is recorded by its own test; "
@@ -802,9 +802,12 @@ const std::vector<Case>& validation_cases() {
        "hover linearisation drops: the transport of forward speed into body vertical velocity "
        "as the vehicle pitches, partly offset by the tilt's loss of vertical gravity. It is not "
        "the rotor-speed curvature an earlier version of this note named. The budget holds at "
-       "nine tenths of the declared perturbation. A case at half the excitation passes the "
-       "unchanged budget, in the declared mix and in its most demanding constituent alone; it "
-       "is PROPOSED in the example's proposed-acceptance.yaml, not adopted. No margin of the "
+       "nine tenths of the declared perturbation. The case at half the excitation, the "
+       "example's acceptance.yaml, passes the unchanged budget in the declared mix and in its "
+       "most demanding constituent alone. It was adopted on 2026-09-11 as the small-"
+       "perturbation acceptance case. It accepts a narrower comparison, and the original case "
+       "keeps its recorded FAIL. The envelope was measured along one perturbation direction and "
+       "a few of its constituents; it is not a region of validity in the chart. No margin of the "
        "sampled loop is computed or implied."},
 
       // --- Not implemented --------------------------------------------------

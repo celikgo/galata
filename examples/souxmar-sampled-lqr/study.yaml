@@ -157,9 +157,13 @@ stages:
   # linearisation drops — above all the transport term q u - p v in the body
   # vertical velocity, partly offset by the tilt's loss of vertical gravity. An
   # earlier version of this comment blamed the rotor-speed curvature. That term
-  # carries almost none of the discrepancy. The budget was not moved and this
-  # perturbation was not changed; a smaller one is PROPOSED, not adopted, in
-  # proposed-acceptance.yaml. And the order test above turned out NOT to see a
+  # carries almost none of the discrepancy. The budget was not moved and the
+  # perturbation in study.yaml was not changed: study.yaml is the ORIGINAL
+  # case, and it keeps its excitation, its budget and its recorded FAIL.
+  # acceptance.yaml is study.yaml with this perturbation halved and nothing
+  # else changed. It was adopted on 2026-09-11 as the small-perturbation
+  # acceptance case, and it accepts a narrower linear-versus-nonlinear
+  # comparison than this one. And the order test above turned out NOT to see a
   # tick of delay at this perturbation — the delay changes the prediction by
   # less than the second-order term — so the delay line is certified by exact
   # re-derivation instead, and the negative control is a prediction at the

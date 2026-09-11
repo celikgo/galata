@@ -1,30 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# PROPOSED - NOT THE AGREED ACCEPTANCE CASE. It awaits the approval of whoever
-# agreed that case. Until then study.yaml is the acceptance case, and its
-# result is OUTSIDE the budget it declared.
+# THE SMALL-PERTURBATION ACCEPTANCE CASE, adopted 2026-09-11.
 #
-#   galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <dir>
+#   galata run examples/souxmar-sampled-lqr/acceptance.yaml --output-dir <dir>
 #
-# WHAT IS PROPOSED. One change: the initial chart perturbation is halved. The
-# budget, the metric, the plant, the design, the period, the hold, the delay
-# and the limits are all study.yaml's, byte for byte.
-# ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget
-# requires this file to be study.yaml with that one vector changed.
+# WHAT CHANGED, AND WHAT DID NOT. This file is study.yaml with one change: the
+# initial chart perturbation is halved. Everything else is study.yaml's, byte
+# for byte:
+#   - the plant, the trim, the design and its weights;
+#   - the 4 ms period, the zero-order hold and the one-period delay;
+#   - the rotor limits, and 3000 RK4 steps of 1 ms, which is 750 controller
+#     ticks over 3 s;
+#   - the budget, and the comparison itself.
+# ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget
+# requires exactly that.
 #
-# WHY. The agreed perturbation lies just past the edge of the envelope in which
-# this linear-versus-nonlinear comparison can hold a five percent budget. What
-# sets that edge is what the hover linearisation drops, the rigid-body
-# kinematics of a vehicle that pitches while it moves, and not a defect; the
-# README's trace closes the whole discrepancy on those terms. At half the
-# excitation the comparison passes. So does its most demanding constituent, the
-# horizontal offset alone, so the pass does not rest on the vertical and
-# attitude entries diluting the metric.
+#   coordinates  the attitude-error chart:
+#                  NED position deviation      m      3
+#                  body velocity               m/s    3
+#                  attitude error, as a rotation vector   rad    3
+#                  body rate                   rad/s  3
+#                  rotor-speed deviation       rad/s  4
+#   original     study.yaml
+#                  [0.2, -0.1, 0.15, 0, 0, 0, 0.01, -0.01, 0.0, 0, 0, 0, 0, 0, 0, 0]
+#   adopted      acceptance.yaml
+#                  [0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]
+#   measure      the largest ||m_k - p_k||_X over ticks k = 0..750, divided by
+#                the largest ||p_k||_X over the same ticks, where
+#                  m    is the measured chart state;
+#                  p    is the design's own discrete prediction, with the same
+#                       gain, hold and delay, from the same initial state;
+#                  ||e||_X = sqrt(e' X e), and X is the design's discrete
+#                       Riccati cost-to-go.
+#   budget       0.05, unchanged. The case passes when the measure is at most
+#                the budget.
 #
-# WHAT IT COSTS. A smaller excitation is a weaker test of the prediction. The
-# miss is second order, so halving the perturbation quarters the miss the
-# comparison can see, and its resolution against a structural error falls with
-# it. The README's one-tick-delay limit applies here more strongly, not less.
+# WHAT ADOPTING IT ACCEPTS: a narrower comparison. The miss is second order in
+# the perturbation. At half the excitation the comparison sees a quarter of the
+# absolute miss and about half the relative one, and its power to expose a
+# structural error in the prediction falls with it. The README's one-tick-delay
+# limit applies here more strongly, not less.
+#
+# WHAT IT DOES NOT CLAIM. The envelope behind this choice was measured along the
+# agreed perturbation's own direction, and along a handful of its constituent
+# directions. It is not a region of validity in the sixteen-dimensional chart.
+# No guarantee is made for a perturbation in any other direction, or of any
+# other shape.
+#
+# THE ORIGINAL CASE STANDS. study.yaml keeps its excitation, its budget and its
+# recorded FAIL, held by a two-sided labelled lock. Adopting this case does not
+# make that one pass.
+#
+# The comments in the body below are study.yaml's, unchanged. They describe the
+# original case.
 #
 # ---- study.yaml follows, unchanged except for initial_chart_perturbation ----
 # SPDX-License-Identifier: Apache-2.0
@@ -186,9 +214,13 @@ stages:
   # linearisation drops — above all the transport term q u - p v in the body
   # vertical velocity, partly offset by the tilt's loss of vertical gravity. An
   # earlier version of this comment blamed the rotor-speed curvature. That term
-  # carries almost none of the discrepancy. The budget was not moved and this
-  # perturbation was not changed; a smaller one is PROPOSED, not adopted, in
-  # proposed-acceptance.yaml. And the order test above turned out NOT to see a
+  # carries almost none of the discrepancy. The budget was not moved and the
+  # perturbation in study.yaml was not changed: study.yaml is the ORIGINAL
+  # case, and it keeps its excitation, its budget and its recorded FAIL.
+  # acceptance.yaml is study.yaml with this perturbation halved and nothing
+  # else changed. It was adopted on 2026-09-11 as the small-perturbation
+  # acceptance case, and it accepts a narrower linear-versus-nonlinear
+  # comparison than this one. And the order test above turned out NOT to see a
   # tick of delay at this perturbation — the delay changes the prediction by
   # less than the second-order term — so the delay line is certified by exact
   # re-derivation instead, and the negative control is a prediction at the

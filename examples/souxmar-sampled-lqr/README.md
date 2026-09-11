@@ -172,44 +172,82 @@ The negative control is now a prediction made at *twice* the design period.
 That is the mismatch `sim.sampled` refuses to run, and the gate catches it. The
 delay test was kept, inverted, as the record of this limit.
 
-## The valid envelope, and a proposed change to the acceptance case
+## Two cases: the original, and the adopted small-perturbation acceptance case
 
-**The agreed case is `study.yaml`, and its result is outside the budget.**
-Nothing below changes that.
+Both cases are kept.
+
+| | Original case | Adopted acceptance case |
+|---|---|---|
+| File | `study.yaml` | `acceptance.yaml` |
+| Initial chart perturbation | `[0.2, -0.1, 0.15, 0, 0, 0, 0.01, -0.01, 0.0, 0, 0, 0, 0, 0, 0, 0]` | `[0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]` |
+| Result | **outside** its budget: a recorded FAIL | adopted on 2026-09-11 as the small-perturbation acceptance case; it passes |
+
+Both vectors are in the attitude-error chart, in this order:
+
+- NED position deviation, in metres (three entries);
+- body velocity, in metres per second (three);
+- attitude error as a rotation vector, in radians (three);
+- body rate, in radians per second (three);
+- rotor-speed deviation, in radians per second (four).
+
+Everything else is the same in both cases. A test requires `acceptance.yaml` to
+be `study.yaml` with only that vector changed:
+
+- **Horizon.** 3000 RK4 steps of 1 ms, which is 750 controller ticks of 4 ms,
+  over 3 s.
+- **Norm.** The design's cost-to-go norm, `||e||_X = sqrt(e' X e)`, where `X`
+  is the discrete Riccati solution.
+- **Normalisation.** The largest `||m_k - p_k||_X` over ticks 0 to 750, divided
+  by the largest `||p_k||_X` over the same ticks. Here `m` is the measured chart
+  state and `p` is the design's own prediction from the same initial state.
+- **Budget.** 0.05. A case passes when the measure is at most the budget.
+
+### Why the smaller case, and what it gives up
 
 The absolute miss is second order and the prediction's peak is first order, so
 the relative discrepancy grows in proportion to the perturbation. Along the
-declared direction there is therefore one scale below which the budget holds and
-above which it does not. The declared perturbation sits just past it:
+agreed direction there is one scale below which the budget holds, and the
+original perturbation sits just past it. Three tests hold that scaling:
 
+- `ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation`
+  holds the scaling between the original perturbation and half of it.
 - `ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation`
-  runs the study at nine tenths of the declared perturbation, and it passes.
+  passes at nine tenths of the original perturbation.
 - `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` holds
-  the declared perturbation itself outside the budget.
+  the original perturbation outside the budget.
 
-The boundary lies between the two. The horizontal part of the offset sets it. A
-vertical offset is followed almost exactly by the linear model, and adding one
+Adopting half the excitation accepts a **narrower** linear-versus-nonlinear
+comparison. The comparison sees a quarter of the absolute miss, and its power to
+expose a structural error in the prediction falls with it. The one-tick-delay
+limit above applies to the acceptance case more strongly, not less.
+
+### Why the pass is not a dilution
+
+A vertical offset is followed almost exactly by the linear model, and adding one
 *lowers* the metric: it raises the prediction's peak without adding much miss.
-**So a perturbation can be made to pass by adding excitation the linearisation
-handles well.** A pass is worth something only if it also holds on the
-demanding part of the excitation alone.
+So a perturbation can be made to pass by adding excitation the linearisation
+handles well. The acceptance case is therefore also required to pass on its most
+demanding constituent, the horizontal offset alone:
+`ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget`.
 
-**Proposed, not adopted.** `proposed-acceptance.yaml` is this study with one
-change: the initial perturbation is halved. Everything else is unchanged: the
-budget, the metric, the law, the period, the hold, the delay and the limits. A
-test requires the file to equal `study.yaml` apart from that one vector. At half
-the excitation the run passes, and so does its most demanding constituent, the
-horizontal offset alone:
-`ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget`.
+### What the envelope is not
 
-The proposal has a cost. The miss is second order, so halving the perturbation
-quarters the miss the comparison can see, and its resolution against a
-structural error falls with it. The one-tick-delay limit above applies to the
-proposed case more strongly, not less. Adopting it is a decision for whoever
-agreed the acceptance case, not for this repository.
+The envelope was measured along the agreed perturbation's own direction, and at
+a few of its constituent directions. That means the tests above, plus an
+amplitude sweep from a quarter to twice the original along the same direction,
+retained with the closure's evidence. **It is not a region of validity in the
+sixteen-dimensional chart.** No guarantee is made for a perturbation in any other
+direction, or of any other shape.
+
+### The original case stands
+
+Adopting the smaller case does not make the original pass. The original's
+excitation, budget and FAIL are unchanged. Its lock fails if the discrepancy
+grows, and also if it comes back inside the budget.
 
 ```bash
-galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <out>/proposed
+galata run examples/souxmar-sampled-lqr/study.yaml      --output-dir <out>/original
+galata run examples/souxmar-sampled-lqr/acceptance.yaml --output-dir <out>/acceptance
 ```
 
 ## What this is not
@@ -273,9 +311,10 @@ file:
   carry it.
 - `ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation`
   holds the inside edge of the envelope.
-- `ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget`
-  holds the proposal: that it is `study.yaml` with only the perturbation
-  halved, that it passes, and that its horizontal offset alone passes too.
+- `ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget`
+  holds the adopted acceptance case. It checks three things: that
+  `acceptance.yaml` is `study.yaml` with only the perturbation halved, that it
+  passes the unchanged budget, and that its horizontal offset alone passes too.
 
 `DiscreteWorkflow` in the same tier holds the three capabilities' contracts:
 the scalar DARE's closed form and Riccati value iteration through the pipeline,

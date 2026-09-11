@@ -889,7 +889,7 @@ TEST(ExampleSouxmarSampledLqr, TheOverBudgetDiscrepancyIsHeldByATwoSidedLock) {
 }
 
 // ===========================================================================
-// The trace behind that lock, the envelope, and the proposal
+// The trace behind that lock, the envelope, and the adopted acceptance case
 // ===========================================================================
 
 namespace souxmar {
@@ -1020,7 +1020,7 @@ const std::string kNineTenthsPerturbation =
     "[0.18, -0.09, 0.135, 0, 0, 0, 0.009, -0.009, 0.0, 0, 0, 0, 0, 0, 0, 0]";
 // The horizontal part of the halved perturbation alone.
 const std::string kHalvedHorizontalOnly = "[0.1, -0.05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
-const std::string kProposalMarker =
+const std::string kAcceptanceMarker =
     "# ---- study.yaml follows, unchanged except for initial_chart_perturbation ----\n";
 
 }  // namespace souxmar
@@ -1196,56 +1196,59 @@ TEST(ExampleSouxmarSampledLqr, TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbati
   RecordProperty("relative_discrepancy", control.prediction.relative_discrepancy);
 }
 
-// THE PROPOSAL, AND ITS SAFEGUARDS. A PROPOSAL: the agreed case is study.yaml,
-// and its result stays outside the budget.
+// THE ADOPTED SMALL-PERTURBATION ACCEPTANCE CASE, AND ITS SAFEGUARDS. Adopted
+// on 2026-09-11, beside the original case rather than in place of it. The
+// original, study.yaml, keeps its excitation, its budget and its recorded FAIL,
+// held by the lock above.
 //
-// proposed-acceptance.yaml must be study.yaml with the initial perturbation
-// halved and nothing else changed. That is checked first, as text, so the
-// proposal cannot drift into a different comparison. Then it must pass the
-// unchanged budget. And because a perturbation can be made to pass by adding
-// excitation the linearisation handles well — a vertical offset raises the
-// prediction's peak and barely adds to the miss — its most demanding
+// acceptance.yaml must be study.yaml with the initial perturbation halved and
+// nothing else changed. That is checked first, as text, so the acceptance case
+// cannot drift into a different comparison. Then it must pass the unchanged
+// budget. A perturbation can be made to pass by adding excitation the
+// linearisation handles well: a vertical offset raises the prediction's peak
+// and barely adds to the miss. So the acceptance case's most demanding
 // constituent, the horizontal offset alone, must pass too, and must be the
-// harder of the two.
-TEST(ExampleSouxmarSampledLqr, TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget) {
+// harder of the two. Neither run says anything about a perturbation in any
+// other direction.
+TEST(ExampleSouxmarSampledLqr, TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget) {
   const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / souxmar::kExample;
   std::string expected = read_file(directory / "study.yaml");
   const auto declared = expected.find(souxmar::kDeclaredPerturbation);
   ASSERT_NE(declared, std::string::npos);
   expected.replace(declared, souxmar::kDeclaredPerturbation.size(), souxmar::kHalvedPerturbation);
-  const std::string proposal = read_file(directory / "proposed-acceptance.yaml");
-  const auto body = proposal.find(souxmar::kProposalMarker);
-  ASSERT_NE(body, std::string::npos) << "proposed-acceptance.yaml has lost its marker line";
-  EXPECT_EQ(proposal.substr(body + souxmar::kProposalMarker.size()), expected)
-      << "proposed-acceptance.yaml is no longer study.yaml with only the perturbation halved";
+  const std::string adopted = read_file(directory / "acceptance.yaml");
+  const auto body = adopted.find(souxmar::kAcceptanceMarker);
+  ASSERT_NE(body, std::string::npos) << "acceptance.yaml has lost its marker line";
+  EXPECT_EQ(adopted.substr(body + souxmar::kAcceptanceMarker.size()), expected)
+      << "acceptance.yaml is no longer study.yaml with only the perturbation halved";
 
-  const auto proposed = galata::pipeline::run_pipeline(
-      galata::pipeline::load_pipeline((directory / "proposed-acceptance.yaml").string()),
+  const auto acceptance = galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "acceptance.yaml").string()),
       galata::pipeline::builtin_registry(),
       directory.string(),
-      souxmar::scratch("proposed").string(),
+      souxmar::scratch("acceptance").string(),
       nullptr,
       galata::pipeline::RunOptions{.overwrite = true});
-  const auto& control = souxmar::sampled_run(proposed).control;
+  const auto& control = souxmar::sampled_run(acceptance).control;
   ASSERT_TRUE(control.prediction.available && control.prediction.relative_discrepancy_defined);
   EXPECT_EQ(control.saturated_tick_count, 0);
   EXPECT_EQ(control.prediction.budget, souxmar::kDeclaredBudget);
   EXPECT_TRUE(control.prediction.within_budget)
-      << "the proposed case is outside the unchanged budget: "
+      << "the adopted acceptance case is outside the unchanged budget: "
       << control.prediction.relative_discrepancy;
 
   const auto horizontal =
-      souxmar::run_with_perturbation("proposed-horizontal", souxmar::kHalvedHorizontalOnly);
+      souxmar::run_with_perturbation("acceptance-horizontal", souxmar::kHalvedHorizontalOnly);
   const auto& alone = souxmar::sampled_run(horizontal).control;
   ASSERT_TRUE(alone.prediction.available && alone.prediction.relative_discrepancy_defined);
   EXPECT_EQ(alone.saturated_tick_count, 0);
   EXPECT_TRUE(alone.prediction.within_budget)
-      << "the proposed case's horizontal offset alone is outside the budget: "
+      << "the acceptance case's horizontal offset alone is outside the budget: "
       << alone.prediction.relative_discrepancy;
   EXPECT_GT(alone.prediction.relative_discrepancy, control.prediction.relative_discrepancy)
       << "the horizontal offset alone is no longer the harder case, so the README's account of "
          "why the mix is diluted no longer holds";
-  RecordProperty("proposed_relative_discrepancy", control.prediction.relative_discrepancy);
+  RecordProperty("acceptance_relative_discrepancy", control.prediction.relative_discrepancy);
   RecordProperty("horizontal_only_relative_discrepancy", alone.prediction.relative_discrepancy);
 }
 
