@@ -67,6 +67,93 @@ programme, and a revision typed into it goes stale on the next commit.
 
 ---
 
+## Final requirements table
+
+**This table is the authoritative requirements record.** The handoff page reproduces it for
+reading; it is not a substitute for it. The table was corrected on 2026-09-11 in four places
+where an earlier version of this record, or of the handoff, said something false:
+
+- **Item 5.** It was recorded as implemented while `sim.linear` still took one constant input.
+  Its linear half was **missing** until
+  [c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10)
+  and [b8f3c26](https://github.com/celikgo/galata/commit/b8f3c263f9a64164191d3fbc4ed4316e5b5db328).
+- **Test counts.** Sanitizer and engine results were written as `637/637`, `690/690` and
+  `722/722`, which read as that many passes. Each count included **two skipped** cross-checks.
+- **Workflow A.** Its linear-versus-nonlinear comparison is **outside** its budget, and it is
+  recorded below as a FAIL rather than as a completed run.
+- **CI columns.** Per-pull-request CI and combined-stack CI are now separate columns, because a
+  green integration head is not a run of any constituent pull request.
+
+### Verdicts
+
+| Verdict | Meaning |
+|---|---|
+| **PASS** | Every named check passes at the stated head, and the claim stays inside its stated scope. |
+| **FAIL** | An agreed acceptance criterion is not met at that head. It is recorded and held, not absorbed. |
+| **SKIP** | The check exists and did not run in that environment. A skip is not a pass. |
+| **DEFERRED** | Explicitly outside this programme's scope, for the reason given. Claimed nowhere. |
+| **PROPOSED** | A change to an agreed criterion, put forward for approval. It changes no other row until it is adopted. |
+
+### The rows
+
+**Local evidence** is the full suite on the platform of record — Darwin arm64, AppleClang,
+Debug — at
+[803326a](https://github.com/celikgo/galata/commit/803326a1fbadadd27bce21e8e7b71d2d8d7d621b),
+the last commit to change code. The Souxmar fixture was configured, so the two cross-checks ran
+there rather than skipped.
+
+**The combined-stack column** is the integration pull request's hosted run at the head that
+carries this table. A commit cannot record its own run, so that column is filled in by the
+commit after it.
+
+**The own-PR column** was read from each pull request's check rollup on 2026-09-11.
+
+| # | Requirement | Callable as | Local at `803326a` | CI, own PR | CI, combined stack | Merged | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | Trim a quadrotor whose rotors have different thrust coefficients | `trim.hover` | `QuadrotorHoverTrim` 3/3, `HoverTrim` 10/10 | #18: 11 of 11 | pending | no | **PASS** |
+| 2 | Reconcile the reported mode count with the state count | `analyze.modes` | `QuadrotorWorkflow` 29/29 | #19: 11 of 11 | pending | no | **PASS** |
+| 3 | Make the Hurwitz refusal name the cause a caller can act on | `analyze.margins`, `analyze.diskmargin` | `Margins` 15/15, `StabilityMarginDiagnostics` 2/2 | #20: 11 of 11 | pending | no | **PASS** |
+| 4 | Integrate the nonlinear plant through a public capability | `sim.plant` | `QuadrotorWorkflow` 29/29, `Determinism` 13/13 | #22: 11 of 11 | pending | no | **PASS** |
+| 5 | Declared input histories, and wind that changes over time | `sim.plant` (`command_schedule`, `wind_schedule`), `sim.sampled` (`wind_schedule`), `sim.linear` (`input_schedule`) | `InputSchedule` 4/4, `LinearSimulation` 10/10, `LinearHistoryWorkflow` 3/3, `ExampleSouxmarLinearHistories` 3/3, `QuadrotorWorkflow` 29/29, `ExampleQuadrotorIdentification.TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule` | #23: **0 checks**; the linear half has no pull request | pending | no | **PASS**; the linear half was **missing** until the two commits above |
+| 6 | A public two-way attitude-error chart map | public C++ API, not a capability; `sim.sampled` uses it | `ChartMapping` 4/4 | #24 (ADR): 11 of 11; #25: **0 checks** | pending | no | **PASS** |
+| 7 | Execute a controller at a declared rate against the plant | `sim.sampled` | `QuadrotorWorkflow` 29/29, `ExampleQuadrotorSampledControl` 4/4 | #26: **0 checks** | pending | no | **PASS** |
+| 8 | A measured record, and a CSV reader that refuses to guess | `data.import.csv` | `CsvImport` 6/6 | #27: 11 of 11 | pending | no | **PASS** |
+| 9 | A pack whose voltage falls under the load it is carrying | `model.quadrotor` with a battery block | `BatterySag` 6/6, `QuadrotorBattery` 2/2 | #28: 11 of 11 | pending | no | **PASS**; the parameters are unmeasured |
+| 10 | Read a PX4 ULog, and refuse what it does not contain | `data.import.ulog`; no CI-gated study drives it | `UlogImport` 8/8, and the pyulog comparison run locally | #21 (ADR): 11 of 11; #29: **0 checks** | pending | no | **PASS** on the generated fixture |
+| 11 | Bench maps by least squares, with honest uncertainty | `identify.static_fit` | `StaticFit` 7/7, `IdentifyWorkflow` 17/17 | #30: **0 checks** | pending | no | **PASS** on a synthetic record |
+| 12 | Grey-box identification against the nonlinear plant | `identify.greybox`, `model.quadrotor.export` | `Greybox` 5/5, `IdentifyWorkflow` 17/17, `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | #31: **0 checks** | pending | no | **PASS** on a synthetic record |
+| 13 | Held-out validation, and the identity that makes it one | `identify.validate`, `data.window` | `RecordSeparation` 8/8, `Validate` 5/5, `RecordWindow` 5/5 | #32: **0 checks** | pending | no | **PASS**; separation, not independence |
+| F14.1 | Register the three discrete capabilities with strict schemas | `model.discretize`, `synth.dare`, `synth.sampled_lqr` | `DiscreteWorkflow` 7/7, `DiscreteControl` 11/11, `DiscreteSystem` 9/9 | none: F14 has no pull request of its own | pending | no | **PASS** |
+| F14.2 | `sim.sampled` consumes the sampled law, at its design period only | `sim.sampled` | `QuadrotorWorkflow` 29/29 | none | pending | no | **PASS** |
+| F14.3 | Retain the cross term, and document the conventions | `synth.sampled_lqr` | `DiscreteControl` 11/11, `DiscreteWorkflow` 7/7 | none | pending | no | **PASS** |
+| F14.4 | The Souxmar example compares the discrete prediction with the nonlinear response under a stated budget | `examples/souxmar-sampled-lqr/study.yaml` | `ExampleSouxmarSampledLqr` 8/8; the lock among them asserts the run is **outside** the budget | none | pending | no | **FAIL**: outside its budget, traced to the kinematics the linearisation drops, no defect found |
+| F14.4, proposed | The same comparison at half the excitation, everything else unchanged | `examples/souxmar-sampled-lqr/proposed-acceptance.yaml` | `ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget` | none | pending | no | **PROPOSED**: it passes but is not adopted, and F14.4 stays a FAIL until it is |
+| F14.5 | Retain the references and refusals, and run the hosted checks at the final head | — | `DiscretePrediction` 4/4, `Determinism` 13/13 | none | pending | no | **PASS** locally; the hosted half is the combined-stack column |
+| — | Sampled-loop margins | none | — | — | — | — | **DEFERRED**: no capability computes one, and F14 and F17 stay open |
+| — | Simultaneous variation across channels (MIMO structured robustness) | none | — | — | — | — | **DEFERRED** |
+| — | Physical validation and hardware calibration | none | — | — | — | — | **DEFERRED**: no aircraft, bench or measured record exists |
+| — | A real PX4 flight log | `data.import.ulog` | — | — | — | — | **DEFERRED**: neither implementation has read one |
+
+The workflows, each run through public capabilities only:
+
+| Workflow | Study | Local at `803326a` | CI, combined stack | Verdict |
+|---|---|---|---|---|
+| Handoff workflow A: plant, trim, linearisation, sampled synthesis, nonlinear sampled simulation | `examples/souxmar-sampled-lqr/study.yaml` | runs end to end; the comparison is outside its budget | pending | **FAIL**, as F14.4 |
+| This record's workflow A: a continuous design flown at a rate | `examples/quadrotor-sampled-control/study.yaml` | `ExampleQuadrotorSampledControl` 4/4 | pending | **PASS** |
+| B: import, identification, export, trim and analysis, held-out validation | `examples/quadrotor-identification/study.yaml` | `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | pending | **PASS** on a synthetic record |
+| C: the unchanged Souxmar bridge, and the independent comparison | the fixture's own study file | `QuadrotorCrossImplementation` 1/1, `QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport` | **SKIP**: no workflow configures the fixture | **PASS** locally; **SKIP** in CI |
+| Declared input histories through `sim.linear` | `examples/souxmar-linear-histories/study.yaml` | `ExampleSouxmarLinearHistories` 3/3 | pending | **PASS** |
+| Independent ULog reading | `scripts/compare-ulog-against-pyulog.py` | re-run at this head; see the retained evidence | not run in CI | **PASS** locally, on the generated fixture |
+
+Two names for workflow A are in use, and they are different studies:
+
+- The handoff's workflow A is the F14 example, `examples/souxmar-sampled-lqr`. It is the only
+  workflow with a linear-versus-nonlinear budget, and it is the one that fails.
+- This record's own section A below is the continuous-design emulation workflow,
+  `examples/quadrotor-sampled-control`. It has no such budget.
+
+---
+
 ## Reproducing the acceptance runs
 
 Everything below runs from a clean checkout of the integration head. `VCPKG_ROOT` must point at
@@ -107,6 +194,12 @@ galata run <fixture dir>/study.yaml --output-dir <out>/C --overwrite
 
 # 5b. F14 — a discrete design on the native Souxmar plant, flown against the nonlinear model.
 galata run examples/souxmar-sampled-lqr/study.yaml --output-dir <out>/D --overwrite
+
+# 5c. The PROPOSED F14 acceptance case, not adopted: the same study at half the excitation.
+galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <out>/D-proposed --overwrite
+
+# 5d. Declared input histories through sim.linear, on the Souxmar hover linearisation.
+galata run examples/souxmar-linear-histories/study.yaml --output-dir <out>/E --overwrite
 
 # 6. The gates, and the six generated artefacts CI diffs.
 scripts/check-si-boundary.sh
@@ -156,6 +249,22 @@ They are build artefacts and are deliberately not committed: ADR-0007's reasonin
 fixture applies to what a run of it produces, and a decimated copy in `tests/` would be the
 same dataset in a directory whose loader happens not to ask for a citation header.
 
+**What is retained, and what is not.** On the platform of record, each evidence directory is
+named for its revision and sits under one `galata-evidence` directory. Each came from a clean
+clone detached at that revision, never from a working tree.
+
+- `8042fb2` and `f5b9b2f` each have a directory holding the workflow strands, the full `ctest`
+  log and JUnit, and an `evidence-digests.txt`.
+- `0efdb44` has a partial directory: a build, a test log and the pyulog environment, with no
+  digest file.
+- The Workflow A trace and envelope sweep were made without a digest file of their own. They
+  are copied into the closure's directory, `closure-2026-09-11`, and digested there.
+- The closure directory's own digest file is identified in the final requirements table once
+  its run is recorded.
+- **Acceptance runs before `0efdb44` wrote to temporary directories that were not kept.** Their
+  results stand only through the hosted runs this record cites, and their local outputs cannot
+  be re-read.
+
 The digest is what makes each file citable. An uncommitted artefact at a stable path is not an
 identification, and two runs citing that path can have read different files.
 
@@ -166,13 +275,13 @@ identification, and two runs citing that path can have read different files.
 Each row's local evidence names the gtest suites that gate it, with the tier in brackets. Where
 an item has two pull requests, the second is the ADR the first depends on.
 
-| # | Item | Capabilities | PRs | Implemented | Locally verified | CI-verified | Merged |
+| # | Item | Capabilities | PRs | Implemented | Locally verified | CI, own PR | Merged |
 |---|---|---|---|---|---|---|---|
 | 1 | Trim a quadrotor whose rotors have different thrust coefficients | `trim.hover` | #18 | yes | yes | yes | no |
 | 2 | Reconcile the reported mode count with the state count | `analyze.modes` | #19 | yes | yes | yes | no |
 | 3 | Make the Hurwitz refusal name the cause a caller can act on | `analyze.margins`, `analyze.diskmargin` | #20 | yes | yes | yes | no |
 | 4 | Integrate the nonlinear plant through a public capability | `sim.plant` | #22 | yes | yes | yes | no |
-| 5 | Declared input histories, and wind that changes over time | `sim.plant`, `sim.linear` | #23 | yes | yes | **no** | no |
+| 5 | Declared input histories, and wind that changes over time | `sim.plant`, `sim.linear` | #23; the linear half has none | `sim.plant` yes; `sim.linear` **missing** until [c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10) and [b8f3c26](https://github.com/celikgo/galata/commit/b8f3c263f9a64164191d3fbc4ed4316e5b5db328), now yes | yes | **no** | no |
 | 6 | A public two-way attitude-error chart map | ADR-0017, chart map | #25, #24 | yes | yes | **ADR only** | no |
 | 7 | Execute a controller at a declared rate against the plant | `sim.sampled` | #26 | yes | yes | **no** | no |
 | 8 | A measured record, and a CSV reader that refuses to guess | `data.import.csv` | #27 | yes | yes | yes | no |
@@ -182,8 +291,9 @@ an item has two pull requests, the second is the ADR the first depends on.
 | 12 | Grey-box identification against the nonlinear plant | `identify.greybox`, `model.quadrotor.export`, ADR-0018 | #31 + integration | yes | yes | **no** | no |
 | 13 | Held-out validation, and the identity that makes it one | `identify.validate`, `data.window` | #32 + integration | yes | yes | **no** | no |
 
-The **CI-verified** column above is a per-pull-request reading, and for seven items it says
-`no` or `ADR only` for one structural reason: their pull requests are stacked on other feature
+The **CI, own PR** column above is a per-pull-request reading. It is not the combined-stack
+reading, which the final requirements table gives in a column of its own. For seven items it
+says `no` or `ADR only` for one structural reason: their pull requests are stacked on other feature
 branches, so `.github/workflows/ci.yml`'s base-branch filter meant the workflow never fired and
 GitHub reported zero checks rather than a failure. ADR-0019 removed that filter.
 
@@ -248,7 +358,10 @@ the head that superseded it.
 
 The combined stack is **CI-verified** at head `ff8c0e37400e344f2703afb20efa4b49ae63ab76`:
 run [34521117651](https://github.com/celikgo/galata/actions/runs/34521117651), **11 of 11 jobs
-green**, `637/637` tests under the sanitizer with `Total Test time (real) = 6400.24 sec`. That
+green**. Under the sanitizer, 635 tests passed and 2 were skipped, of 637, with
+`Total Test time (real) = 6400.24 sec`. The two skipped are the Souxmar cross-checks, which need
+a fixture no workflow configures; an earlier version of this paragraph wrote `637/637`, which
+read as 637 passes. That
 is the whole required graph — Charter gates, Format, Engine on linux-gcc / linux-clang / macos,
 both Determinism fingerprints, Determinism tier 2, the Clang static analyzer, ASan/UBSan, and
 the `CI` aggregate. That result covers the tree at `ff8c0e3` and nothing after it. The F14 work
@@ -293,9 +406,9 @@ loosened, and no test changed what it asserts.
 |---|---|---|
 | 1 | `QuadrotorHoverTrim` (validation), `HoverTrim` (unit) | The four thrust coefficients in `examples/quadrotor-heterogeneous-rotors/quad-heterogeneous.yaml` are synthetic and its own header says so. No motor was run up. |
 | 2 | `QuadrotorWorkflow` (integration) | Legibility only; no numerical behaviour changed. |
-| 3 | `Margins` (unit) | The refusal is now legible. Frequency-domain margins on a hover-linearised multirotor remain unavailable — see the outstanding-requirements section. |
+| 3 | `Margins` and `StabilityMarginDiagnostics` (unit) | The refusal is now legible. Loop-at-a-time margins on the hover-linearised multirotor are available through `model.control_system`'s `use: single_loop`; see the outstanding-requirements section. Simultaneous variation across channels is not. An earlier version of this row said the margins remained unavailable. |
 | 4 | `QuadrotorWorkflow` (integration), `Determinism` (determinism) | Closes the audit's most basic gap: the plant was previously reachable only from C++ inside this repository's own tests. |
-| 5 | `InputSchedule` (unit), `QuadrotorWorkflow` (integration) | A discontinuity strictly inside an integration step is refused rather than rounded, which moves the event and says nothing about having done so. |
+| 5 | `InputSchedule` and `LinearSimulation` (unit); `QuadrotorWorkflow`, `LinearHistoryWorkflow`, `ExampleSouxmarLinearHistories` and `ExampleQuadrotorIdentification.TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule` (integration) | A zero-order event strictly inside an integration step is refused rather than rounded, which would move the event and say nothing about having done so. Under a linear hold, a change of slope inside a step is not refused; it costs RK4 its order across that step. The linear path was **missing** until this closure. Until the record test named here, no study-level test drove `sim.plant`'s command history. |
 | 6 | `ChartMapping` (unit) | A green check on ADR-0017 is not a green check on the implementation; they were separate pull requests and only one ran. |
 | 7 | `QuadrotorWorkflow` (integration), `ExampleQuadrotorSampledControl` (integration) | Executes a continuously-designed law at a discrete rate. That is not designing in discrete time, and it establishes nothing about the sampled loop's own robustness. Designing in discrete time is delivered separately — see the F14 section — and it establishes no sampled-loop margin either. |
 | 8 | `CsvImport` (unit) | No measured file exists to import. Every record exercised is galata's own output. |
@@ -344,18 +457,14 @@ cancels a superseded run, so a result is recorded only for a head whose run comp
 | [ff8c0e3](https://github.com/celikgo/galata/commit/ff8c0e37400e344f2703afb20efa4b49ae63ab76) | The thirteen items, and the sanitizer deadline scaled for the instrumented build | [34521117651](https://github.com/celikgo/galata/actions/runs/34521117651) | 11 of 11 | **no** — it predates both F14 commits |
 | [f7fb895](https://github.com/celikgo/galata/commit/f7fb89559a8019e574741f939249af43e22fb9ec) | F14's library half | none of its own | — | only through the row below |
 | [f33c1cb](https://github.com/celikgo/galata/commit/f33c1cb069959f8659e5fe49a07224626bf96dad) | F14's public interface, the example, and this section | [34537710729](https://github.com/celikgo/galata/actions/runs/34537710729) | **not a result.** Format failed on `f7fb895`'s files, which reached CI for the first time here, so the `CI` aggregate failed. The eight other jobs that finished passed. The sanitizer job was cancelled by the `concurrency` group when the next head was pushed. | — |
-| [e48a3e3](https://github.com/celikgo/galata/commit/e48a3e3a72fa34c190f9468d9a52b0ece7c562ed) | The same tree with those seven files formatted at the pinned version, whitespace only | [34538572894](https://github.com/celikgo/galata/actions/runs/34538572894) | **11 of 11.** `690/690` tests under the sanitizer and on each Linux engine; `722/722` on macOS, whose suite includes tests that exist only on macOS | **yes** — the first head carrying both the numerical implementation and the pipeline wiring to pass the whole graph |
+| [e48a3e3](https://github.com/celikgo/galata/commit/e48a3e3a72fa34c190f9468d9a52b0ece7c562ed) | The same tree with those seven files formatted at the pinned version, whitespace only | [34538572894](https://github.com/celikgo/galata/actions/runs/34538572894) | **11 of 11.** Under the sanitizer and on each Linux engine, 688 passed and 2 were skipped, of 690. On macOS, 720 passed and 2 were skipped, of 722; its suite includes tests that exist only on macOS. An earlier version of this row wrote `690/690` and `722/722` | **yes** — the first head carrying both the numerical implementation and the pipeline wiring to pass the whole graph |
+| [0efdb44](https://github.com/celikgo/galata/commit/0efdb44d4d187fc4be08c19262445b3bd564ad8c) | Documentation only | [34543869523](https://github.com/celikgo/galata/actions/runs/34543869523) | **not a result.** Cancelled by the `concurrency` group when the next head was pushed | — |
+| [8042fb2](https://github.com/celikgo/galata/commit/8042fb218e20c1b6f293eccbb58a500b8e8f31c2) | A mislabelled verdict fixed: a declared budget on a run that starts at the reference has an undefined comparison, and it had been printed as OUTSIDE the budget. It also adds a test for the chart refusal requirement 2 names, and corrects wording in this record | [34547686368](https://github.com/celikgo/galata/actions/runs/34547686368) | **not a result.** In both attempts every job passed except the sanitizer, which was cancelled at the job's 120-minute limit, so the `CI` aggregate failed | — |
+| [f5b9b2f](https://github.com/celikgo/galata/commit/f5b9b2f7bf75a2f1610955ac4ca18a35cc357983) | The sanitizer job's limit sized from the runtime it was measured to need, with the derivation beside it in `.github/workflows/ci.yml` | [34563887885](https://github.com/celikgo/galata/actions/runs/34563887885) | **11 of 11.** Under the sanitizer, 690 passed and 2 were skipped, of 692, with `Total Test time (real) = 6206.06 sec`. On each Linux engine, 690 passed and 2 were skipped, of 692. On macOS, 722 passed and 2 were skipped, of 724 | **yes** |
+| [c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10) to [803326a](https://github.com/celikgo/galata/commit/803326a1fbadadd27bce21e8e7b71d2d8d7d621b), and the documentation commit after them | The linear path's declared input histories; the Souxmar histories example; the F14 comparison's trace, its envelope and the proposed case; this record's corrections | the integration pull request's run at the documentation commit | recorded in the final requirements table by the commit after it | **yes**, once that result is in |
 
-Two heads follow it:
-
-- `0efdb44` is documentation only.
-- The head after it fixes a mislabelled verdict found in review. A declared budget on a run
-  that starts at the reference has an undefined comparison, and it was printed as OUTSIDE the
-  budget. The same head adds a test for the chart refusal that requirement 2 names, and
-  corrects wording in this record.
-
-A commit cannot record its own run, so the hosted result at that head is given in the handoff
-that accompanies it, and on [#33](https://github.com/celikgo/galata/pull/33).
+Each result above covers its own tree and nothing after it. Every skipped test in every row is
+one of the same two Souxmar cross-checks.
 
 ### Requirements
 
@@ -364,7 +473,7 @@ that accompanies it, and on [#33](https://github.com/celikgo/galata/pull/33).
 | **1. Register `model.discretize`, `synth.dare` and `synth.sampled_lqr` with strict schemas, explicit time-domain types and complete evidence propagation** | Three capabilities, each with a closed input vocabulary. Continuous and discrete models are different artefact kinds — `linear_system` and `discrete_linear_system` — and `dare_solution` and `sampled_control_law` sit beside them, so every existing continuous capability refuses a discrete artefact by kind. `model.discretize` is the only adapter, and it requires `sample_time_s` and `hold`. `synth.sampled_lqr` requires an `evidence_path`. The executor carries an upstream linearisation's record through discretisation and design as the same object. | `DiscreteWorkflow.EachTimeDomainRefusesTheOtherByName`, `DiscreteWorkflow.TheSampleTimeAndTheHoldAreDeclaredAndNeverDefaulted`, `DiscreteWorkflow.UnknownKeysAreRefusedBeforeAnythingRuns`, `DiscreteWorkflow.LinearisationEvidenceSurvivesDiscretisationAndDesign` | implemented, unvalidated; locally verified; CI-verified — see the results by revision |
 | **2. The sampled controller can be consumed by `sim.sampled`, with its design period and execution period consistent** | `sim.sampled` accepts a `sampled_control_law` and executes it only at the period it was designed for. **No transformation between rates is supported**, so every mismatch, faster or slower, is refused. The refusal names the remedy: a redesign at the execution period. A discrete design must declare its hold and its delay. For either kind of law, a gain is refused if its inputs are not the rotor commands in the model's order, or if its chart is not the vehicle's. | `QuadrotorWorkflow.ADiscreteLawIsRefusedAtAPeriodItWasNotDesignedFor`, `QuadrotorWorkflow.ADiscreteLawMustDeclareItsHoldAndItsDelay`, `QuadrotorWorkflow.TheDiscreteLawIsExecutedAsDesigned`, `QuadrotorWorkflow.ALawWhoseInputsAreNotTheRotorCommandsInOrderIsRefused`, `QuadrotorWorkflow.ALawDesignedOnAnotherChartIsRefused`, `QuadrotorWorkflow.ABudgetOnAnUndefinedComparisonGetsNoVerdict` | implemented, unvalidated; locally verified; CI-verified — see the results by revision |
 | **3. The discrete cost's state-input cross term is retained through synthesis and the exported evidence, and the conventions are documented** | The hold's cross term goes to the solver, the artefact, the report section and the required evidence file. The following are stated in the report section, the evidence file, `include/galata/synth/discrete_control.hpp` and RFC-0002's WP5 addendum: the cost convention; the gain convention `u[k] = -K x[k]` with `K = (R + B'XB)^-1 (B'XA + N')`; the residual of the equation as posed; and the unit-circle and symplectic-separation checks. | `DiscreteControl.TheDiscretisedCostMatchesTheHandIntegratedInterval`; `DiscreteWorkflow.ASampledDesignThroughThePipelineAgreesWithValueIteration`, which reads the cross term back out of the evidence file bit for bit | implemented; locally verified; CI-verified — see the results by revision |
-| **4. A runnable Souxmar example — native plant, trim, linearisation, discretisation and sampled synthesis, nonlinear sampled simulation — with rotor lag, a declared hold and delay, and actuator limits, comparing the discrete prediction with the nonlinear response under a stated budget** | `examples/souxmar-sampled-lqr`, reading `models/souxmar-quad/souxmar-quad.yaml` in place. The budget was fixed in the study file before its first run, and **the run lands just outside it**. The budget was not moved. The discrepancy was localised instead: it is second order in the perturbation; it is not the quadratic drag; and it is carried by the collective channel, where the thrust's ω² curvature turns differential rotor commands into collective thrust — a mechanism the budget's derivation did not count. Separately, the order test that gives the budget its meaning **cannot resolve a one-tick delay error** at this perturbation. Its own test records that, and the delay line is certified by exact re-derivation instead. | `ExampleSouxmarSampledLqr.RunsEndToEndOnTheNativePlant`, `ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation`, `ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest`, `ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution`, `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` | runs end to end, CI-verified — see the results by revision; **outside its declared budget**, held by a two-sided labelled lock |
+| **4. A runnable Souxmar example — native plant, trim, linearisation, discretisation and sampled synthesis, nonlinear sampled simulation — with rotor lag, a declared hold and delay, and actuator limits, comparing the discrete prediction with the nonlinear response under a stated budget** | `examples/souxmar-sampled-lqr`, reading `models/souxmar-quad/souxmar-quad.yaml` in place. The budget was fixed in the study file before its first run, and **the run lands just outside it**. The budget was not moved, and the agreed perturbation was not changed. The discrepancy was traced instead. It is second order in the perturbation, and it is not the quadratic drag. It is the rigid-body kinematics the hover linearisation drops: the transport term `−ω × v` in the body vertical velocity while the vehicle pitches with forward speed, partly offset by gravity projected onto the tilted body. Carried through the delayed loop, the named terms close the discrepancy. No defect was found in the plant, the discretisation, the gain, the delay line or the prediction. An earlier version of this row attributed the excess to the thrust's ω² curvature in the collective channel; the trace shows that term carries almost none of it. The budget holds at nine tenths of the declared perturbation. A case at half the excitation, with the budget unchanged, passes, and so does its horizontal offset alone. `examples/souxmar-sampled-lqr/proposed-acceptance.yaml` **proposes** that case, and nothing adopts it. Separately, the order test that gives the budget its meaning **cannot resolve a one-tick delay error** at this perturbation. Its own test records that, and the delay line is certified by exact re-derivation instead. | `ExampleSouxmarSampledLqr.RunsEndToEndOnTheNativePlant`, `ExampleSouxmarSampledLqr.TheDisagreementIsSecondOrderInThePerturbation`, `ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest`, `ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution`, `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock`, `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops`, `ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation`, `ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget` | runs end to end; **FAIL**: outside its declared budget, held by a two-sided labelled lock. The half-excitation case is **PROPOSED**, not adopted |
 | **5. The independent reference cases and refusal tests are retained, and the hosted checks run against the final head** | Every library reference is unchanged: the scalar closed form, value iteration with and without a cross term, the hand-integrated interval cost, held-input trajectories, and the stabilisable, unstabilisable, undetectable and invalid-cost cases. The same references are joined at the pipeline level, and a discrete-prediction unit test checks the delay against the augmented-state matrix. Determinism is held by a bit-identity test and a fingerprint-battery section compared across platforms. The case registry records `sampled.discrete_references` and `sampled.small_perturbation`; both are self-consistent and neither is validated. | `DiscreteControl`, `DiscreteSystem` and `DiscretePrediction` (unit); `DiscreteWorkflow` (integration); `Determinism.ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns` (determinism) | locally verified; CI-verified — see the results by revision |
 | **Sampled-loop margins** | **Not delivered.** No capability computes a gain, phase, delay or disk margin of the sampled loop. A DARE solution whose closed loop lies strictly inside the unit circle says only that the *nominal* sampled loop converges. A stable sampled simulation is one trajectory from one initial state. **Neither establishes a margin**, and nothing in this repository claims one from either. The continuous margin path does not stand in for it, because `model.control_system` refuses a `sampled_control_law` by kind. | `QuadrotorWorkflow.TheContinuousMarginPathRefusesADiscreteDesign` | **not delivered** |
 
@@ -625,7 +734,10 @@ hold, a declared one-period delay and per-rotor limits:
 
 - The run agrees with the design's own prediction to second order in the perturbation.
 - At the declared perturbation, that agreement falls just outside the budget the study set in
-  advance, for a reason that has been localised.
+  advance. That is a FAIL of the agreed case, and it stands. The excess is traced to the
+  rigid-body kinematics the hover linearisation drops. The budget holds inside an envelope
+  that the declared perturbation lies just beyond, and a case at half the excitation is
+  proposed, not adopted.
 - The period, the hold, the delay and the basis the run applied are the ones the design and
   the study declared.
 
@@ -678,6 +790,9 @@ These are named so that their absence is not read as an omission from this progr
 - **No sampled-loop margin.** No capability here computes a gain, phase, delay or disk margin
   of the sampled loop. A stabilising discrete Riccati solution is not one, and neither is a
   converging sampled simulation.
+- **No pass of the agreed F14 comparison.** It is outside its declared budget. The
+  half-excitation case passes, but it is a proposal. It is not the acceptance case until someone
+  who agreed that case adopts it, and nothing here counts it as one.
 - **No merge.** The constituent pull requests and the integration pull request are open. ADR-0019
   records that a stack merges by merging the integration head once it is green, not by merging
   each constituent in turn, so that the same commits are not applied twice and `main` never

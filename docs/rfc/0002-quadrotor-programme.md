@@ -7,10 +7,11 @@
   implemented-unvalidated: none of them is anchored to a published reference, for the reason
   the acceptance section gives, and a completed run of any of them is not a validation.
   What is NOT delivered is named in each record rather than left to be inferred — chiefly
-  discrete-time synthesis, the sampled loop's own robustness, and any evidence at all from real
-  hardware, which does not exist. This line has been wrong three times: it said "nothing below
-  is implemented" after WP1 landed, "WP3, WP4 and WP5 are not started" after all three had, and
-  it named the Gramians as outstanding after `analyze.gramians` registered. The README's Status
+  the sampled loop's own robustness, simultaneous robustness across channels, and any evidence
+  at all from real hardware, which does not exist. This line has been wrong four times: it said
+  "nothing below is implemented" after WP1 landed, "WP3, WP4 and WP5 are not started" after all
+  three had, it named the Gramians as outstanding after `analyze.gramians` registered, and it
+  named discrete-time synthesis as undelivered after the WP5 addendum delivered it. The README's Status
   table, generated from the capability registry, remains the authority on what exists, and it
   is the authority precisely because a hand-maintained status line drifts; nothing here is a
   release commitment. The per-item evidence, and the four statuses kept apart, are in
@@ -1027,12 +1028,25 @@ tests and a user could not integrate one at all. `sim.nonlinear` is the fixed-wi
 takes a `trim.level` point and actuators named elevator, aileron, rudder and thrust — and is
 untouched.
 
-**Declared input histories, for both the linear and the nonlinear path.** A command or wind
-history is a declared sample list with a stated hold and a stated extrapolation rule, and the
-recorded trajectory carries the command and wind AT EACH SAMPLE rather than the constants the
-run was configured with, because a schedule makes those constants a half-truth. A discontinuity
-strictly inside an integration step is refused rather than rounded to the nearest step, which
-would move the event and say nothing about having done so.
+**Declared input histories.** A command or wind history is a declared sample list with a stated
+hold and a stated extrapolation rule, and the recorded trajectory carries the command and wind
+AT EACH SAMPLE rather than the constants the run was configured with, because a schedule makes
+those constants a half-truth. A discontinuity strictly inside an integration step is refused
+rather than rounded to the nearest step, which would move the event and say nothing about
+having done so.
+
+*Correction, 2026-09-11.* This paragraph was headed "for both the linear and the nonlinear
+path". For the linear path that was false when it was written. WP5 gave `sim.plant` its command
+and wind histories, and `sim.sampled` its wind history. `sim.linear` still took one constant
+input: the gap WP5's own package description names. The linear path was delivered afterwards.
+[c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10)
+added the integrator, and
+[b8f3c26](https://github.com/celikgo/galata/commit/b8f3c263f9a64164191d3fbc4ed4316e5b5db328)
+added the `input_schedule` key, in the same schema `sim.plant` reads. The semantics are stated
+in `include/galata/sim/linear.hpp`: timestamps, zero-order events, linear interpolation,
+extrapolation, and what is recorded. `examples/souxmar-linear-histories` runs it. Until those
+commits, the acceptance record's item 5 should have recorded the linear path as missing. It now
+says so.
 
 **`sim.sampled` executes a state-feedback law at a declared rate**, with zero-order hold, a
 whole number of periods of delay, and per-rotor saturation, feeding back on the attitude-error
@@ -1161,12 +1175,29 @@ norm, against an optional declared small-perturbation budget.
 Souxmar plant: trim, linearisation, discretisation and sampled synthesis, then nonlinear sampled
 simulation, with rotor lag, a declared one-period delay and per-rotor speed limits. Its
 small-perturbation budget was fixed in the study file before the study first ran, and the run
-lands **just outside** it. That was localised rather than absorbed:
+lands **just outside** it. That is the acceptance case's result, and it is a FAIL. It was
+localised rather than absorbed:
 
 - The discrepancy is second order in the perturbation.
 - It is not the quadratic drag.
-- It is carried by the collective channel, where the thrust's ω² curvature turns differential
-  rotor commands into collective thrust. The budget's derivation did not count that mechanism.
+- It is the rigid-body kinematics the hover linearisation drops. Above all it is the transport
+  term `−ω × v` in the body vertical velocity while the vehicle pitches with forward speed,
+  partly offset by gravity projected onto the tilted body. The budget's derivation never
+  listed these terms.
+
+*Correction, 2026-09-11.* The third point originally said the discrepancy was carried by the
+collective channel, where the thrust's ω² curvature turns differential rotor commands into
+collective thrust. A term-by-term trace with a closure check,
+[803326a](https://github.com/celikgo/galata/commit/803326a1fbadadd27bce21e8e7b71d2d8d7d621b),
+shows that the curvature carries almost none of it, and with the opposite sign. The rotor
+speeds' common miss is the loop's response to the vertical miss. No defect was found in the
+plant, the discretisation, the gain, the delay line or the prediction.
+
+The budget holds at nine tenths of the declared perturbation and fails at the perturbation
+itself. A case at half the excitation, with the budget and everything else unchanged, passes,
+and so does its horizontal offset alone. It is **proposed, not adopted**, in
+`examples/souxmar-sampled-lqr/proposed-acceptance.yaml`. Until it is adopted, the agreed case
+stands as a FAIL.
 
 A two-sided labelled lock holds the finding. The negative control first chosen — a prediction
 one tick out in delay — turned out to be below the comparison's resolution at this
@@ -1186,7 +1217,11 @@ example's README carries all of it.
 - The discrete-law tests in `QuadrotorWorkflow` hold the period refusal and the declared
   timing, re-derive the executed commands from the discrete gain, and refuse a permuted
   basis.
-- `ExampleSouxmarSampledLqr` runs the example.
+- `ExampleSouxmarSampledLqr` runs the example and traces its discrepancy term by term. It
+  brackets the envelope, and it checks that the proposed case is the agreed study with only
+  the perturbation halved.
+- `ExampleSouxmarLinearHistories`, `LinearHistoryWorkflow` and `LinearSimulation` hold the
+  linear path's declared histories. The correction above records them.
 - `Determinism.ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns` and the fingerprint
   battery's sampled-design section cover determinism.
 - The case registry records `sampled.discrete_references` and `sampled.small_perturbation`,
