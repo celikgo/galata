@@ -1073,9 +1073,15 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
             << prediction.cost_to_go_eigenvalue_ratio << " |\n"
             << "| Declared small-perturbation budget | ";
         if (prediction.budget_declared) {
+          // An undefined comparison is neither inside nor outside a budget. A
+          // run that starts at the reference predicts nothing but zero, and
+          // printing OUTSIDE beside "undefined" would contradict the row above.
           out << prediction.budget << " |\n| Verdict | "
-              << (prediction.within_budget ? "within the declared budget"
-                                           : "**OUTSIDE the declared budget**");
+              << (!prediction.relative_discrepancy_defined
+                      ? "none — the comparison is undefined, so the budget can be neither met nor "
+                        "missed"
+                  : prediction.within_budget ? "within the declared budget"
+                                             : "**OUTSIDE the declared budget**");
         } else {
           out << "none declared; reported without a verdict";
         }

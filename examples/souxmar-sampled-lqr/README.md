@@ -93,7 +93,9 @@ chart coordinates side by side at every tick.
 The budget was set in `study.yaml` before the study had ever run: five percent
 of the prediction's peak, for the declared perturbation of decimetres of position
 and a hundredth of a radian of attitude. The derivation behind it is written
-beside it and has not been edited since. It compared each of the plant's
+beside it and has not been edited since. That order of events is the author's
+account, and the repository cannot confirm it: the study, this finding and its
+tests all arrived in one commit. It compared each of the plant's
 nonlinearities with its own linear part: the ω² thrust law, the quadratic drag,
 and the attitude kinematics.
 
@@ -107,7 +109,7 @@ perturbation was not shrunk to fit. The discrepancy was localised instead:
   happening for a prediction made at the wrong period.
 - **It is not the drag.** The quadratic drag is the term a hover linearisation
   cannot see, and the obvious suspect. Setting its coefficients to zero leaves
-  the discrepancy unchanged.
+  the discrepancy essentially where it was, and still outside the budget.
 - **It lives in the collective channel.** At the worst tick, nearly all of the
   miss is common to the four rotor speeds, and the vertical velocity misses at
   the same time. That is where the thrust's ω² curvature acts. Squaring a

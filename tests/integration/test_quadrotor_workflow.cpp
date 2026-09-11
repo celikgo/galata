@@ -885,6 +885,80 @@ TEST_F(QuadrotorWorkflow, AnAgreementBudgetWithNothingToHoldIsRefused) {
       << "a declared wind history";
 }
 
+// AN UNDEFINED COMPARISON HAS NO VERDICT. A run that starts exactly at the
+// reference makes the design predict nothing but zero, so its discrepancy
+// relative to the prediction's peak does not exist. A declared budget can then
+// be neither met nor missed, and the report must say that rather than print
+// OUTSIDE beside "undefined".
+TEST_F(QuadrotorWorkflow, ABudgetOnAnUndefinedComparisonGetsNoVerdict) {
+  std::string study = discrete_chain(
+      "      controller_period_s: 0.004\n"
+      "      hold: zero_order\n"
+      "      delay_periods: 0\n"
+      "      linear_agreement_budget: 0.05\n");
+  study +=
+      "  - id: report\n    capability: report.markdown\n    input: "
+      "{sections: [{from: closed}], path: closed.md}\n";
+  const RunResult result = run(study, {.overwrite = true, .write_manifest = false});
+  const auto& prediction =
+      result.find("closed")->payload_as<SampledRun>("sampled_trajectory").control.prediction;
+  ASSERT_TRUE(prediction.available) << prediction.unavailable_reason;
+  EXPECT_TRUE(prediction.budget_declared);
+  EXPECT_FALSE(prediction.relative_discrepancy_defined)
+      << "a run started at the reference has an identically zero prediction";
+
+  std::ifstream file(output / "closed.md");
+  const std::string report((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+  EXPECT_EQ(report.find("OUTSIDE the declared budget"), std::string::npos)
+      << "an undefined comparison was reported as a budget miss";
+  EXPECT_NE(report.find("can be neither met nor missed"), std::string::npos);
+}
+
+// A GAIN DESIGNED ON ANOTHER CHART IS REFUSED, even when its shape and its
+// inputs match. The linearisation is exported, one appended coordinate is
+// renamed in the file, and the renamed model is read back, designed on and
+// flown: the gain is the right size for this vehicle and commands the right
+// rotors, and it still describes a state this vehicle does not have.
+TEST_F(QuadrotorWorkflow, ALawDesignedOnAnotherChartIsRefused) {
+  (void)run(chain("{quadrotor: {from: plant}, altitude_m: 120.0}"),
+            {.overwrite = true, .write_manifest = false});
+  const fs::path exported = output / "quad-hover.yaml";
+  std::string text = read_file_bytes(exported.string());
+  const auto at = text.find("\"omega_3\"");
+  ASSERT_NE(at, std::string::npos) << "the export no longer names the rotor state omega_3";
+  text.replace(at, std::string("\"omega_3\"").size(), "\"omega_rear_right\"");
+  put(root / "other-chart.yaml", text);
+
+  const std::string study =
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: hover\n    capability: trim.hover\n"
+      "    input: {quadrotor: {from: plant}, altitude_m: 120.0}\n"
+      "  - id: other\n    capability: model.linear.statespace\n"
+      "    input: {path: other-chart.yaml}\n"
+      "  - id: rotors\n    capability: model.channels\n    input:\n"
+      "      system: {from: other}\n"
+      "      inputs: [omega_command_0, omega_command_1, omega_command_2, omega_command_3]\n"
+      "  - id: lqr\n    capability: synth.sampled_lqr\n"
+      "    input: {system: {from: rotors}, sample_time_s: 0.004, hold: zero_order, "
+      "evidence_path: lqr.yaml, q: "
+      + identity_weight(16, 1.0) + ", r: " + identity_weight(4, 0.02)
+      + "}\n"
+        "  - id: closed\n    capability: sim.sampled\n    input:\n"
+        "      trim: {from: hover}\n      law: {from: lqr}\n"
+        "      controller_period_s: 0.004\n      hold: zero_order\n      delay_periods: 0\n"
+        "      step_s: 0.002\n      steps: 40\n";
+  try {
+    (void)run(study, {.overwrite = true, .write_manifest = false}, (root / "second").string());
+    ADD_FAILURE() << "a law designed on a chart with a coordinate this vehicle lacks was flown";
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("chart coordinate"), std::string::npos) << message;
+    EXPECT_NE(message.find("omega_rear_right"), std::string::npos) << message;
+  }
+}
+
 // SAMPLED-LOOP MARGINS ARE NOT DELIVERED, and the continuous margin path does
 // not quietly supply them. `model.control_system` builds loops from a
 // CONTINUOUS design's plant; handed a discrete design it is refused by the
