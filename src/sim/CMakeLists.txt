@@ -35,6 +35,7 @@ target_link_libraries(galata_simulation
     galata::trim
     galata::linearize
     galata::numerics
+    galata::sim
   PRIVATE
     galata::warnings
 )
