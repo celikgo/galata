@@ -9,7 +9,13 @@
 
 #include "galata/analyze/gramians.hpp"
 #include "galata/analyze/margins.hpp"
+#include "galata/core/constants.hpp"
+#include "galata/core/quaternion.hpp"
+#include "galata/core/state.hpp"
+#include "galata/model/discrete_system.hpp"
+#include "galata/model/linear_system.hpp"
 #include "galata/model/quadrotor.hpp"
+#include "galata/numerics/matrix_exponential.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/pipeline.hpp"
 #include "galata/pipeline/registry.hpp"
@@ -879,6 +885,411 @@ TEST(ExampleSouxmarSampledLqr, TheOverBudgetDiscrepancyIsHeldByATwoSidedLock) {
   EXPECT_GT(std::fabs(common), 5.0 * differential)
       << "the miss at the worst tick is no longer carried by the collective channel: common "
       << common << " rad/s against differential " << differential << " rad/s";
+}
+
+// ===========================================================================
+// Declared input histories through sim.linear, on the Souxmar linearisation
+// ===========================================================================
+//
+// `examples/souxmar-linear-histories` drives the hover linearisation with a
+// held doublet and an interpolated spool-up. The references are exact solutions
+// of the same linear model by the block matrix exponential (Van Loan, IEEE TAC
+// 23(3), 1978), so they share the model with the run and nothing of its
+// integrator. Each test runs into its own directory, for the reason the
+// sampled-LQR tests above give.
+
+namespace histories {
+
+const std::string kExample = "souxmar-linear-histories";
+constexpr double kStepS = 0.001;
+constexpr int kDoubletSteps = 1000;
+constexpr int kSpoolUpSteps = 1500;
+constexpr Eigen::Index kRotors = 4;
+constexpr Eigen::Index kSpoolUpInputs = 7;
+
+struct Run {
+  galata::pipeline::RunResult result;
+  std::filesystem::path output;
+};
+
+Run run(const std::string& test) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / kExample;
+  const auto output =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / (kExample + "-" + test);
+  std::filesystem::create_directories(output);
+  return {galata::pipeline::run_pipeline(
+              galata::pipeline::load_pipeline((directory / "study.yaml").string()),
+              galata::pipeline::builtin_registry(),
+              directory.string(),
+              output.string(),
+              nullptr,
+              galata::pipeline::RunOptions{.overwrite = true}),
+          output};
+}
+
+// A report.csv file: its header with the quoting removed, and every row.
+struct Table {
+  std::vector<std::string> header;
+  std::vector<std::vector<double>> rows;
+
+  [[nodiscard]] std::vector<std::size_t> columns_starting(const std::string& prefix) const {
+    std::vector<std::size_t> found;
+    for (std::size_t i = 0; i < header.size(); ++i) {
+      if (header[i].rfind(prefix, 0) == 0) {
+        found.push_back(i);
+      }
+    }
+    return found;
+  }
+};
+
+Table read_table(const std::filesystem::path& path) {
+  std::ifstream file(path);
+  Table table;
+  std::string line;
+  std::getline(file, line);
+  std::stringstream header(line);
+  for (std::string cell; std::getline(header, cell, ',');) {
+    cell.erase(std::remove(cell.begin(), cell.end(), '"'), cell.end());
+    table.header.push_back(cell);
+  }
+  while (std::getline(file, line)) {
+    std::vector<double> row;
+    std::stringstream stream(line);
+    for (std::string cell; std::getline(stream, cell, ',');) {
+      row.push_back(std::stod(cell));
+    }
+    table.rows.push_back(std::move(row));
+  }
+  return table;
+}
+
+// The two histories study.yaml declares, restated in whole steps rather than
+// parsed, so the references are built from the declaration and not from the
+// code that reads it. RunsEndToEnd holds the study's recorded inputs to these
+// at every sample.
+//
+// The doublet: the value in force across step k.
+Eigen::VectorXd doublet_input(int step) {
+  Eigen::VectorXd u = Eigen::VectorXd::Zero(kRotors);
+  if (step >= 100 && step < 300) {
+    u.setConstant(3.0);
+  } else if (step >= 300 && step < 500) {
+    u.setConstant(-3.0);
+  }
+  return u;
+}
+
+// The spool-up, four rotor commands and then wind north, east and down: the
+// value at the start of step k, and its rate of change across the step.
+Eigen::VectorXd spoolup_input(int step) {
+  Eigen::VectorXd u = Eigen::VectorXd::Zero(kSpoolUpInputs);
+  u.head(kRotors).setConstant(step < 100 ? 0.0 : step < 300 ? 3.0 * (step - 100) / 200.0 : 3.0);
+  u(4) = step < 200 ? 0.0 : step < 700 ? 2.0 * (step - 200) / 500.0 : 2.0;
+  return u;
+}
+
+Eigen::VectorXd spoolup_rate(int step) {
+  Eigen::VectorXd rate = Eigen::VectorXd::Zero(kSpoolUpInputs);  // per second
+  if (step >= 100 && step < 300) {
+    rate.head(kRotors).setConstant(15.0);
+  }
+  if (step >= 200 && step < 700) {
+    rate(4) = 4.0;
+  }
+  return rate;
+}
+
+// M = [[A, B, 0], [0, 0, I], [0, 0, 0]] for z = [x; u; du/dt]: a system whose
+// input is constant or linear across a step is autonomous in z across it.
+Eigen::MatrixXd augmented(const Eigen::MatrixXd& a, const Eigen::MatrixXd& b) {
+  const Eigen::Index n = a.rows();
+  const Eigen::Index p = b.cols();
+  Eigen::MatrixXd m = Eigen::MatrixXd::Zero(n + 2 * p, n + 2 * p);
+  m.topLeftCorner(n, n) = a;
+  m.block(0, n, n, p) = b;
+  m.block(n, n + p, p, p) = Eigen::MatrixXd::Identity(p, p);
+  return m;
+}
+
+double infinity_norm(const Eigen::MatrixXd& m) {
+  return m.cwiseAbs().rowwise().sum().maxCoeff();
+}
+
+struct Reference {
+  std::vector<Eigen::VectorXd> states;  // at every step boundary, from rest
+  double largest_augmented = 0.0;       // the largest |[x; u; du/dt]|, infinity norm
+};
+
+// x[k+1] = the top rows of exp(hM) [x[k]; u[k]; du/dt[k]]: the exact solution
+// for an input held, or linear, across each step.
+template <typename Input, typename Rate>
+Reference exact_solution(const Eigen::MatrixXd& a,
+                         const Eigen::MatrixXd& b,
+                         int steps,
+                         Input input,
+                         Rate rate) {
+  const Eigen::Index n = a.rows();
+  const Eigen::Index p = b.cols();
+  const Eigen::MatrixXd step =
+      galata::numerics::matrix_exponential(augmented(a, b) * kStepS).value.topRows(n);
+  Reference reference;
+  Eigen::VectorXd z = Eigen::VectorXd::Zero(n + 2 * p);
+  reference.states.push_back(z.head(n));
+  for (int k = 0; k < steps; ++k) {
+    z.segment(n, p) = input(k);
+    z.tail(p) = rate(k);
+    reference.largest_augmented = std::fmax(reference.largest_augmented, z.cwiseAbs().maxCoeff());
+    const Eigen::VectorXd next = step * z;
+    z.head(n) = next;
+    reference.states.push_back(next);
+  }
+  reference.largest_augmented =
+      std::fmax(reference.largest_augmented, z.head(n).cwiseAbs().maxCoeff());
+  return reference;
+}
+
+// THE A PRIORI BUDGET, from the model, the step and the declared history alone,
+// and fixed before either comparison it gates.
+//
+// With u held or linear across each step, RK4 on x' = A x + B u(t) is RK4 on
+// z' = M z, because the stage values of a linear u are its values at the stage
+// times; one step applies exp(hM)'s Taylor polynomial to fourth order. What
+// that drops is (hM)^5 times a series whose norm is at most e^{h|M|} / 120, so
+// a step taken from the exact state errs by at most |(hM)^5| e^{h|M|} / 120 |z|.
+// RK4's own propagator R carries each such error forward, so after N steps the
+// error is at most N max_j |R^j| times the worst of them. Infinity norms of the
+// raw vectors throughout.
+double rk4_budget(const Eigen::MatrixXd& a,
+                  const Eigen::MatrixXd& b,
+                  int steps,
+                  double largest_augmented) {
+  const Eigen::MatrixXd hm = augmented(a, b) * kStepS;
+  Eigen::MatrixXd fifth = hm;
+  for (int i = 1; i < 5; ++i) {
+    fifth = (fifth * hm).eval();
+  }
+  const double local =
+      infinity_norm(fifth) * std::exp(infinity_norm(hm)) / 120.0 * largest_augmented;
+
+  const Eigen::Index n = a.rows();
+  const Eigen::MatrixXd ha = a * kStepS;
+  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
+  const Eigen::MatrixXd r =
+      identity + ha * (identity + ha / 2.0 * (identity + ha / 3.0 * (identity + ha / 4.0)));
+  double growth = 1.0;
+  Eigen::MatrixXd power = identity;
+  for (int j = 1; j < steps; ++j) {
+    power = (power * r).eval();
+    growth = std::fmax(growth, infinity_norm(power));
+  }
+  return steps * growth * local;
+}
+
+// The largest state deviation from a reference, over every recorded sample.
+double worst_deviation(const Table& table, const std::vector<Eigen::VectorXd>& states) {
+  const std::vector<std::size_t> columns = table.columns_starting("state:");
+  double worst = 0.0;
+  for (std::size_t k = 0; k < table.rows.size(); ++k) {
+    for (std::size_t j = 0; j < columns.size(); ++j) {
+      worst = std::fmax(
+          worst, std::fabs(table.rows[k][columns[j]] - states[k](static_cast<Eigen::Index>(j))));
+    }
+  }
+  return worst;
+}
+
+}  // namespace histories
+
+TEST(ExampleSouxmarLinearHistories, RunsEndToEndAndHonoursEveryDeclaredEvent) {
+  const auto run = histories::run("end-to-end");
+  const std::vector<std::string> expected = {"model.quadrotor",
+                                             "trim.hover",
+                                             "linearize.extended",
+                                             "model.channels",
+                                             "model.channels",
+                                             "sim.linear",
+                                             "sim.linear",
+                                             "report.csv",
+                                             "report.csv",
+                                             "report.markdown"};
+  ASSERT_EQ(run.result.stages.size(), expected.size());
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(run.result.stages[i].capability, expected[i]) << "stage " << i;
+  }
+
+  // Three value changes, each an event; a linear hold has none.
+  const std::string& doublet_summary = run.result.find("doublet")->summary;
+  const std::string& spoolup_summary = run.result.find("spoolup")->summary;
+  EXPECT_NE(doublet_summary.find("3 event(s) inside the run"), std::string::npos)
+      << doublet_summary;
+  EXPECT_NE(spoolup_summary.find("0 event(s) inside the run"), std::string::npos)
+      << spoolup_summary;
+
+  // At every sample the recorded input is the declared value in force there:
+  // right-continuous at the doublet's three events, and interpolated between the
+  // spool-up's samples.
+  const histories::Table doublet = histories::read_table(run.output / "doublet.csv");
+  const std::vector<std::size_t> doublet_inputs = doublet.columns_starting("input:");
+  ASSERT_EQ(doublet_inputs.size(), static_cast<std::size_t>(histories::kRotors));
+  ASSERT_EQ(doublet.rows.size(), static_cast<std::size_t>(histories::kDoubletSteps) + 1);
+  for (std::size_t k = 0; k < doublet.rows.size(); ++k) {
+    const Eigen::VectorXd declared = histories::doublet_input(static_cast<int>(k));
+    for (std::size_t j = 0; j < doublet_inputs.size(); ++j) {
+      EXPECT_EQ(doublet.rows[k][doublet_inputs[j]], declared(static_cast<Eigen::Index>(j)))
+          << "doublet sample " << k << ", input " << j;
+    }
+  }
+  const histories::Table spoolup = histories::read_table(run.output / "spoolup.csv");
+  const std::vector<std::size_t> spoolup_inputs = spoolup.columns_starting("input:");
+  ASSERT_EQ(spoolup_inputs.size(), static_cast<std::size_t>(histories::kSpoolUpInputs));
+  ASSERT_EQ(spoolup.rows.size(), static_cast<std::size_t>(histories::kSpoolUpSteps) + 1);
+  for (std::size_t k = 0; k < spoolup.rows.size(); ++k) {
+    const Eigen::VectorXd declared = histories::spoolup_input(static_cast<int>(k));
+    for (std::size_t j = 0; j < spoolup_inputs.size(); ++j) {
+      EXPECT_NEAR(spoolup.rows[k][spoolup_inputs[j]], declared(static_cast<Eigen::Index>(j)), 1e-12)
+          << "spool-up sample " << k << ", input " << j;
+    }
+  }
+}
+
+// The held doublet against the exact solution for a held input. The negative
+// control is the same comparison against the doublet moved one step late, which
+// must FAIL the same budget: without it, the budget could be one that no event
+// placement error reaches.
+TEST(ExampleSouxmarLinearHistories, TheDoubletMatchesTheExactHeldSolutionWithinAnAPrioriBudget) {
+  const auto run = histories::run("doublet");
+  const auto& rotors =
+      run.result.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system");
+  const auto held = [](int) -> Eigen::VectorXd {
+    return Eigen::VectorXd::Zero(histories::kRotors);
+  };
+  const histories::Reference exact = histories::exact_solution(
+      rotors.a, rotors.b, histories::kDoubletSteps, histories::doublet_input, held);
+  const double budget =
+      histories::rk4_budget(rotors.a, rotors.b, histories::kDoubletSteps, exact.largest_augmented);
+
+  const histories::Table table = histories::read_table(run.output / "doublet.csv");
+  ASSERT_EQ(table.rows.size(), exact.states.size());
+  const double deviation = histories::worst_deviation(table, exact.states);
+  EXPECT_LE(deviation, budget) << "the doublet run departs from the exact held solution by "
+                               << deviation << " against an a priori budget of " << budget;
+
+  const histories::Reference late = histories::exact_solution(
+      rotors.a,
+      rotors.b,
+      histories::kDoubletSteps,
+      [](int step) { return histories::doublet_input(step - 1); },
+      held);
+  EXPECT_GT(histories::worst_deviation(table, late.states), budget)
+      << "a doublet one step late is inside the budget, so the budget cannot see an event in "
+         "the wrong place";
+  RecordProperty("deviation", deviation);
+  RecordProperty("budget", budget);
+  RecordProperty("one_step_late_deviation", histories::worst_deviation(table, late.states));
+}
+
+// The interpolated spool-up against the exact solution for a linearly varying
+// input. The negative control is a reference that HOLDS each value across the
+// step instead of interpolating it, which must fail the same budget.
+TEST(ExampleSouxmarLinearHistories,
+     TheSpoolUpMatchesTheExactInterpolatedSolutionWithinAnAPrioriBudget) {
+  const auto run = histories::run("spoolup");
+  const auto& inputs =
+      run.result.find("all_inputs")->payload_as<galata::model::LinearSystem>("linear_system");
+  const histories::Reference exact = histories::exact_solution(inputs.a,
+                                                               inputs.b,
+                                                               histories::kSpoolUpSteps,
+                                                               histories::spoolup_input,
+                                                               histories::spoolup_rate);
+  const double budget =
+      histories::rk4_budget(inputs.a, inputs.b, histories::kSpoolUpSteps, exact.largest_augmented);
+
+  const histories::Table table = histories::read_table(run.output / "spoolup.csv");
+  ASSERT_EQ(table.rows.size(), exact.states.size());
+  const double deviation = histories::worst_deviation(table, exact.states);
+  EXPECT_LE(deviation, budget)
+      << "the spool-up run departs from the exact interpolated solution by " << deviation
+      << " against an a priori budget of " << budget;
+
+  const histories::Reference held = histories::exact_solution(
+      inputs.a,
+      inputs.b,
+      histories::kSpoolUpSteps,
+      histories::spoolup_input,
+      [](int) -> Eigen::VectorXd { return Eigen::VectorXd::Zero(histories::kSpoolUpInputs); });
+  EXPECT_GT(histories::worst_deviation(table, held.states), budget)
+      << "a held reference is inside the budget, so the budget cannot tell the declared hold "
+         "from the other one";
+  RecordProperty("deviation", deviation);
+  RecordProperty("budget", budget);
+  RecordProperty("held_reference_deviation", histories::worst_deviation(table, held.states));
+}
+
+// THE NONLINEAR PATH'S COMMAND HISTORY, THROUGH A STUDY. `make-record.yaml`
+// flies the identification example's truth model through a declared zero-order
+// rotor-command history, and it is the only study that drives `sim.plant`'s
+// `command_schedule`. Its record is committed as `flight.csv`, so regenerating
+// it checks two things at once. The schedule reaches the plant as declared: the
+// command columns must equal the declared value in force at every sample,
+// exactly, right-continuous at each event. And the committed record is what its
+// own study produces: the states must agree to ADR-0004's cross-platform bound,
+// one part in 1e9 of each column's peak, because the record was written on one
+// platform and the platforms' libm differ in the last bits.
+TEST(ExampleQuadrotorIdentification, TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / "quadrotor-identification";
+  const auto output = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                      / "quadrotor-identification-make-record";
+  std::filesystem::create_directories(output);
+  (void)galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "make-record.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      output.string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+  const histories::Table regenerated = histories::read_table(output / "flight.csv");
+  const histories::Table committed = histories::read_table(directory / "flight.csv");
+  ASSERT_EQ(regenerated.header, committed.header);
+  ASSERT_EQ(regenerated.rows.size(), committed.rows.size());
+
+  // The declared history, restated in samples: sample k is at t = 0.02 k, and
+  // the events at 0.2, 0.6, 1.2 and 1.6 s fall on samples 10, 30, 60 and 80.
+  const auto declared = [](std::size_t k) -> std::vector<double> {
+    if (k < 10) {
+      return {632.0, 632.0, 632.0, 632.0};
+    }
+    if (k < 30) {
+      return {610.0, 660.0, 660.0, 610.0};
+    }
+    if (k < 60) {
+      return {660.0, 610.0, 610.0, 660.0};
+    }
+    if (k < 80) {
+      return {645.0, 645.0, 620.0, 620.0};
+    }
+    return {620.0, 620.0, 645.0, 645.0};
+  };
+  const std::vector<std::size_t> commands = committed.columns_starting("command:");
+  ASSERT_EQ(commands.size(), 4U);
+  for (std::size_t k = 0; k < regenerated.rows.size(); ++k) {
+    const std::vector<double> in_force = declared(k);
+    for (std::size_t j = 0; j < commands.size(); ++j) {
+      EXPECT_EQ(regenerated.rows[k][commands[j]], in_force[j]) << "sample " << k << ", rotor " << j;
+    }
+  }
+
+  for (const std::size_t column : committed.columns_starting("state:")) {
+    double column_peak = 0.0;
+    for (const auto& row : committed.rows) {
+      column_peak = std::fmax(column_peak, std::fabs(row[column]));
+    }
+    for (std::size_t k = 0; k < committed.rows.size(); ++k) {
+      EXPECT_LE(std::fabs(regenerated.rows[k][column] - committed.rows[k][column]),
+                1e-9 * column_peak)
+          << committed.header[column] << " at sample " << k;
+    }
+  }
 }
 
 TEST(ExampleNt33aLateralModes, EveryShippedExampleHasAReadme) {

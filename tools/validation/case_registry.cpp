@@ -704,6 +704,37 @@ const std::vector<Case>& validation_cases() {
        "are checked under step halving and shrinking perturbations against a full linearization "
        "with actuator lags. Flight-data validation remains absent."},
 
+      {"simulation.linear_input_histories",
+       "Declared input histories through the linear simulation: held and interpolated inputs, "
+       "events and extrapolation",
+       {"sim.linear"},
+       "Closed-form polynomial and exponential responses; exact held and linearly interpolated "
+       "solutions by the block-matrix exponential (Van Loan, IEEE TAC 23(3), 1978)",
+       Status::SelfConsistent,
+       {E{kUnit, "LinearSimulation.AZeroOrderHistoryMatchesTheClosedFormAcrossEveryEvent"},
+        E{kUnit,
+          "LinearSimulation.ALinearHistoryIsEvaluatedAtEveryStageAndIsExactOnADoubleIntegrator"},
+        E{kUnit,
+          "LinearSimulation.AHistoryThatHoldsOneValueReproducesTheConstantInputRunBitForBit"},
+        E{kIntegration,
+          "LinearHistoryWorkflow.AZeroOrderHistoryIsExactOnADoubleIntegratorThroughTheSchema"},
+        E{kIntegration,
+          "LinearHistoryWorkflow."
+          "AConstantRunIsUnchangedAndAOneValueHistoryReproducesItBitForBit"},
+        E{kIntegration,
+          "ExampleSouxmarLinearHistories."
+          "TheDoubletMatchesTheExactHeldSolutionWithinAnAPrioriBudget"},
+        E{kIntegration,
+          "ExampleSouxmarLinearHistories."
+          "TheSpoolUpMatchesTheExactInterpolatedSolutionWithinAnAPrioriBudget"}},
+       "Every reference is independent of the integrator it checks: polynomial and exponential "
+       "closed forms, and exact solutions of the same model by a matrix exponential, each "
+       "within a budget derived from the model, the step and the history before the "
+       "comparison. Negative controls show those budgets failing an event moved by one step "
+       "and a hold of the wrong kind. The references check the integration of a declared "
+       "history, not the model: nothing here compares the linear response with the nonlinear "
+       "plant or with a measurement."},
+
       {"model.continuous_scalar",
        "Experimental continuous scalar graph compilation and simulation",
        {"model.compile", "sim.model"},
