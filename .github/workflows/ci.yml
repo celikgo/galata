@@ -273,7 +273,24 @@ jobs:
   sanitizer:
     name: Address and undefined-behaviour sanitizers
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # A WALL-CLOCK GUARD, NOT A NUMERICAL GATE, sized from measurement.
+    #
+    #   run 34521117651, ff8c0e3: ctest --preset asan took 6400 s for 637 tests
+    #   run 34538572894, e48a3e3: 3558 s for 690 tests
+    #   run 34547686368, 8042fb2: two attempts on two different workers were
+    #   each cut off at the former 120-minute limit, at tests 560 and 561 of
+    #   692. No test failed and there was no sanitizer diagnostic.
+    #
+    # Both 8042fb2 attempts ran every test a median 2.26-2.29x slower than
+    # e48a3e3, over 80 tests common to both logs. The uninstrumented engines
+    # in the same run were not comparably slower. The cause is not localised.
+    # It is not that head's change: the slowdown hit tests that run before the
+    # new ones, and code neither change touches. At that pace the whole suite
+    # needs about 8070 s (2.27 x 3558), past 7200 s.
+    #
+    # 180 minutes is 1.34x that projection. Raising it changes what no test
+    # asserts; it lets the job finish.
+    timeout-minutes: 180
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
