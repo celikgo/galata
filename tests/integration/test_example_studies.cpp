@@ -846,15 +846,13 @@ TEST(ExampleSouxmarSampledLqr, AOneTickDelayErrorIsBelowThisComparisonsResolutio
 // THE FINDING IT HOLDS. The study's budget was derived before the first run,
 // from each nonlinearity measured against its OWN linear part. The first run
 // fell just outside it, and the discrepancy was then localised rather than
-// absorbed: it is second order (the test above), it is not the quadratic drag
-// (zeroing the drag coefficients leaves it unchanged), and it lives in the
-// COLLECTIVE channel — at the worst tick the four rotor speeds miss their
-// prediction by nearly the same amount, with the vertical velocity beside
-// them. That is where the thrust's w^2 curvature acts, and it acts there even
-// when the first-order motion is mostly horizontal: squaring a differential
-// rotor command produces a collective thrust and a yaw torque that the
-// derivation's per-term ratio did not count. The budget is left where it was
-// set.
+// absorbed. It is second order (the test above). It is not the quadratic drag:
+// zeroing the drag coefficients leaves it unchanged. It is the rigid-body
+// kinematics the hover linearisation drops, which the derivation never listed,
+// and `TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops`
+// below closes that account term by term. An earlier version of this comment
+// blamed the rotor-speed curvature. The trace shows that term carries almost
+// none of it. The budget is left where it was set.
 //
 // Two-sided, as every lock here is. If the run comes inside the declared budget
 // the finding is stale and the README must be revisited; if the discrepancy
@@ -874,17 +872,381 @@ TEST(ExampleSouxmarSampledLqr, TheOverBudgetDiscrepancyIsHeldByATwoSidedLock) {
       << prediction.relative_discrepancy;
   EXPECT_FALSE(prediction.within_budget);
 
-  // Where it lives. The rotor-speed block is the last four chart coordinates;
-  // split its miss at the worst tick into the part all four share and the part
-  // that differs between them. Measured at about twenty to one.
+  // Where it SHOWS. The rotor-speed block is the last four chart coordinates.
+  // At the worst tick their miss is common to all four, at about twenty to one
+  // against the part that differs between them. That is the feedback answering
+  // the vertical miss through the gain — the trace below checks that the rotor
+  // equations are forced by nothing the linearisation drops — so it is a
+  // symptom, held because a change in it would mean the mechanism had moved.
   const std::size_t worst = static_cast<std::size_t>(prediction.worst_tick);
   const Eigen::VectorXd miss =
       (prediction.measured_chart[worst] - prediction.predicted_chart[worst]).tail(4);
   const double common = miss.mean();
   const double differential = (miss.array() - common).matrix().norm();
   EXPECT_GT(std::fabs(common), 5.0 * differential)
-      << "the miss at the worst tick is no longer carried by the collective channel: common "
+      << "the rotor-speed miss at the worst tick is no longer common to the four rotors: common "
       << common << " rad/s against differential " << differential << " rad/s";
+}
+
+// ===========================================================================
+// The trace behind that lock, the envelope, and the proposal
+// ===========================================================================
+
+namespace souxmar {
+
+// The chart `sim.sampled` records and the design is taken on: NED position
+// deviation (0-2), body velocity (3-5), attitude error as a rotation vector on
+// the right of the trim attitude (6-8), body rate (9-11) and rotor-speed
+// deviation (12-15).
+constexpr int kVelocity = 3;
+constexpr int kAttitude = 6;
+constexpr int kRate = 9;
+constexpr int kRotorSpeed = 12;
+
+// The rate of a right-multiplicative rotation-vector chart, J_r^-1(e) w, with
+// J_r the right Jacobian of SO(3) (Sola, Deray & Atchuthan, "A micro Lie theory
+// for state estimation in robotics", arXiv:1812.01537, 2018). Its linear part
+// is w.
+Eigen::Vector3d chart_attitude_rate(const Eigen::Vector3d& e, const Eigen::Vector3d& w) {
+  const double angle = e.norm();
+  // Below a microradian the closed form cancels, and the series' leading term
+  // is exact far beyond anything this test resolves.
+  const double c = angle < 1e-6 ? 1.0 / 12.0
+                                : 1.0 / (angle * angle)
+                                      - (1.0 + std::cos(angle)) / (2.0 * angle * std::sin(angle));
+  return w + 0.5 * e.cross(w) + c * e.cross(e.cross(w));
+}
+
+struct NamedTerm {
+  std::string name;
+  bool kinematic = false;       // rigid-body kinematics and gravity
+  bool rotor_squaring = false;  // the thrust and torque laws' curvature in rotor speed
+  Eigen::VectorXd rate;         // chart-rate units, row by row
+};
+
+// Each physical term of the chart dynamics, less its part in the hover
+// linearisation, at chart state c. Written from the rigid-body equations about
+// the centre of gravity and the model's own parameters — not from galata's
+// derivative routine — and valid only at a still-air hover, level and at zero
+// heading, which the test asserts before using it. Every term is second order
+// at leading order; the EXACT remainder is kept, so a higher order stays with
+// the term that owns it. The linear drag, the angular drag and the rotor lag
+// are linear and have none.
+std::vector<NamedTerm> named_remainders(const galata::model::Quadrotor& model,
+                                        const Eigen::VectorXd& c) {
+  const double g = galata::core::kStandardGravity;
+  const double mass = model.mass.mass_kg;
+  const Eigen::Matrix3d& inertia = model.mass.inertia_cg_body_kg_m2;
+  const Eigen::Matrix3d inverse_inertia = inertia.inverse();
+  const Eigen::Vector3d v = c.segment<3>(kVelocity);
+  const Eigen::Vector3d e = c.segment<3>(kAttitude);
+  const Eigen::Vector3d w = c.segment<3>(kRate);
+  const Eigen::Matrix3d ned_from_body =
+      galata::core::dcm_ned_from_body(galata::core::quaternion_from_rotation_vector(e));
+
+  double collective_n = 0.0;
+  Eigen::Vector3d thrust_moment_n_m = Eigen::Vector3d::Zero();
+  double yaw_moment_n_m = 0.0;
+  for (int i = 0; i < model.rotor_count(); ++i) {
+    const galata::model::Rotor& rotor = model.rotors[static_cast<std::size_t>(i)];
+    const double squared = c(kRotorSpeed + i) * c(kRotorSpeed + i);
+    const double thrust_n = rotor.thrust_coefficient_n_s2 * squared;
+    collective_n += thrust_n;
+    thrust_moment_n_m +=
+        rotor.position_cg_to_hub_body_m.cross(Eigen::Vector3d(0.0, 0.0, -thrust_n));
+    yaw_moment_n_m -= rotor.spin_about_body_z * rotor.torque_coefficient_n_m_s2 * squared;
+  }
+
+  const auto in_rows = [&c](int first, const Eigen::Vector3d& value) {
+    Eigen::VectorXd rate = Eigen::VectorXd::Zero(c.size());
+    rate.segment<3>(first) = value;
+    return rate;
+  };
+  const Eigen::Vector3d gravity_linear_part(-g * e.y(), g * e.x(), g);
+  const Eigen::Vector3d quadratic_drag =
+      -(model.drag_quadratic_n_s2_m2.array() * v.array() * v.array().abs()).matrix() / mass;
+  return {
+      {"position rotation (R - I) v", true, false, in_rows(0, ned_from_body * v - v)},
+      {"transport -w x v", true, false, in_rows(kVelocity, -w.cross(v))},
+      {"gravity projection",
+       true,
+       false,
+       in_rows(kVelocity,
+               ned_from_body.transpose() * Eigen::Vector3d(0.0, 0.0, g) - gravity_linear_part)},
+      {"attitude chart kinematics",
+       false,
+       false,
+       in_rows(kAttitude, chart_attitude_rate(e, w) - w)},
+      {"quadratic drag", false, false, in_rows(kVelocity, quadratic_drag)},
+      {"gyroscopic", false, false, in_rows(kRate, -(inverse_inertia * w.cross(inertia * w)))},
+      {"thrust curvature",
+       false,
+       true,
+       in_rows(kVelocity, Eigen::Vector3d(0.0, 0.0, -collective_n / mass))},
+      {"roll and pitch moment curvature",
+       false,
+       true,
+       in_rows(
+           kRate,
+           inverse_inertia * Eigen::Vector3d(thrust_moment_n_m.x(), thrust_moment_n_m.y(), 0.0))},
+      {"yaw torque curvature",
+       false,
+       true,
+       in_rows(kRate, inverse_inertia * Eigen::Vector3d(0.0, 0.0, yaw_moment_n_m))},
+  };
+}
+
+// A forcing held across each tick is carried through it by
+// Gamma = integral_0^T exp(A s) ds — the integral the zero-order hold puts in
+// front of B — and then through the loop the design predicts, delay included:
+//   e[k+1] = Ad e[k] - Bd K e[k-1] + Gamma f(m[k]),   e[0] = 0.
+// Holding each forcing at its tick-start value is the one approximation, and
+// the closure gate below allows for it.
+std::vector<Eigen::VectorXd> through_the_loop(const Eigen::MatrixXd& ad,
+                                              const Eigen::MatrixXd& bd_k,
+                                              const std::vector<Eigen::VectorXd>& forcing) {
+  std::vector<Eigen::VectorXd> error(forcing.size() + 1, Eigen::VectorXd::Zero(ad.rows()));
+  for (std::size_t k = 0; k < forcing.size(); ++k) {
+    error[k + 1] = ad * error[k] + forcing[k];
+    if (k >= 1) {
+      error[k + 1] -= bd_k * error[k - 1];
+    }
+  }
+  return error;
+}
+
+// Nine tenths of the declared perturbation, entry by entry.
+const std::string kNineTenthsPerturbation =
+    "[0.18, -0.09, 0.135, 0, 0, 0, 0.009, -0.009, 0.0, 0, 0, 0, 0, 0, 0, 0]";
+// The horizontal part of the halved perturbation alone.
+const std::string kHalvedHorizontalOnly = "[0.1, -0.05, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
+const std::string kProposalMarker =
+    "# ---- study.yaml follows, unchanged except for initial_chart_perturbation ----\n";
+
+}  // namespace souxmar
+
+// THE TRACE BEHIND THE LOCK ABOVE. Every term the hover linearisation drops is
+// evaluated along the recorded run, carried through the design's own delayed
+// loop, and set against the discrepancy the run actually shows.
+//
+//   CLOSURE      Together the terms account for the discrepancy to within a
+//                tenth, in the X norm, at every tick. The tenth was fixed before
+//                the trace was first run. It allows for the one approximation,
+//                a forcing held across each 4 ms tick.
+//   ATTRIBUTION  At the worst tick the rigid-body kinematic group — the
+//                rotation of body velocity into NED position, the transport
+//                -w x v, and gravity projected onto a tilted body — carries the
+//                discrepancy to within a tenth, and the transport term is the
+//                largest single contributor. The rotor-speed curvature and the
+//                quadratic drag each carry under a twentieth: a term carrying
+//                under a twentieth of a discrepancy is not its mechanism.
+//   ROTOR ROWS   The rotor-speed equations are the linear lag and nothing else,
+//                so their one-step residual is RK4's error on that lag, of
+//                order (h / tau)^5 / 120 of the rotor-speed deviation per step
+//                and orders of magnitude below the vertical velocity's. The gate
+//                is a thousandth of the latter. The rotor speeds' common miss is
+//                then the loop's response, not a cause.
+//
+// Shares are signed projections onto the discrepancy, e_term' X e / e' X e, so
+// they sum to the closure and one term can offset another.
+TEST(ExampleSouxmarSampledLqr,
+     TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops) {
+  const auto result = souxmar::run_shipped("trace");
+  const auto& design = souxmar::design_of(result);
+  const auto& run = souxmar::sampled_run(result);
+  const auto& prediction = run.control.prediction;
+  ASSERT_TRUE(prediction.available && prediction.relative_discrepancy_defined);
+  ASSERT_EQ(run.control.delay_periods, 1);
+  ASSERT_EQ(run.control.saturated_tick_count, 0);
+
+  // The remainders are written for a still-air hover, level, at zero heading.
+  const auto& hover =
+      result.find("hover")->payload_as<galata::pipeline::HoverTrimArtifact>("hover_trim");
+  const Eigen::VectorXd& trim_state = hover.point.extended_state;
+  ASSERT_NEAR(std::fabs(trim_state(galata::core::kQuaternionW)), 1.0, 1e-12);
+  ASSERT_LT(trim_state.segment<3>(galata::core::kQuaternionX).norm(), 1e-12);
+  ASSERT_EQ(hover.point.wind_ned_m_s.norm(), 0.0);
+  ASSERT_EQ(hover.model.rotor_count(), 4);
+
+  const Eigen::MatrixXd& a =
+      result.find("rotors")->payload_as<galata::model::LinearSystem>("linear_system").a;
+  const Eigen::Index n = a.rows();
+  const double period_s = run.control.controller_period_s;
+  Eigen::MatrixXd block = Eigen::MatrixXd::Zero(2 * n, 2 * n);
+  block.topLeftCorner(n, n) = a * period_s;
+  block.topRightCorner(n, n) = Eigen::MatrixXd::Identity(n, n) * period_s;
+  const Eigen::MatrixXd exponential = galata::numerics::matrix_exponential(block).value;
+  const Eigen::MatrixXd gamma = exponential.topRightCorner(n, n);
+  const Eigen::MatrixXd& ad = design.discretisation.system.a;
+  const Eigen::MatrixXd& bd = design.discretisation.system.b;
+  ASSERT_LT((exponential.topLeftCorner(n, n) - ad).cwiseAbs().maxCoeff(), 1e-12)
+      << "Gamma must come from the A the design discretised";
+  const Eigen::MatrixXd bd_k = bd * design.riccati.k;
+  const Eigen::MatrixXd& x = design.riccati.x;
+
+  const std::vector<Eigen::VectorXd>& measured = prediction.measured_chart;
+  const std::size_t ticks = measured.size() - 1;
+  ASSERT_GE(run.control.applied_rad_s.size(), ticks);
+
+  // Each term's forcing at every tick, then carried through the loop on its own.
+  const std::vector<souxmar::NamedTerm> terms =
+      souxmar::named_remainders(hover.model, measured.front());
+  std::vector<std::vector<Eigen::VectorXd>> forcing(terms.size());
+  for (std::size_t k = 0; k < ticks; ++k) {
+    const std::vector<souxmar::NamedTerm> at_tick =
+        souxmar::named_remainders(hover.model, measured[k]);
+    for (std::size_t t = 0; t < at_tick.size(); ++t) {
+      forcing[t].push_back(gamma * at_tick[t].rate);
+    }
+  }
+  std::vector<std::vector<Eigen::VectorXd>> carried;
+  for (const auto& term_forcing : forcing) {
+    carried.push_back(souxmar::through_the_loop(ad, bd_k, term_forcing));
+  }
+
+  // CLOSURE.
+  double unexplained = 0.0;
+  double largest = 0.0;
+  for (std::size_t k = 0; k <= ticks; ++k) {
+    const Eigen::VectorXd discrepancy = measured[k] - prediction.predicted_chart[k];
+    Eigen::VectorXd accounted = Eigen::VectorXd::Zero(n);
+    for (const auto& term : carried) {
+      accounted += term[k];
+    }
+    unexplained = std::fmax(unexplained, souxmar::x_norm(accounted - discrepancy, x));
+    largest = std::fmax(largest, souxmar::x_norm(discrepancy, x));
+  }
+  ASSERT_GT(largest, 0.0);
+  EXPECT_LT(unexplained / largest, 0.1)
+      << "the named terms no longer account for the discrepancy: the part they leave "
+         "unexplained reaches "
+      << unexplained / largest << " of its largest value";
+
+  // ATTRIBUTION, at the worst tick.
+  const auto worst = static_cast<std::size_t>(prediction.worst_tick);
+  const Eigen::VectorXd at_worst = measured[worst] - prediction.predicted_chart[worst];
+  const double total = at_worst.dot(x * at_worst);
+  double kinematic = 0.0;
+  double rotor_squaring = 0.0;
+  double drag = 0.0;
+  double largest_share = 0.0;
+  std::string largest_term;
+  std::ostringstream shares;
+  for (std::size_t t = 0; t < terms.size(); ++t) {
+    const double share = carried[t][worst].dot(x * at_worst) / total;
+    shares << terms[t].name << ' ' << share << "; ";
+    if (terms[t].kinematic) {
+      kinematic += share;
+    }
+    if (terms[t].rotor_squaring) {
+      rotor_squaring += share;
+    }
+    if (terms[t].name == "quadratic drag") {
+      drag = share;
+    }
+    if (std::fabs(share) > std::fabs(largest_share)) {
+      largest_share = share;
+      largest_term = terms[t].name;
+    }
+  }
+  EXPECT_NEAR(kinematic, 1.0, 0.1)
+      << "the rigid-body kinematic group no longer carries the discrepancy. Shares: "
+      << shares.str();
+  EXPECT_EQ(largest_term, "transport -w x v") << "Shares: " << shares.str();
+  EXPECT_LT(std::fabs(rotor_squaring), 0.05)
+      << "the rotor-speed curvature now carries a material part of the discrepancy, and the "
+         "README's account must be revisited. Shares: "
+      << shares.str();
+  EXPECT_LT(std::fabs(drag), 0.05) << "Shares: " << shares.str();
+  RecordProperty("unexplained_fraction", unexplained / largest);
+  RecordProperty("shares_at_worst_tick", shares.str());
+
+  // ROTOR ROWS.
+  const Eigen::VectorXd& trim_command = hover.point.command_rad_s;
+  double rotor_residual = 0.0;
+  double vertical_residual = 0.0;
+  for (std::size_t k = 0; k < ticks; ++k) {
+    const Eigen::VectorXd one_step =
+        measured[k + 1] - ad * measured[k] - bd * (run.control.applied_rad_s[k] - trim_command);
+    rotor_residual = std::fmax(rotor_residual, one_step.tail(4).cwiseAbs().maxCoeff());
+    vertical_residual = std::fmax(vertical_residual, std::fabs(one_step(souxmar::kVelocity + 2)));
+  }
+  EXPECT_LT(rotor_residual, 1e-3 * vertical_residual)
+      << "the rotor-speed rows now carry a one-step residual of " << rotor_residual
+      << " rad/s against the vertical velocity's " << vertical_residual
+      << " m/s: something the linearisation drops is acting on the rotors";
+}
+
+// THE ENVELOPE, along the declared direction. The absolute miss is second order
+// and the prediction's peak first order, so the relative discrepancy grows in
+// proportion to the perturbation, and along the declared direction there is one
+// scale below which the budget holds. This run, at nine tenths of the declared
+// perturbation, must be inside it; the lock above holds the declared
+// perturbation itself outside. Together they bracket the boundary.
+TEST(ExampleSouxmarSampledLqr, TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation) {
+  const auto near = souxmar::run_with_perturbation("envelope", souxmar::kNineTenthsPerturbation);
+  const auto& control = souxmar::sampled_run(near).control;
+  ASSERT_TRUE(control.prediction.available && control.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(control.saturated_tick_count, 0);
+  EXPECT_EQ(control.prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_TRUE(control.prediction.within_budget)
+      << "at nine tenths of the declared perturbation the run is now outside the budget too ("
+      << control.prediction.relative_discrepancy
+      << "); the envelope the README describes has moved";
+  RecordProperty("relative_discrepancy", control.prediction.relative_discrepancy);
+}
+
+// THE PROPOSAL, AND ITS SAFEGUARDS. A PROPOSAL: the agreed case is study.yaml,
+// and its result stays outside the budget.
+//
+// proposed-acceptance.yaml must be study.yaml with the initial perturbation
+// halved and nothing else changed. That is checked first, as text, so the
+// proposal cannot drift into a different comparison. Then it must pass the
+// unchanged budget. And because a perturbation can be made to pass by adding
+// excitation the linearisation handles well — a vertical offset raises the
+// prediction's peak and barely adds to the miss — its most demanding
+// constituent, the horizontal offset alone, must pass too, and must be the
+// harder of the two.
+TEST(ExampleSouxmarSampledLqr, TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget) {
+  const auto directory = std::filesystem::path(GALATA_EXAMPLES_DIR) / souxmar::kExample;
+  std::string expected = read_file(directory / "study.yaml");
+  const auto declared = expected.find(souxmar::kDeclaredPerturbation);
+  ASSERT_NE(declared, std::string::npos);
+  expected.replace(declared, souxmar::kDeclaredPerturbation.size(), souxmar::kHalvedPerturbation);
+  const std::string proposal = read_file(directory / "proposed-acceptance.yaml");
+  const auto body = proposal.find(souxmar::kProposalMarker);
+  ASSERT_NE(body, std::string::npos) << "proposed-acceptance.yaml has lost its marker line";
+  EXPECT_EQ(proposal.substr(body + souxmar::kProposalMarker.size()), expected)
+      << "proposed-acceptance.yaml is no longer study.yaml with only the perturbation halved";
+
+  const auto proposed = galata::pipeline::run_pipeline(
+      galata::pipeline::load_pipeline((directory / "proposed-acceptance.yaml").string()),
+      galata::pipeline::builtin_registry(),
+      directory.string(),
+      souxmar::scratch("proposed").string(),
+      nullptr,
+      galata::pipeline::RunOptions{.overwrite = true});
+  const auto& control = souxmar::sampled_run(proposed).control;
+  ASSERT_TRUE(control.prediction.available && control.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(control.saturated_tick_count, 0);
+  EXPECT_EQ(control.prediction.budget, souxmar::kDeclaredBudget);
+  EXPECT_TRUE(control.prediction.within_budget)
+      << "the proposed case is outside the unchanged budget: "
+      << control.prediction.relative_discrepancy;
+
+  const auto horizontal =
+      souxmar::run_with_perturbation("proposed-horizontal", souxmar::kHalvedHorizontalOnly);
+  const auto& alone = souxmar::sampled_run(horizontal).control;
+  ASSERT_TRUE(alone.prediction.available && alone.prediction.relative_discrepancy_defined);
+  EXPECT_EQ(alone.saturated_tick_count, 0);
+  EXPECT_TRUE(alone.prediction.within_budget)
+      << "the proposed case's horizontal offset alone is outside the budget: "
+      << alone.prediction.relative_discrepancy;
+  EXPECT_GT(alone.prediction.relative_discrepancy, control.prediction.relative_discrepancy)
+      << "the horizontal offset alone is no longer the harder case, so the README's account of "
+         "why the mix is diluted no longer holds";
+  RecordProperty("proposed_relative_discrepancy", control.prediction.relative_discrepancy);
+  RecordProperty("horizontal_only_relative_discrepancy", alone.prediction.relative_discrepancy);
 }
 
 // ===========================================================================

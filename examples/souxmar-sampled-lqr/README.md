@@ -110,13 +110,44 @@ perturbation was not shrunk to fit. The discrepancy was localised instead:
 - **It is not the drag.** The quadratic drag is the term a hover linearisation
   cannot see, and the obvious suspect. Setting its coefficients to zero leaves
   the discrepancy essentially where it was, and still outside the budget.
-- **It lives in the collective channel.** At the worst tick, nearly all of the
-  miss is common to the four rotor speeds, and the vertical velocity misses at
-  the same time. That is where the thrust's ω² curvature acts. Squaring a
-  *differential* rotor command, the kind a mostly horizontal correction uses,
-  produces a *collective* thrust and a yaw torque. Those are second-order terms
-  in channels the first-order motion barely excites, and a ratio of each term to
-  its own linear part does not count them. The derivation missed this mechanism.
+- **It is the rigid-body kinematics the hover linearisation drops.** While the
+  loop removes the horizontal offset, the vehicle pitches and rolls while it
+  carries forward and sideways speed. Three second-order products follow, and
+  the linear model has none of them:
+  - the transport of velocity by the rotating body axes, `−ω × v`, which puts
+    `q·u − p·v` into the body vertical velocity. This is the largest single
+    term.
+  - gravity projected onto a tilted body, whose component along the body's own
+    vertical axis falls short of `g` by about half the square of the tilt. This
+    partly offsets the first.
+  - the rotation of body velocity into NED position, `(R − I) v`.
+
+  Nearly all of the discrepancy, in the cost-to-go norm, sits in the body
+  vertical velocity and the down position. The comparison is made in the chart,
+  whose velocities are in body axes. So part of that vertical miss is a tilted
+  vehicle's forward speed appearing along its own vertical axis, rather than a
+  miss in how fast it climbs. The metric counts both, and this account is of
+  the metric.
+- **It is not the rotor-speed curvature.** An earlier version of this section
+  said it was: that squaring a differential rotor command produced a collective
+  thrust the derivation had not counted. Traced term by term, that curvature
+  carries almost none of the discrepancy, and with the opposite sign. The rotor
+  speeds do miss their prediction almost equally at the worst tick, but that is
+  the feedback answering the vertical miss through the gain. The rotor equations
+  themselves are forced by nothing the linearisation drops.
+- **Nothing is broken.** The discretisation, the Riccati gain, the delay line
+  and the prediction's recursion were each re-derived independently, and each
+  agrees to round-off. Carried through the delayed loop, the named terms account
+  for the whole discrepancy.
+
+`ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops`
+holds that account. It evaluates each term along the recorded run and carries
+it through the design's own delayed loop. It then requires three things:
+
+- the terms together close the discrepancy to within a tenth;
+- the kinematic group carries the discrepancy, and the transport term is the
+  largest single contributor;
+- the rotor curvature and the drag each carry under a twentieth.
 
 The finding is held by a two-sided labelled lock,
 `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock`. It
@@ -140,6 +171,46 @@ certified by exact re-derivation instead:
 The negative control is now a prediction made at *twice* the design period.
 That is the mismatch `sim.sampled` refuses to run, and the gate catches it. The
 delay test was kept, inverted, as the record of this limit.
+
+## The valid envelope, and a proposed change to the acceptance case
+
+**The agreed case is `study.yaml`, and its result is outside the budget.**
+Nothing below changes that.
+
+The absolute miss is second order and the prediction's peak is first order, so
+the relative discrepancy grows in proportion to the perturbation. Along the
+declared direction there is therefore one scale below which the budget holds and
+above which it does not. The declared perturbation sits just past it:
+
+- `ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation`
+  runs the study at nine tenths of the declared perturbation, and it passes.
+- `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` holds
+  the declared perturbation itself outside the budget.
+
+The boundary lies between the two. The horizontal part of the offset sets it. A
+vertical offset is followed almost exactly by the linear model, and adding one
+*lowers* the metric: it raises the prediction's peak without adding much miss.
+**So a perturbation can be made to pass by adding excitation the linearisation
+handles well.** A pass is worth something only if it also holds on the
+demanding part of the excitation alone.
+
+**Proposed, not adopted.** `proposed-acceptance.yaml` is this study with one
+change: the initial perturbation is halved. Everything else is unchanged: the
+budget, the metric, the law, the period, the hold, the delay and the limits. A
+test requires the file to equal `study.yaml` apart from that one vector. At half
+the excitation the run passes, and so does its most demanding constituent, the
+horizontal offset alone:
+`ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget`.
+
+The proposal has a cost. The miss is second order, so halving the perturbation
+quarters the miss the comparison can see, and its resolution against a
+structural error falls with it. The one-tick-delay limit above applies to the
+proposed case more strongly, not less. Adopting it is a decision for whoever
+agreed the acceptance case, not for this repository.
+
+```bash
+galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <out>/proposed
+```
 
 ## What this is not
 
@@ -196,6 +267,15 @@ file:
   resolving a one-tick delay error.
 - `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock`
   holds the finding above.
+- `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops`
+  holds the trace of that finding. It requires the named terms to close the
+  discrepancy, and requires the kinematic group, not the rotor curvature, to
+  carry it.
+- `ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation`
+  holds the inside edge of the envelope.
+- `ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget`
+  holds the proposal: that it is `study.yaml` with only the perturbation
+  halved, that it passes, and that its horizontal offset alone passes too.
 
 `DiscreteWorkflow` in the same tier holds the three capabilities' contracts:
 the scalar DARE's closed form and Riccati value iteration through the pipeline,

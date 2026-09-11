@@ -1,5 +1,34 @@
 # SPDX-License-Identifier: Apache-2.0
 #
+# PROPOSED - NOT THE AGREED ACCEPTANCE CASE. It awaits the approval of whoever
+# agreed that case. Until then study.yaml is the acceptance case, and its
+# result is OUTSIDE the budget it declared.
+#
+#   galata run examples/souxmar-sampled-lqr/proposed-acceptance.yaml --output-dir <dir>
+#
+# WHAT IS PROPOSED. One change: the initial chart perturbation is halved. The
+# budget, the metric, the plant, the design, the period, the hold, the delay
+# and the limits are all study.yaml's, byte for byte.
+# ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget
+# requires this file to be study.yaml with that one vector changed.
+#
+# WHY. The agreed perturbation lies just past the edge of the envelope in which
+# this linear-versus-nonlinear comparison can hold a five percent budget. What
+# sets that edge is what the hover linearisation drops, the rigid-body
+# kinematics of a vehicle that pitches while it moves, and not a defect; the
+# README's trace closes the whole discrepancy on those terms. At half the
+# excitation the comparison passes. So does its most demanding constituent, the
+# horizontal offset alone, so the pass does not rest on the vertical and
+# attitude entries diluting the metric.
+#
+# WHAT IT COSTS. A smaller excitation is a weaker test of the prediction. The
+# miss is second order, so halving the perturbation quarters the miss the
+# comparison can see, and its resolution against a structural error falls with
+# it. The README's one-tick-delay limit applies here more strongly, not less.
+#
+# ---- study.yaml follows, unchanged except for initial_chart_perturbation ----
+# SPDX-License-Identifier: Apache-2.0
+#
 # A controller DESIGNED in discrete time, flown against the nonlinear plant it
 # was designed from, and compared with what the design itself predicted.
 #
@@ -174,7 +203,7 @@ stages:
       delay_periods: 1
       step_s: 0.001
       steps: 3000
-      initial_chart_perturbation: [0.2, -0.1, 0.15, 0, 0, 0, 0.01, -0.01, 0.0, 0, 0, 0, 0, 0, 0, 0]
+      initial_chart_perturbation: [0.1, -0.05, 0.075, 0, 0, 0, 0.005, -0.005, 0.0, 0, 0, 0, 0, 0, 0, 0]
       linear_agreement_budget: 0.05
 
   - id: history

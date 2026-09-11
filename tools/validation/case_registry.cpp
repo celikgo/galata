@@ -784,16 +784,28 @@ const std::vector<Case>& validation_cases() {
           "ExampleSouxmarSampledLqr.APredictionAtTheWrongPeriodFailsTheSameOrderTest"},
         E{kIntegration,
           "ExampleSouxmarSampledLqr.AOneTickDelayErrorIsBelowThisComparisonsResolution"},
-        E{kIntegration, "ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock"}},
+        E{kIntegration, "ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr."
+          "TheOverBudgetDiscrepancyIsTracedToTheKinematicsTheHoverLinearisationDrops"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.TheBudgetHoldsAtNineTenthsOfTheDeclaredPerturbation"},
+        E{kIntegration,
+          "ExampleSouxmarSampledLqr.TheProposedCaseAtHalfTheExcitationPassesTheUnchangedBudget"}},
        "The prediction is shown right to first order by the scaling of its miss, and a negative "
        "control shows the same test failing a prediction made at the wrong period. It does NOT "
        "resolve a one-tick delay error at this perturbation, which is recorded by its own test; "
        "the delay line is certified by exact re-derivation instead. At the example's declared "
-       "perturbation the run falls just outside the budget the study set before its first run. "
-       "The excess is localised to the collective channel, where the thrust's quadratic "
-       "curvature turns differential rotor commands into collective thrust, and is held by a "
-       "two-sided labelled lock rather than absorbed. No margin of the sampled loop is computed "
-       "or implied."},
+       "perturbation the run falls just outside the budget the study set before its first run, "
+       "and that result stands, held by a two-sided labelled lock rather than absorbed. The "
+       "excess is traced term by term, with a closure check, to the rigid-body kinematics the "
+       "hover linearisation drops: the transport of forward speed into body vertical velocity "
+       "as the vehicle pitches, partly offset by the tilt's loss of vertical gravity. It is not "
+       "the rotor-speed curvature an earlier version of this note named. The budget holds at "
+       "nine tenths of the declared perturbation. A case at half the excitation passes the "
+       "unchanged budget, in the declared mix and in its most demanding constituent alone; it "
+       "is PROPOSED in the example's proposed-acceptance.yaml, not adopted. No margin of the "
+       "sampled loop is computed or implied."},
 
       // --- Not implemented --------------------------------------------------
       {"synth.riccati",
