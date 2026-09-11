@@ -98,6 +98,13 @@ class InputSchedule {
     return discontinuities_;
   }
 
+  // Every declared sample time, strictly increasing. Under Linear these are the
+  // points where the SLOPE may change: the value is continuous there, and
+  // `rate_at` is not.
+  [[nodiscard]] const std::vector<double>& sample_times_s() const noexcept {
+    return times_s_;
+  }
+
   // The jump applied at a discontinuity time: value just after minus value just
   // before. Throws if `time_s` is not one of `discontinuities()`.
   [[nodiscard]] Eigen::VectorXd jump_at(double time_s) const;

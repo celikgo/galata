@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <locale>
 #include <ostream>
@@ -151,6 +152,192 @@ int step_index_for_event(double time_s, double step_s, int steps, const std::str
   return index;
 }
 
+// A zero-order history's events, each at the step it falls on AND at the time
+// it was DECLARED. Both are needed: the step is where the integration splits,
+// and the declared time is where the history is read. Reading it at
+// step * step_s instead is wrong in floating point, in both directions:
+//   - 13 * 0.002 is 0.026000000000000002, which `jump_at` does not recognise as
+//     the declared 0.026, so a lattice-aligned wind step was refused;
+//   - 3 * 0.3 is 0.8999999999999999, at which a right-continuous history still
+//     returns the value from BEFORE an event declared at 0.9, so a zero-order
+//     command read there would have held its old value for the whole segment
+//     after the event. (A wind step there was refused first, by `jump_at`.)
+// Events come in step order, because discontinuities come in time order, and
+// the lookups below rely on that.
+struct HistoryEvent {
+  int step = 0;
+  double declared_time_s = 0.0;  // s
+};
+
+std::vector<HistoryEvent> history_events(const sim::InputSchedule& history,
+                                         double step_s,
+                                         int steps,
+                                         const std::string& key) {
+  std::vector<HistoryEvent> events;
+  for (const double time_s : history.discontinuities()) {
+    events.push_back({step_index_for_event(time_s, step_s, steps, key), time_s});
+  }
+  return events;
+}
+
+using EventIterator = std::vector<HistoryEvent>::const_iterator;
+
+// Every event at `step`, as a range; empty when there is none.
+std::pair<EventIterator, EventIterator> events_at(const std::vector<HistoryEvent>& events,
+                                                  int step) {
+  return std::equal_range(
+      events.begin(),
+      events.end(),
+      HistoryEvent{step, 0.0},
+      [](const HistoryEvent& lhs, const HistoryEvent& rhs) { return lhs.step < rhs.step; });
+}
+
+// The first event strictly after `step`, or the end.
+EventIterator first_event_after(const std::vector<HistoryEvent>& events, int step) {
+  return std::upper_bound(
+      events.begin(), events.end(), step, [](int value, const HistoryEvent& event) {
+        return value < event.step;
+      });
+}
+
+// Which of several events that land on one step a lookup takes.
+enum class Pick { Earliest, Latest };
+
+// The declared time of the event at `step` (the earliest or the latest, when
+// more than one lands there), or step * step_s where there is none.
+double declared_time_at(const std::vector<HistoryEvent>& events,
+                        int step,
+                        double step_s,
+                        Pick pick) {
+  const auto [first, last] = events_at(events, step);
+  if (first == last) {
+    return static_cast<double>(step) * step_s;
+  }
+  return pick == Pick::Earliest ? first->declared_time_s : std::prev(last)->declared_time_s;
+}
+
+// Every zero-order wind event at `step`, applied to the state. The ground
+// velocity is continuous across an event, so the air-relative velocity absorbs
+// the whole change, -R^T dw. Every event that lands on the step is applied, so
+// the jump agrees with the value read after them.
+void apply_wind_events(const sim::InputSchedule& wind_history,
+                       const std::vector<HistoryEvent>& events,
+                       int step,
+                       Eigen::VectorXd& state) {
+  const auto [first, last] = events_at(events, step);
+  for (auto event = first; event != last; ++event) {
+    const core::State at_event = core::State::from_vector(state.head<core::kStateSize>());
+    const Eigen::Vector3d jump(wind_history.jump_at(event->declared_time_s));
+    state.segment<3>(core::kVelocityU) -=
+        core::dcm_ned_from_body(at_event.attitude_body_to_ned).transpose() * jump;
+  }
+}
+
+// A linear WIND history's samples inside the run, at their step and their
+// declared time. Each is a change of the wind's RATE, and a ramp contributes
+// that rate, -R^T dw/dt, to the air-relative velocity. So each must fall on the
+// step lattice, for the reason a zero-order step must. RK4 weighs the rate at
+// four stage times, and a change of rate between them is integrated as if it
+// happened at one of them. That is not a loss of order that later steps repay:
+// the error stays in the air-relative velocity as a ground-velocity error, a
+// fraction of the ramp's change that grows as the ramp shortens. A ramp shorter
+// than a step can be missed entirely. A sample ON the lattice is a segment
+// boundary instead. The value is continuous there, and the last stage of the
+// step ending at it reads the rate through `rate_read_time`, so it takes this
+// segment's slope and not the next one's.
+//
+// Two samples on the SAME lattice step are refused too. The interval between
+// them is shorter than a step, so no stage reads its rate: it is a step written
+// as a ramp. A command history needs none of this. The rotors integrate the
+// command's value, not its rate, so a change of slope inside a step costs only
+// that step's order, as in `sim.linear`.
+std::vector<HistoryEvent> on_lattice_slope_changes(const sim::InputSchedule& history,
+                                                   double step_s,
+                                                   int steps,
+                                                   const std::string& key) {
+  std::vector<HistoryEvent> changes;
+  if (history.empty() || history.hold() != sim::HoldPolicy::Linear) {
+    return changes;
+  }
+  for (const double time_s : history.sample_times_s()) {
+    const double exact = time_s / step_s;
+    const double tolerance = 1e-9 * std::fmax(1.0, std::fabs(exact));
+    if (exact < -tolerance || exact > static_cast<double>(steps) + tolerance) {
+      continue;  // before the start or past the horizon: no step integrates across it
+    }
+    const double nearest = std::round(exact);
+    if (std::fabs(exact - nearest) > tolerance) {
+      std::ostringstream message;
+      message << std::setprecision(17) << "'" << key
+              << "' is a linear history with a sample at t = " << time_s
+              << " s, which is not a whole number of " << step_s
+              << " s steps from the start. The wind's rate enters the air-relative velocity, "
+                 "and a change of rate inside a step is integrated as if it happened at one of "
+                 "RK4's stages, which leaves an error in the ground velocity that no later step "
+                 "repays. Align the samples to the step, or choose a step that divides them";
+      throw std::invalid_argument(message.str());
+    }
+    const int index = static_cast<int>(nearest);
+    if (!changes.empty() && changes.back().step == index) {
+      std::ostringstream message;
+      message << std::setprecision(17) << "'" << key
+              << "' has two linear-hold samples, at t = " << changes.back().declared_time_s
+              << " s and t = " << time_s << " s, on the same integration step of " << step_s
+              << " s. A change that short is a step written as a ramp: no stage of the "
+                 "integrator can read its rate, so the air-relative velocity would never "
+                 "follow it. Declare it with `hold: zero_order`, which re-bases it as an event, "
+                 "or space the samples at least a step apart";
+      throw std::invalid_argument(message.str());
+    }
+    changes.push_back({index, time_s});
+  }
+  return changes;
+}
+
+// The time at which to read a linear history's RATE for an RK4 stage at
+// `time_s` inside the segment [from_s, until_s]: the stage time, held inside the
+// segment's own open interval so that a stage on either end reads this
+// segment's slope and not a neighbour's. Each end is a slope change's declared
+// time where one falls there, and the step's multiple otherwise.
+double rate_read_time(double time_s, double from_s, double until_s) {
+  const double last_inside = std::nextafter(until_s, from_s);
+  return std::clamp(time_s, from_s, std::fmax(from_s, last_inside));
+}
+
+// Where a history is read at the run's horizon: the horizon itself, or the
+// history's last declared sample when the horizon is within the lattice
+// tolerance of it. That is the tolerance `step_index_for_event` uses, counted
+// in steps, so a last sample read as the horizon is also on the lattice, and a
+// slope change there is a segment end. 13 * 0.002 overshoots a sample declared
+// at 0.026 s by one unit in the last place. Under `extrapolation: refuse`, a
+// read there would refuse a history that ends exactly where the run does.
+//
+// Each capability asks the history for its value here ONCE, before
+// integrating. So `refuse` is enforced for every history, including a
+// zero-order one, which is otherwise read only at t = 0 and at its events.
+// Each capability also clamps its per-stage reads to this time. For a linear
+// history that runs past the horizon, that moves the last stage's read by no
+// more than its time overshoots, a unit in the last place.
+double horizon_read_time(const sim::InputSchedule& history, double end_s, double step_s) {
+  if (history.empty()) {
+    return end_s;
+  }
+  const double last_s = history.last_time_s();
+  const double tolerance_s = 1e-9 * std::fmax(1.0, end_s / step_s) * step_s;
+  return std::fabs(end_s - last_s) <= tolerance_s ? last_s : end_s;
+}
+
+// The zero-order value in force from `step` onward: the value after the latest
+// event at or before that step, read at that event's declared time; before the
+// first event, the value at the start of the run.
+Eigen::VectorXd zero_order_value_from(const sim::InputSchedule& history,
+                                      const std::vector<HistoryEvent>& events,
+                                      int step) {
+  const EventIterator after = first_event_after(events, step);
+  const double read_at_s = after == events.begin() ? 0.0 : std::prev(after)->declared_time_s;
+  return history.at(read_at_s);
+}
+
 // --- sim.plant -------------------------------------------------------------
 //
 // The nonlinear plant, integrated, through a public capability.
@@ -227,6 +414,18 @@ Artifact simulate_plant_capability(const StageContext& context) {
       schedule_at(context, "command_schedule", model->rotor_count());
   const sim::InputSchedule wind_history = schedule_at(context, "wind_schedule", 3);
 
+  // Under `extrapolation: refuse` a history must cover the whole run. It is
+  // asked once, here, before any step; see `horizon_read_time`.
+  const double end_s = static_cast<double>(steps) * step_s;
+  const double command_end_read_s = horizon_read_time(command_history, end_s, step_s);
+  const double wind_end_read_s = horizon_read_time(wind_history, end_s, step_s);
+  if (!command_history.empty()) {
+    (void)command_history.at(command_end_read_s);
+  }
+  if (!wind_history.empty()) {
+    (void)wind_history.at(wind_end_read_s);
+  }
+
   const bool freeze_battery = context.input->bool_at("freeze_battery", false);
   if (freeze_battery && !model->has_battery()) {
     throw std::invalid_argument(
@@ -282,16 +481,24 @@ Artifact simulate_plant_capability(const StageContext& context) {
   const bool wind_per_stage =
       !wind_history.empty() && wind_history.hold() == sim::HoldPolicy::Linear;
 
+  // The segment the ramp's rate is read inside, as declared times; see
+  // `rate_read_time`. Set at the start of every segment below.
+  double wind_rate_from_s = 0.0;                                   // s
+  double wind_rate_until_s = static_cast<double>(steps) * step_s;  // s
+
   const numerics::DerivativeFunction derivative = [&](double time_s,
                                                       const Eigen::VectorXd& x) -> Eigen::VectorXd {
     const Eigen::VectorXd command_now =
-        command_per_stage ? command_history.at(time_s) : segment_command;
+        command_per_stage ? command_history.at(std::fmin(time_s, command_end_read_s))
+                          : segment_command;
     const Eigen::Vector3d wind_now =
-        wind_per_stage ? Eigen::Vector3d(wind_history.at(time_s)) : segment_wind;
+        wind_per_stage ? Eigen::Vector3d(wind_history.at(std::fmin(time_s, wind_end_read_s)))
+                       : segment_wind;
     Eigen::VectorXd rate = model->derivative(x, command_now, wind_now);
     if (wind_ramps) {
       const core::State state = core::State::from_vector(x.head<core::kStateSize>());
-      const Eigen::Vector3d wind_rate_ned = wind_history.rate_at(time_s);
+      const Eigen::Vector3d wind_rate_ned(
+          wind_history.rate_at(rate_read_time(time_s, wind_rate_from_s, wind_rate_until_s)));
       rate.segment<3>(core::kVelocityU) -=
           core::dcm_ned_from_body(state.attitude_body_to_ned).transpose() * wind_rate_ned;
     }
@@ -306,15 +513,21 @@ Artifact simulate_plant_capability(const StageContext& context) {
   // state. A command step needs no re-basing, but integrating across it inside
   // one RK4 step would still cost the method its order; splitting there keeps
   // every step's four stages on one side of every jump.
+  const std::vector<HistoryEvent> command_events =
+      history_events(command_history, step_s, steps, "command_schedule");
+  const std::vector<HistoryEvent> wind_events =
+      history_events(wind_history, step_s, steps, "wind_schedule");
   std::vector<int> boundaries;
-  for (const double time_s : command_history.discontinuities()) {
-    boundaries.push_back(step_index_for_event(time_s, step_s, steps, "command_schedule"));
+  for (const HistoryEvent& event : command_events) {
+    boundaries.push_back(event.step);
   }
-  std::vector<int> wind_events;
-  for (const double time_s : wind_history.discontinuities()) {
-    const int index = step_index_for_event(time_s, step_s, steps, "wind_schedule");
-    boundaries.push_back(index);
-    wind_events.push_back(index);
+  for (const HistoryEvent& event : wind_events) {
+    boundaries.push_back(event.step);
+  }
+  const std::vector<HistoryEvent> wind_slope_changes =
+      on_lattice_slope_changes(wind_history, step_s, steps, "wind_schedule");
+  for (const HistoryEvent& change : wind_slope_changes) {
+    boundaries.push_back(change.step);
   }
   std::sort(boundaries.begin(), boundaries.end());
   boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
@@ -340,14 +553,20 @@ Artifact simulate_plant_capability(const StageContext& context) {
   for (std::size_t segment = 0; segment <= boundaries.size(); ++segment) {
     const int stop = segment < boundaries.size() ? boundaries[segment] : steps;
     const int length = stop - taken;
-    // The value in force ACROSS this segment, read at its start.
-    const double segment_start_s = static_cast<double>(taken) * step_s;
+    // The value in force ACROSS this segment: the one after the latest event at
+    // or before its first step, read at that event's DECLARED time. Reading at
+    // taken * step_s can land a rounding error before the event; see
+    // `HistoryEvent`.
     if (!command_history.empty() && !command_per_stage) {
-      segment_command = command_history.at(segment_start_s);
+      segment_command = zero_order_value_from(command_history, command_events, taken);
     }
     if (!wind_history.empty() && !wind_per_stage) {
-      segment_wind = Eigen::Vector3d(wind_history.at(segment_start_s));
+      segment_wind = Eigen::Vector3d(zero_order_value_from(wind_history, wind_events, taken));
     }
+    // The ramp's rate window: this segment's own ends, at the declared time of
+    // a slope change where one falls there.
+    wind_rate_from_s = declared_time_at(wind_slope_changes, taken, step_s, Pick::Latest);
+    wind_rate_until_s = declared_time_at(wind_slope_changes, stop, step_s, Pick::Earliest);
     if (length > 0) {
       const numerics::Trajectory piece = numerics::integrate_fixed_step(
           derivative, state, static_cast<double>(taken) * step_s, step_s, length, 1, projection);
@@ -358,14 +577,10 @@ Artifact simulate_plant_capability(const StageContext& context) {
       state = piece.states.back();
       taken = stop;
     }
-    // The wind event, applied between segments: ground velocity is continuous,
-    // so the air-relative velocity absorbs the whole change.
-    if (segment < boundaries.size()
-        && std::find(wind_events.begin(), wind_events.end(), stop) != wind_events.end()) {
-      const core::State at_event = core::State::from_vector(state.head<core::kStateSize>());
-      const Eigen::Vector3d jump = wind_history.jump_at(static_cast<double>(stop) * step_s);
-      state.segment<3>(core::kVelocityU) -=
-          core::dcm_ned_from_body(at_event.attitude_body_to_ned).transpose() * jump;
+    // The wind events at this boundary, applied between segments, each looked
+    // up at its declared time; see `apply_wind_events`.
+    if (segment < boundaries.size()) {
+      apply_wind_events(wind_history, wind_events, stop, state);
     }
   }
   all_times.push_back(static_cast<double>(steps) * step_s);
@@ -374,15 +589,24 @@ Artifact simulate_plant_capability(const StageContext& context) {
   for (std::size_t i = 0; i < all_states.size(); ++i) {
     if (i % static_cast<std::size_t>(stride) == 0 || i + 1 == all_states.size()) {
       const double at = all_times[i];
+      // Sample i is step i: the pieces above are assembled at stride one.
+      const int step = static_cast<int>(i);
       run.trajectory.times_s.push_back(at);
       run.trajectory.states.push_back(all_states[i]);
-      run.command_samples_rad_s.push_back(command_history.empty() ? command
-                                                                  : command_history.at(at));
-      // The wind AFTER the event at a boundary sample, which is the wind the
-      // next step integrates under and the one that makes the recorded
-      // air-relative velocity add up to the right ground velocity.
+      // The values AFTER any event at this sample: the ones the next step
+      // integrates under, and the ones that make the recorded air-relative
+      // velocity add up to the right ground velocity. A zero-order value is
+      // read at its event's declared time, for the reason `HistoryEvent` gives.
+      run.command_samples_rad_s.push_back(
+          command_history.empty() ? command
+          : command_per_stage     ? command_history.at(std::fmin(at, command_end_read_s))
+                                  : zero_order_value_from(command_history, command_events, step));
       run.wind_samples_ned_m_s.push_back(
-          wind_history.empty() ? wind : Eigen::Vector3d(wind_history.at(at)));
+          wind_history.empty()
+              ? wind
+              : Eigen::Vector3d(wind_per_stage
+                                    ? wind_history.at(std::fmin(at, wind_end_read_s))
+                                    : zero_order_value_from(wind_history, wind_events, step)));
     }
   }
   run.trajectory.step_s = step_s;
@@ -436,6 +660,11 @@ Artifact simulate_plant_capability(const StageContext& context) {
 //                  the TRIM command, declared rather than zero, because a
 //                  multirotor commanded to zero falls.
 //   7. HOLD.       That command is held until t_{k+1}. Zero-order, exactly.
+//                  A declared wind step inside the period splits the hold at
+//                  that instant; see the WIND note in the function.
+//
+// Before step 1 at every tick, any declared wind step AT t_k is applied, so the
+// measurement is of the state after it.
 //
 // TIMING IS AN INTEGER SCHEDULE. The controller period must be a whole number
 // of integration steps and the horizon a whole number of periods; anything else
@@ -728,18 +957,97 @@ Artifact simulate_sampled_capability(const StageContext& context) {
   std::vector<Eigen::VectorXd> queue(static_cast<std::size_t>(delay_periods) + 1, trim_command);
   std::size_t queue_head = 0;
 
+  // WIND, BY THE SAME CONTRACT AS `sim.plant`. The velocity state is
+  // air-relative (ADR-0002) and the plant takes the wind as steady, so a wind
+  // history needs the simulator's help here exactly as it does there.
+  //
+  //   A zero-order STEP is an EVENT. It must fall on an integration step, and
+  //   it is refused otherwise. The hold is split at it wherever it falls
+  //   between two ticks. The air-relative velocity absorbs the whole change,
+  //   -R^T dw, so the ground velocity is continuous across it. An event ON a
+  //   tick is applied BEFORE that tick's measurement: the controller measures
+  //   the state the plant is in at t_k, which is the state after anything that
+  //   happens at t_k.
+  //
+  //   A linear RAMP is a genuine derivative: -R^T dw/dt on the velocity rows.
+  //
+  // Until 2026-09-11 this capability did neither. It read the wind per RK4
+  // stage and integrated straight through a step. A wind step therefore became
+  // a permanent ground-velocity error of the whole increment, and a step inside
+  // an integration step was flown rather than refused.
+  const bool wind_per_stage =
+      !wind_history.empty() && wind_history.hold() == sim::HoldPolicy::Linear;
+  const std::vector<HistoryEvent> wind_events =
+      history_events(wind_history, step_s, steps, "wind_schedule");
+  // Under `extrapolation: refuse` the history must cover the whole run. It is
+  // asked once, here, before any step; see `horizon_read_time`.
+  const double wind_end_read_s =
+      horizon_read_time(wind_history, static_cast<double>(steps) * step_s, step_s);
+  if (!wind_history.empty()) {
+    (void)wind_history.at(wind_end_read_s);
+  }
+  const auto wind_from_step = [&](int step) -> Eigen::Vector3d {
+    if (wind_history.empty()) {
+      return run.wind_ned_m_s;
+    }
+    if (wind_per_stage) {
+      return Eigen::Vector3d(
+          wind_history.at(std::fmin(static_cast<double>(step) * step_s, wind_end_read_s)));
+    }
+    return Eigen::Vector3d(zero_order_value_from(wind_history, wind_events, step));
+  };
+  const auto apply_wind_events_at = [&](int step) {
+    apply_wind_events(wind_history, wind_events, step, state);
+  };
+
+  // The wind recorded at a sample is the one in force AFTER any event there.
   const auto record_sample =
-      [&](double time_s, const Eigen::VectorXd& x, const Eigen::VectorXd& applied) {
+      [&](double time_s, int step, const Eigen::VectorXd& x, const Eigen::VectorXd& applied_now) {
         run.trajectory.times_s.push_back(time_s);
         run.trajectory.states.push_back(x);
-        run.command_samples_rad_s.push_back(applied);
-        run.wind_samples_ned_m_s.push_back(
-            wind_history.empty() ? run.wind_ned_m_s : Eigen::Vector3d(wind_history.at(time_s)));
+        run.command_samples_rad_s.push_back(applied_now);
+        run.wind_samples_ned_m_s.push_back(wind_from_step(step));
       };
 
+  // The integrand of step 7. The command is the one the delay line released at
+  // the tick. Under a zero-order hold the wind is resolved once per segment;
+  // under a linear hold it is read per stage and carries the ramp's -R^T dw/dt.
+  // A ramp's slope changes on the lattice split the hold as an event does, and
+  // its rate is read inside the current segment's own window; see
+  // `on_lattice_slope_changes` and `rate_read_time`.
+  const std::vector<HistoryEvent> wind_slope_changes =
+      on_lattice_slope_changes(wind_history, step_s, steps, "wind_schedule");
+  double wind_rate_from_s = 0.0;                                   // s
+  double wind_rate_until_s = static_cast<double>(steps) * step_s;  // s
+
   Eigen::VectorXd applied = trim_command;
+  Eigen::Vector3d segment_wind = wind_from_step(0);
+  const numerics::DerivativeFunction derivative = [&](double time_s,
+                                                      const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    const Eigen::Vector3d wind_now =
+        wind_per_stage ? Eigen::Vector3d(wind_history.at(std::fmin(time_s, wind_end_read_s)))
+                       : segment_wind;
+    Eigen::VectorXd rate = model.derivative(x, applied, wind_now);
+    if (wind_per_stage) {
+      const core::State at_stage = core::State::from_vector(x.head<core::kStateSize>());
+      rate.segment<3>(core::kVelocityU) -=
+          core::dcm_ned_from_body(at_stage.attitude_body_to_ned).transpose()
+          * Eigen::Vector3d(
+              wind_history.rate_at(rate_read_time(time_s, wind_rate_from_s, wind_rate_until_s)));
+    }
+    if (freeze_battery) {
+      rate(battery_index) = 0.0;
+    }
+    return rate;
+  };
+  const numerics::ProjectionFunction projection = [&](Eigen::VectorXd& x) { model.project(x); };
+
   for (int tick = 0; tick < tick_count; ++tick) {
     const double tick_time_s = static_cast<double>(tick) * period_s;
+    const int tick_start = tick * steps_per_tick;
+
+    // 0. Events at t_k happen before the measurement at t_k.
+    apply_wind_events_at(tick_start);
 
     // 2. Coordinates, against the reference AT THIS TICK.
     Eigen::VectorXd reference_now = reference_state;
@@ -781,26 +1089,43 @@ Artifact simulate_sampled_capability(const StageContext& context) {
     record.applied_rad_s.push_back(applied);
     record.chart_error.push_back(error);
 
-    record_sample(tick_time_s, state, applied);
+    record_sample(tick_time_s, tick_start, state, applied);
 
-    // 7. Hold, and integrate one period under it. The wind is the plant's, not
-    // the controller's: it is read per stage exactly as `sim.plant` reads it.
-    const numerics::DerivativeFunction derivative =
-        [&](double time_s, const Eigen::VectorXd& x) -> Eigen::VectorXd {
-      const Eigen::Vector3d wind_now =
-          wind_history.empty() ? run.wind_ned_m_s : Eigen::Vector3d(wind_history.at(time_s));
-      Eigen::VectorXd rate = model.derivative(x, applied, wind_now);
-      if (freeze_battery) {
-        rate(battery_index) = 0.0;
+    // 7. Hold, and integrate one period under it. The period is split at any
+    // wind event or on-lattice slope change strictly inside it, and an event is
+    // applied at that instant. An event on the next tick is applied there,
+    // before that tick's measurement. For a run with no wind history this is
+    // one piece from the tick: the same computation as before wind histories
+    // were honoured.
+    const int tick_end = tick_start + steps_per_tick;
+    int at_step = tick_start;
+    while (at_step < tick_end) {
+      int stop = tick_end;
+      const EventIterator next_event = first_event_after(wind_events, at_step);
+      if (next_event != wind_events.end() && next_event->step < stop) {
+        stop = next_event->step;
       }
-      return rate;
-    };
-    const numerics::ProjectionFunction projection = [&](Eigen::VectorXd& x) { model.project(x); };
-    const numerics::Trajectory piece = numerics::integrate_fixed_step(
-        derivative, state, tick_time_s, step_s, steps_per_tick, steps_per_tick, projection);
-    state = piece.states.back();
+      const EventIterator next_change = first_event_after(wind_slope_changes, at_step);
+      if (next_change != wind_slope_changes.end() && next_change->step < stop) {
+        stop = next_change->step;
+      }
+      segment_wind = wind_from_step(at_step);
+      wind_rate_from_s = declared_time_at(wind_slope_changes, at_step, step_s, Pick::Latest);
+      wind_rate_until_s = declared_time_at(wind_slope_changes, stop, step_s, Pick::Earliest);
+      const int length = stop - at_step;
+      const double start_s =
+          at_step == tick_start ? tick_time_s : static_cast<double>(at_step) * step_s;
+      const numerics::Trajectory piece = numerics::integrate_fixed_step(
+          derivative, state, start_s, step_s, length, length, projection);
+      state = piece.states.back();
+      at_step = stop;
+      if (at_step < tick_end) {
+        apply_wind_events_at(at_step);
+      }
+    }
   }
-  record_sample(static_cast<double>(steps) * step_s, state, applied);
+  apply_wind_events_at(steps);
+  record_sample(static_cast<double>(steps) * step_s, steps, state, applied);
 
   run.trajectory.step_s = step_s;
   run.trajectory.step_count = steps;

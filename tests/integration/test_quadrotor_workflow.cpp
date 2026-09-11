@@ -13,7 +13,9 @@
 #include "galata/analyze/gramians.hpp"
 #include "galata/analyze/margins.hpp"
 #include "galata/core/state.hpp"
+#include "galata/linearize/extended.hpp"
 #include "galata/model/linear_system.hpp"
+#include "galata/model/quadrotor.hpp"
 #include "galata/modeling/linear_adapter.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/files.hpp"
@@ -24,14 +26,18 @@
 #include <gtest/gtest.h>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <numbers>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 namespace fs = std::filesystem;
@@ -742,6 +748,1040 @@ TEST_F(QuadrotorWorkflow, UnsupportedSampledTimingIsRefused) {
                                        "      delay_periods: 1.5\n"),
                          {.overwrite = true, .write_manifest = false}),
                std::runtime_error);
+}
+
+// --- sim.sampled under a declared wind history -------------------------------
+//
+// THE SAME CONTRACT AS `sim.plant`, NOT A WEAKER ONE. `sim.sampled` reads the
+// same `wind_schedule` into a plant whose velocity state is, by ADR-0002, the
+// same AIR-RELATIVE one, so everything stated above
+// `AWindStepMovesTheAirRelativeVelocityAndNotTheGroundVelocity` holds here
+// unchanged: a zero-order step is an event, no force acts at it, the ground
+// velocity is continuous across it, the air-relative velocity jumps by exactly
+// -R^T dw, and an event strictly inside an integration step is refused. Until
+// these tests the schedule was accepted here and no study drove one through it,
+// and a closed loop is exactly where WP1's first finding hides: the controller
+// quietly flies off whatever ground-velocity error the integrator injected, and
+// the trajectory still looks like a vehicle rejecting a gust.
+//
+// What the sampled loop adds is TIMING. The event need not fall on a controller
+// tick, the controller must not learn of it before its next tick, and the
+// rotors must not move before the declared delay has elapsed.
+//
+// THE FLIGHT, identical in the three tests below: from the exact trim with no
+// chart perturbation, a 2 ms step, a 0.01 s controller period and five periods
+// of delay.
+//
+//   t = 0.026 s  (step 13)  wind (0, 0, 0) -> (3, 2, 0)    between ticks 2 and 3
+//   t = 0.040 s  (step 20)  wind (3, 2, 0) -> (1, 2, -1)   exactly on tick 4
+//
+// The delay line holds the TRIM command for its first five ticks, so the rotors
+// are commanded to the trim, bitwise, over the whole of [0, 0.05 s]: no feedback
+// of any kind acts inside that window. Tick 3 is the first at or after 0.026 s,
+// so the first command that can know of the wind is computed there and reaches
+// the rotors at tick 3 + 5 = 8.
+//
+// R IS THE IDENTITY, and that is asserted rather than assumed. A still-air hover
+// at zero heading is level, and nothing in the window can tilt it: the rotors
+// hold trim and the plant's drag acts at the centre of gravity, so no moment
+// changes. The expected jumps are therefore the negated wind changes, written
+// down: -(3, 2, 0) and -(-2, 0, -1).
+//
+// THE PHYSICS IS KNOWN IN CLOSED FORM. Level, with the rotors at trim, thrust
+// still balances weight and the only force that changes is the drag on the
+// air-relative velocity, per axis m dv/dt = -(c1 v + c2 v|v|) with the model
+// file's coefficients. That equation separates: with a = c1/m and k = c2/c1,
+// |v| = s0 e^(-at) / (1 + k s0 (1 - e^(-at))), whose time integral is
+// (m/c2) ln(1 + k s0 (1 - e^(-at))), sign preserved. The expectation is exact —
+// not a Taylor expansion with a remainder to budget — so the budget is only
+// what the idealisation neglects.
+//
+// THE BUDGET, derived here before any run of these tests and not from one. Over
+// the 0.05 s window, in each coordinate's own unit:
+//
+//   the trim's unbalanced acceleration, at most its declared gate of 1e-10
+//     m/s^2 (rad/s^2), acting for 0.05 s ............................. 5e-12
+//   the level premise, asserted below at 1e-12 rad for the trim and for the
+//     flown attitude, misreading a velocity of at most 4 m/s ........... 8e-12
+//   the body rate that gate allows, 5e-12 rad/s, turning that velocity
+//     for 0.05 s ...................................................... 1e-12
+//   RK4's truncation on a decay whose rate is below 0.25 1/s, at 2 ms . < 1e-15
+//   round-off: a few ulps of 4 m/s, or of 120 m, per step, 25 steps .. < 1e-12
+//
+// The sum is below 2e-11. The budget is 1e-10, five times the sum, because the
+// round-off entries are estimates rather than bounds. Positions integrate these
+// errors over at most 0.05 s and sit inside the same figure. The smallest defect
+// the budget has to see is a re-basing applied one step late, which leaves the
+// air-relative velocity one 2 ms step of drag short: the drag at (3, 2, 0) m/s
+// is about 0.4 m/s^2 on this 1.6 kg vehicle, so about 8e-4 m/s, seven orders
+// above the budget.
+
+namespace {
+
+constexpr double kWindWindowBudget = 1e-10;  // each chart coordinate, in its own unit
+
+// The flight above. Only the time of the first wind step varies, so that the
+// refusal test can move it off the step lattice and change nothing else.
+std::string windy_sampled_chain(const std::string& first_step_time_s) {
+  return sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                       "      controller_period_s: 0.01\n"
+                       "      delay_periods: 5\n"
+                       "      wind_schedule:\n"
+                       "        hold: zero_order\n"
+                       "        extrapolation: hold\n"
+                       "        samples:\n"
+                       "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                       "          - {time_s: "
+                           + first_step_time_s
+                           + ", values: [3.0, 2.0, 0.0]}\n"
+                             "          - {time_s: 0.04, values: [1.0, 2.0, -1.0]}\n",
+                       50);
+}
+
+// Drag alone, in closed form, on a level vehicle whose rotors hold trim: the
+// air-relative velocity after `duration_s`, and the GROUND displacement over
+// it under a constant wind. Body axes are NED axes at level, zero heading.
+struct DragOnly {
+  Eigen::Vector3d air_m_s = Eigen::Vector3d::Zero();         // m/s
+  Eigen::Vector3d displacement_m = Eigen::Vector3d::Zero();  // m, NED
+};
+
+DragOnly drag_only(const galata::model::Quadrotor& model,
+                   const Eigen::Vector3d& air_m_s,
+                   const Eigen::Vector3d& wind_ned_m_s,
+                   double duration_s) {
+  DragOnly out;
+  const double mass_kg = model.mass.mass_kg;
+  for (int axis = 0; axis < 3; ++axis) {
+    const double linear = model.drag_linear_n_s_m(axis);
+    const double quadratic = model.drag_quadratic_n_s2_m2(axis);
+    const double speed = std::fabs(air_m_s(axis));
+    const double sign = air_m_s(axis) < 0.0 ? -1.0 : 1.0;
+    const double rate = linear / mass_kg;
+    const double decayed = -std::expm1(-rate * duration_s);  // 1 - e^(-at)
+    const double spread = (quadratic / linear) * speed * decayed;
+    out.air_m_s(axis) = sign * speed * std::exp(-rate * duration_s) / (1.0 + spread);
+    out.displacement_m(axis) =
+        sign * std::log1p(spread) * mass_kg / quadratic + wind_ned_m_s(axis) * duration_s;
+  }
+  return out;
+}
+
+double largest_magnitude(const Eigen::VectorXd& values) {
+  return values.cwiseAbs().maxCoeff();
+}
+
+// The worst discrepancy each check left, so the margin the budget holds is
+// visible in the test report and not only its verdict.
+void record_discrepancy(const std::string& key, double value) {
+  std::ostringstream out;
+  out << std::scientific << std::setprecision(3) << value;
+  ::testing::Test::RecordProperty(key, out.str());
+}
+
+// What the analytic flight predicts at the recorded ticks inside the window.
+struct WindWindow {
+  DragOnly at_tick_3;            // 0.004 s after the first step
+  DragOnly before_second;        // 0.014 s after the first step, just before the second
+  Eigen::Vector3d after_second;  // the air-relative velocity just after it, m/s
+  DragOnly at_tick_5;            // 0.010 s after the second step
+};
+
+WindWindow predict_wind_window(const galata::model::Quadrotor& model) {
+  // The wind as declared, and the air-relative jump each step must cause at
+  // level attitude: minus the wind change, written down rather than derived by
+  // the code under test.
+  const Eigen::Vector3d first_wind(3.0, 2.0, 0.0);
+  const Eigen::Vector3d first_jump(-3.0, -2.0, 0.0);
+  const Eigen::Vector3d second_jump(2.0, 0.0, 1.0);
+  const Eigen::Vector3d second_wind(1.0, 2.0, -1.0);
+
+  WindWindow window;
+  // Still air until 0.026 s: the air-relative velocity is zero, and the first
+  // step sets it to the jump, because the ground velocity cannot move.
+  window.at_tick_3 = drag_only(model, first_jump, first_wind, 0.030 - 0.026);
+  window.before_second = drag_only(model, first_jump, first_wind, 0.040 - 0.026);
+  window.after_second = window.before_second.air_m_s + second_jump;
+  window.at_tick_5 = drag_only(model, window.after_second, second_wind, 0.050 - 0.040);
+  return window;
+}
+
+}  // namespace
+
+// Contract items (1) and (4): continuity at each event, and the only ground
+// acceleration between the first event and the first command change is the
+// drag the wind change causes.
+TEST_F(QuadrotorWorkflow, AWindStepBetweenControllerTicksKeepsTheGroundVelocityContinuous) {
+  const RunResult result =
+      run(windy_sampled_chain("0.026"), {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  const auto& states = sampled.plant.trajectory.states;
+  const auto& winds = sampled.plant.wind_samples_ned_m_s;
+  const auto& control = sampled.control;
+  ASSERT_EQ(control.tick_times_s.size(), 10U);
+  ASSERT_EQ(states.size(), 11U) << "one sample per tick, and the state after the last hold";
+  ASSERT_EQ(winds.size(), states.size());
+
+  // THE PREMISES THE BUDGET RESTS ON. Each is asserted, so a change that
+  // invalidates the derivation above fails here, by name, rather than moving a
+  // number the budget no longer describes.
+  ASSERT_LE(trimmed.point.residual_tolerance, 1e-10) << "the budget assumes trim.hover's gate";
+  ASSERT_LE(trimmed.point.residual_norm, trimmed.point.residual_tolerance);
+  ASSERT_TRUE(trimmed.point.wind_ned_m_s.isZero(0.0)) << "the trim must be a still-air hover";
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12) << "a still-air hover must be level";
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12) << "a still-air hover must be level";
+  for (int axis = 0; axis < 3; ++axis) {
+    // The closed form divides by both coefficients; a model without either
+    // needs a different expectation, not this one with a zero in it.
+    ASSERT_GT(model.drag_linear_n_s_m(axis), 0.0);
+    ASSERT_GT(model.drag_quadratic_n_s2_m2(axis), 0.0);
+  }
+  using galata::linearize::kChartAttitudeErrorX;
+  for (std::size_t tick = 0; tick <= 5; ++tick) {
+    EXPECT_LE(largest_magnitude(control.chart_error[tick].segment<3>(kChartAttitudeErrorX)), 1e-12)
+        << "the vehicle tilted inside the trim-held window, at tick " << tick
+        << ", so R is not the identity the expected jumps assume";
+  }
+  // Nothing moves before the first event: every chart coordinate, at every
+  // tick before 0.026 s, is still the trim.
+  for (std::size_t tick = 0; tick <= 2; ++tick) {
+    EXPECT_LE(largest_magnitude(control.chart_error[tick]), kWindWindowBudget)
+        << "the trim moved before any wind changed, at tick " << tick;
+  }
+
+  const WindWindow expected = predict_wind_window(model);
+  const auto air = [&](std::size_t tick) -> Eigen::Vector3d {
+    return states[tick].segment<3>(galata::core::kVelocityU);
+  };
+  // R is the identity (asserted above), so body and NED components coincide.
+  const auto ground = [&](std::size_t tick) -> Eigen::Vector3d { return air(tick) + winds[tick]; };
+  const Eigen::Vector3d first_wind(3.0, 2.0, 0.0);
+  const Eigen::Vector3d second_wind(1.0, 2.0, -1.0);
+
+  // (1) THE JUMP. The first event is between recorded samples, so it is seen
+  // through its consequence at tick 3: the jump -(3, 2, 0) followed by 4 ms of
+  // drag, and nothing else. The second is ON tick 4, and the state recorded
+  // there must be the one AFTER it — the analytic air-relative velocity just
+  // before the event moved by exactly -(-2, 0, -1).
+  const double at_tick_3 = largest_magnitude(air(3) - expected.at_tick_3.air_m_s);
+  EXPECT_LE(at_tick_3, kWindWindowBudget)
+      << "the air-relative velocity 4 ms after the 0.026 s step is not minus the wind change "
+         "decayed by drag: "
+      << air(3).transpose() << " against " << expected.at_tick_3.air_m_s.transpose();
+  const double at_event = largest_magnitude(air(4) - expected.after_second);
+  EXPECT_LE(at_event, kWindWindowBudget)
+      << "at the 0.04 s step the air-relative velocity did not jump by exactly minus the wind "
+         "change: "
+      << air(4).transpose() << " against " << expected.after_second.transpose();
+  const double at_tick_5 = largest_magnitude(air(5) - expected.at_tick_5.air_m_s);
+  EXPECT_LE(at_tick_5, kWindWindowBudget)
+      << air(5).transpose() << " against " << expected.at_tick_5.air_m_s.transpose();
+
+  // CONTINUITY, AS A CONSISTENCY CHECK. The ground velocity here is the recorded
+  // air-relative velocity plus the recorded wind, and the next test pins the
+  // wind to the declared table. So these two checks restate the jump checks
+  // above rather than add to them. They are kept because they state the
+  // property in its own terms. The INDEPENDENT witness of continuity is the
+  // position at tick 5 below: it integrates the ground velocity and has no
+  // event of its own, and a re-basing through the wrong vector moves it by
+  // millimetres or more.
+  const double across_first =
+      largest_magnitude(ground(3) - ground(2) - (expected.at_tick_3.air_m_s + first_wind));
+  EXPECT_LE(across_first, kWindWindowBudget)
+      << "the ground velocity moved across the 0.026 s wind step by more than the drag it "
+         "causes: from "
+      << ground(2).transpose() << " to " << ground(3).transpose();
+  const double across_second =
+      largest_magnitude(ground(4) - (expected.before_second.air_m_s + first_wind));
+  EXPECT_LE(across_second, kWindWindowBudget)
+      << "the ground velocity at the 0.04 s wind step is not the one just before it: "
+      << ground(4).transpose() << " against "
+      << (expected.before_second.air_m_s + first_wind).transpose();
+
+  // (4) THE PHYSICAL RESULT. From tick 2, before any wind, to tick 5, the last
+  // state the trim command alone produced, the ground velocity changed by the
+  // drag the two wind changes caused — a few hundredths of a metre per second,
+  // against wind changes of metres per second — and the position by its
+  // integral.
+  const Eigen::Vector3d drag_change = expected.at_tick_5.air_m_s + second_wind;
+  const double velocity_change = largest_magnitude(ground(5) - ground(2) - drag_change);
+  EXPECT_LE(velocity_change, kWindWindowBudget)
+      << "between the first wind step and the first command change the ground velocity "
+         "changed by "
+      << (ground(5) - ground(2)).transpose() << "; drag alone accounts for "
+      << drag_change.transpose();
+  const Eigen::Vector3d displacement =
+      states[5].segment<3>(galata::core::kPositionNorth)
+      - trimmed.point.extended_state.segment<3>(galata::core::kPositionNorth);
+  const Eigen::Vector3d drag_displacement =
+      expected.before_second.displacement_m + expected.at_tick_5.displacement_m;
+  const double position_change = largest_magnitude(displacement - drag_displacement);
+  EXPECT_LE(position_change, kWindWindowBudget)
+      << "the vehicle moved " << displacement.transpose() << " m over the window; drag alone "
+      << "moves it " << drag_displacement.transpose() << " m";
+
+  record_discrepancy("air_at_tick_3_m_s", at_tick_3);
+  record_discrepancy("air_at_event_on_tick_4_m_s", at_event);
+  record_discrepancy("air_at_tick_5_m_s", at_tick_5);
+  record_discrepancy("ground_across_first_step_m_s", across_first);
+  record_discrepancy("ground_across_second_step_m_s", across_second);
+  record_discrepancy("ground_change_to_tick_5_m_s", velocity_change);
+  record_discrepancy("position_change_to_tick_5_m", position_change);
+}
+
+// Contract item (2): the recorded wind is the declared value in force at every
+// sample, and the change reaches the controller at its next tick and the rotors
+// only after the declared delay — ticks 3 and 8, derived above from the period,
+// the delay and the event time, and written down here rather than searched for.
+TEST_F(QuadrotorWorkflow, AWindStepReachesTheRotorsOnlyAtTheNextTickPlusTheDeclaredDelay) {
+  const RunResult result =
+      run(windy_sampled_chain("0.026"), {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& law = result.find("lqr")->payload_as<galata::synth::LqrDesign>("control_law");
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  const auto& control = sampled.control;
+  const auto& winds = sampled.plant.wind_samples_ned_m_s;
+  ASSERT_EQ(control.tick_times_s.size(), 10U);
+  ASSERT_EQ(winds.size(), 11U);
+  EXPECT_EQ(control.delay_periods, 5);
+
+  // RIGHT-CONTINUOUS, AT EVERY SAMPLE. Ticks 0 to 2 are before the first step,
+  // tick 3 is inside the first wind, and tick 4 is AT the second step and
+  // carries the value that starts there — the one the next step integrates
+  // under and the one that makes the recorded air-relative velocity add up to
+  // the right ground velocity. The final sample, at 0.1 s, holds the last value.
+  const Eigen::Vector3d still(0.0, 0.0, 0.0);
+  const Eigen::Vector3d first_wind(3.0, 2.0, 0.0);
+  const Eigen::Vector3d second_wind(1.0, 2.0, -1.0);
+  const std::vector<Eigen::Vector3d> declared = {still,
+                                                 still,
+                                                 still,
+                                                 first_wind,
+                                                 second_wind,
+                                                 second_wind,
+                                                 second_wind,
+                                                 second_wind,
+                                                 second_wind,
+                                                 second_wind,
+                                                 second_wind};
+  for (std::size_t i = 0; i < winds.size(); ++i) {
+    EXPECT_TRUE(winds[i] == declared[i])
+        << "sample " << i << " at t = " << sampled.plant.trajectory.times_s[i]
+        << " s recorded the wind " << winds[i].transpose() << "; the schedule declares "
+        << declared[i].transpose();
+  }
+
+  // THE CONTROLLER'S VIEW. At tick 2 (0.02 s) the wind has not changed, so the
+  // error it feeds back on is still the trim's. Tick 3 is the first at or after
+  // the 0.026 s step, and its error is the analytic one: position and
+  // air-relative velocity from the closed form, attitude, rates and rotors
+  // untouched. The second step is on tick 4 and is seen there.
+  using galata::linearize::kChartPositionNorth;
+  using galata::linearize::kChartVelocityU;
+  for (std::size_t tick = 0; tick <= 2; ++tick) {
+    EXPECT_LE(largest_magnitude(control.chart_error[tick]), kWindWindowBudget)
+        << "the controller saw a change at tick " << tick << ", before any wind changed";
+  }
+  const WindWindow expected = predict_wind_window(model);
+  Eigen::VectorXd first_error = Eigen::VectorXd::Zero(control.chart_error[3].size());
+  first_error.segment<3>(kChartPositionNorth) = expected.at_tick_3.displacement_m;
+  first_error.segment<3>(kChartVelocityU) = expected.at_tick_3.air_m_s;
+  EXPECT_LE(largest_magnitude(control.chart_error[3] - first_error), kWindWindowBudget)
+      << "tick 3 is the first to see the 0.026 s step, and it did not see the analytic error: "
+      << control.chart_error[3].transpose();
+  EXPECT_LE(
+      largest_magnitude(control.chart_error[4].segment<3>(kChartVelocityU) - expected.after_second),
+      kWindWindowBudget)
+      << "the step ON tick 4 must be seen at tick 4, after it, not before";
+
+  // THE ROTORS. What a chart error within the budget in every coordinate can
+  // move a command by, at most: the largest row sum of |K| times the budget.
+  const Eigen::VectorXd& trim_command = trimmed.point.command_rad_s;
+  const double trim_level_rad_s =
+      law.riccati.k.cwiseAbs().rowwise().sum().maxCoeff() * kWindWindowBudget;
+
+  // Ticks 0 to 4 receive the delay line's own fill, the trim, bitwise.
+  for (std::size_t tick = 0; tick <= 4; ++tick) {
+    EXPECT_TRUE(control.applied_rad_s[tick] == trim_command)
+        << "tick " << tick << " must receive the delay line's trim fill";
+  }
+  // Ticks 5 to 7 receive what ticks 0 to 2 computed — before any wind changed.
+  for (std::size_t tick = 5; tick <= 7; ++tick) {
+    EXPECT_LE(largest_magnitude(control.applied_rad_s[tick] - trim_command), trim_level_rad_s)
+        << "tick " << tick << " applied a command computed at tick " << tick - 5
+        << ", before the 0.026 s step, and it is not the trim";
+  }
+  // Tick 8 is the first to change: it receives exactly what tick 3 computed,
+  // and that is the trim minus the gain times the analytic error, clamped to
+  // the rotors' own limits.
+  EXPECT_LT((control.applied_rad_s[8] - control.saturated_rad_s[3]).norm(), 1e-12)
+      << "tick 8 did not receive the command computed at tick 3";
+  EXPECT_LT((control.applied_rad_s[9] - control.saturated_rad_s[4]).norm(), 1e-12)
+      << "tick 9 did not receive the command computed at tick 4";
+  Eigen::VectorXd first_response = trim_command - law.riccati.k * first_error;
+  for (int rotor = 0; rotor < model.rotor_count(); ++rotor) {
+    const auto& description = model.rotors[static_cast<std::size_t>(rotor)];
+    first_response(rotor) = std::clamp(
+        first_response(rotor), description.minimum_speed_rad_s, description.maximum_speed_rad_s);
+  }
+  EXPECT_LE(largest_magnitude(control.applied_rad_s[8] - first_response), trim_level_rad_s)
+      << "the first command to answer the wind is not u_trim - K e at the analytic error";
+  EXPECT_GT(largest_magnitude(control.applied_rad_s[8] - trim_command), trim_level_rad_s)
+      << "tick 8 is where the wind first reaches the rotors, and it applied the trim";
+  record_discrepancy("first_response_rad_s",
+                     largest_magnitude(control.applied_rad_s[8] - first_response));
+  record_discrepancy("trim_level_rad_s", trim_level_rad_s);
+}
+
+// Contract item (3): a wind step half-way through an integration step is
+// refused by `sim.sampled`, and the refusal names the schedule and says why.
+// (Every stage error carries its capability's name, added by the pipeline's own
+// wrapper, so matching that name here would prove nothing.) The same flight
+// with the step on the lattice runs, so the refusal is about WHEN, not about
+// the key. That lattice time is 0.026 s: thirteen 2 ms steps, but not
+// 13 * 0.002 in floating point. So an implementation that looks the event up
+// at k * step_s rather than at its declared time fails here as well.
+TEST_F(QuadrotorWorkflow, SimSampledRefusesAWindStepInsideAnIntegrationStep) {
+  EXPECT_NO_THROW(
+      (void)run(windy_sampled_chain("0.026"), {.overwrite = true, .write_manifest = false}));
+  try {
+    (void)run(windy_sampled_chain("0.027"), {.overwrite = true, .write_manifest = false});
+    ADD_FAILURE() << "a wind step at 0.027 s, half-way through the 2 ms step from 0.026 s, was "
+                     "flown: its re-basing had no instant to happen at, and RK4's stages "
+                     "straddled it";
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("wind_schedule"), std::string::npos)
+        << "the refusal must name the schedule whose event missed the lattice: " << message;
+    EXPECT_NE(message.find("not a whole number of"), std::string::npos)
+        << "the refusal must say that the event is not on the step lattice: " << message;
+  }
+}
+
+// THE ROTATION, which the level, zero-heading flight above cannot see. There R
+// is the identity, so -R^T dw, -R dw and an unrotated -dw are one vector, and a
+// re-basing through the wrong rotation passes every check. Here the trim is
+// level at a 30 degree heading, so the body jump is -Rz(30 deg)^T dw. At these
+// winds that differs from the other two by metres per second. The rotation is
+// written with cos and sin here, not taken from the code under test. The flight,
+// the window and the budget are the ones derived above. The body axes differ
+// from NED only by the heading, and nothing turns them inside the window, so
+// the per-axis drag closed form holds unchanged in body axes.
+TEST_F(QuadrotorWorkflow, AWindStepAtANonzeroHeadingIsAbsorbedThroughTheBodyRotation) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0, heading_deg: 30.0}",
+                        "      controller_period_s: 0.01\n"
+                        "      delay_periods: 5\n"
+                        "      wind_schedule:\n"
+                        "        hold: zero_order\n"
+                        "        extrapolation: hold\n"
+                        "        samples:\n"
+                        "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.026, values: [3.0, 2.0, 0.0]}\n"
+                        "          - {time_s: 0.04, values: [1.0, 2.0, -1.0]}\n",
+                        50),
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  const auto& states = sampled.plant.trajectory.states;
+  const auto& control = sampled.control;
+  ASSERT_EQ(states.size(), 11U);
+
+  // The premises: a still-air hover, level, at the declared heading, and still
+  // level through the whole trim-held window.
+  ASSERT_TRUE(trimmed.point.wind_ned_m_s.isZero(0.0));
+  ASSERT_NEAR(trimmed.point.yaw_rad, std::numbers::pi / 6.0, 1e-15);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12);
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12);
+  using galata::linearize::kChartAttitudeErrorX;
+  for (std::size_t tick = 0; tick <= 4; ++tick) {
+    ASSERT_LE(largest_magnitude(control.chart_error[tick].segment<3>(kChartAttitudeErrorX)), 1e-12)
+        << "the vehicle tilted inside the trim-held window, at tick " << tick;
+  }
+
+  const double c = std::cos(trimmed.point.yaw_rad);
+  const double s = std::sin(trimmed.point.yaw_rad);
+  Eigen::Matrix3d ned_from_body;
+  ned_from_body << c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0;
+  const Eigen::Vector3d first_wind(3.0, 2.0, 0.0);
+  const Eigen::Vector3d second_wind(1.0, 2.0, -1.0);
+  const Eigen::Vector3d first_jump = -(ned_from_body.transpose() * first_wind);
+  const Eigen::Vector3d second_jump = -(ned_from_body.transpose() * (second_wind - first_wind));
+
+  // Drag only, in body axes; the wind's own contribution to the position is
+  // added in NED below.
+  const DragOnly at_tick_3 = drag_only(model, first_jump, Eigen::Vector3d::Zero(), 0.004);
+  const DragOnly before_second = drag_only(model, first_jump, Eigen::Vector3d::Zero(), 0.014);
+  const Eigen::Vector3d after_second = before_second.air_m_s + second_jump;
+  const auto air = [&](std::size_t tick) -> Eigen::Vector3d {
+    return states[tick].segment<3>(galata::core::kVelocityU);
+  };
+
+  const double at_tick_3_miss = largest_magnitude(air(3) - at_tick_3.air_m_s);
+  EXPECT_LE(at_tick_3_miss, kWindWindowBudget)
+      << "4 ms after the 0.026 s step at a 30 degree heading, the body-axis air-relative "
+         "velocity is "
+      << air(3).transpose() << "; -Rz^T dw decayed by drag is " << at_tick_3.air_m_s.transpose();
+  const double at_event_miss = largest_magnitude(air(4) - after_second);
+  EXPECT_LE(at_event_miss, kWindWindowBudget)
+      << "at the 0.04 s step the body-axis jump is not -Rz^T dw: " << air(4).transpose()
+      << " against " << after_second.transpose();
+
+  // The independent witness of ground-velocity continuity: the POSITION, which
+  // integrates the ground velocity and has no event of its own. Still air
+  // until 0.026 s, then 14 ms of the rotated air-relative motion plus the wind.
+  const Eigen::Vector3d displacement =
+      states[4].segment<3>(galata::core::kPositionNorth)
+      - trimmed.point.extended_state.segment<3>(galata::core::kPositionNorth);
+  const Eigen::Vector3d expected_displacement =
+      ned_from_body * before_second.displacement_m + first_wind * 0.014;
+  const double displacement_miss = largest_magnitude(displacement - expected_displacement);
+  EXPECT_LE(displacement_miss, kWindWindowBudget)
+      << "the vehicle moved " << displacement.transpose() << " m by the 0.04 s step; the "
+      << "continuous ground velocity moves it " << expected_displacement.transpose() << " m";
+
+  record_discrepancy("heading_air_at_tick_3_m_s", at_tick_3_miss);
+  record_discrepancy("heading_air_at_event_on_tick_4_m_s", at_event_miss);
+  record_discrepancy("heading_position_at_tick_4_m", displacement_miss);
+}
+
+// A RAMP, the other half of the contract. Under a linear hold the wind has a
+// finite rate, and the air-relative velocity's rate must gain -R^T dw/dt,
+// which the plant, taking the wind as steady, does not supply. Without it the
+// air-relative velocity would sit still while the wind ramps, and the ground
+// velocity would follow the wind by metres per second that no force produced.
+//
+// THE BUDGET is a bound rather than a closed form, computed from the model file
+// before the run. The vehicle is level at zero heading, and the rotors hold the
+// trim bitwise over [0, 0.05 s], by the delay line's fill as above. So the only
+// force that changes is the drag on the air-relative velocity. The ground
+// velocity changes by at most the drag's magnitude times the time it acts:
+//     (c1 |v| + c2 |v|^2) / m * T,
+// using the largest coefficient on any axis. Here |v| <= 2.1 m/s, because the
+// wind reaches 2 m/s and the bound itself keeps the ground velocity far below
+// 0.1 m/s, and T = 0.04 s covers the 0.038 s from the ramp's start to the end
+// of the window. A missing ramp term moves the ground velocity by the whole
+// 2 m/s. The position moves by at most the bound times the 0.05 s window.
+//
+// The ramp's slope changes, at 0.012 s and 0.036 s, fall on the integration
+// lattice but strictly INSIDE controller periods. So the hold must be split at
+// them as well as at ticks. Otherwise the last stage of the step ending at
+// either change reads the next segment's slope, which moves the ground velocity
+// by h / 6 times the 83 m/s^2 slope: twice the bound.
+TEST_F(QuadrotorWorkflow, AWindRampThroughSimSampledMovesTheGroundVelocityOnlyThroughDrag) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                        "      controller_period_s: 0.01\n"
+                        "      delay_periods: 5\n"
+                        "      wind_schedule:\n"
+                        "        hold: linear\n"
+                        "        extrapolation: hold\n"
+                        "        samples:\n"
+                        "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.012, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.036, values: [2.0, 0.0, 0.0]}\n",
+                        50),
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  const auto& states = sampled.plant.trajectory.states;
+  const auto& winds = sampled.plant.wind_samples_ned_m_s;
+  const auto& control = sampled.control;
+  ASSERT_EQ(states.size(), 11U);
+  ASSERT_TRUE(trimmed.point.wind_ned_m_s.isZero(0.0));
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  using galata::linearize::kChartAttitudeErrorX;
+  for (std::size_t tick = 0; tick <= 5; ++tick) {
+    ASSERT_LE(largest_magnitude(control.chart_error[tick].segment<3>(kChartAttitudeErrorX)), 1e-12)
+        << "the vehicle tilted inside the trim-held window, at tick " << tick;
+    EXPECT_TRUE(control.applied_rad_s[std::min<std::size_t>(tick, 4)]
+                == trimmed.point.command_rad_s);
+  }
+  // The recorded wind is the interpolated one: at 0.02 s, a third of the way
+  // up the ramp.
+  EXPECT_NEAR(winds[2](0), 2.0 / 3.0, 1e-12);
+
+  const double speed_m_s = 2.1;
+  const double linear = model.drag_linear_n_s_m.maxCoeff();
+  const double quadratic = model.drag_quadratic_n_s2_m2.maxCoeff();
+  const double velocity_bound =
+      (linear * speed_m_s + quadratic * speed_m_s * speed_m_s) / model.mass.mass_kg * 0.04;
+  const auto ground = [&](std::size_t tick) -> Eigen::Vector3d {
+    return states[tick].segment<3>(galata::core::kVelocityU) + winds[tick];
+  };
+  double worst_velocity = 0.0;
+  for (std::size_t tick = 1; tick <= 5; ++tick) {
+    worst_velocity = std::fmax(worst_velocity, largest_magnitude(ground(tick) - ground(0)));
+  }
+  EXPECT_LE(worst_velocity, velocity_bound)
+      << "the ground velocity moved by " << worst_velocity << " m/s while the wind ramped; drag "
+      << "alone can move it by at most " << velocity_bound << " m/s";
+  const double moved =
+      largest_magnitude(states[5].segment<3>(galata::core::kPositionNorth)
+                        - trimmed.point.extended_state.segment<3>(galata::core::kPositionNorth));
+  EXPECT_LE(moved, velocity_bound * 0.05)
+      << "the vehicle moved " << moved << " m while the wind ramped; drag alone moves it at most "
+      << velocity_bound * 0.05 << " m";
+  record_discrepancy("ramp_ground_velocity_change_m_s", worst_velocity);
+  record_discrepancy("ramp_velocity_bound_m_s", velocity_bound);
+}
+
+// THE SAME RAMP THROUGH `sim.plant`, which carried the ramp term before this
+// closure and had no test of it. Open loop, from the still-air trim, with the
+// rotors commanded to the trim throughout, so the only force that changes is the
+// drag. The budget is the drag bound derived above the `sim.sampled` ramp test,
+// over the 0.04 s of ramp and hold. A ramp rate read one stage early at a slope
+// change moves the ground velocity by a sixth of a step of the whole slope, which
+// this bound does not allow for.
+TEST_F(QuadrotorWorkflow, AWindRampThroughSimPlantMovesTheGroundVelocityOnlyThroughDrag) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 25\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: linear\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.01, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.04, values: [2.0, 0.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& data = result.find("fly")->payload_as<PlantRun>("plant_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  ASSERT_EQ(data.trajectory.states.size(), 26U);
+  ASSERT_TRUE(trimmed.point.wind_ned_m_s.isZero(0.0));
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12);
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12);
+
+  const double speed_m_s = 2.1;
+  const double velocity_bound = (model.drag_linear_n_s_m.maxCoeff() * speed_m_s
+                                 + model.drag_quadratic_n_s2_m2.maxCoeff() * speed_m_s * speed_m_s)
+                                / model.mass.mass_kg * 0.04;
+  const auto ground = [&](std::size_t sample) -> Eigen::Vector3d {
+    return data.trajectory.states[sample].segment<3>(galata::core::kVelocityU)
+           + data.wind_samples_ned_m_s[sample];
+  };
+  double worst_velocity = 0.0;
+  for (std::size_t sample = 1; sample < data.trajectory.states.size(); ++sample) {
+    worst_velocity = std::fmax(worst_velocity, largest_magnitude(ground(sample) - ground(0)));
+  }
+  EXPECT_LE(worst_velocity, velocity_bound)
+      << "the ground velocity moved by " << worst_velocity << " m/s while the wind ramped; drag "
+      << "alone can move it by at most " << velocity_bound << " m/s";
+  record_discrepancy("plant_ramp_ground_velocity_change_m_s", worst_velocity);
+}
+
+// `extrapolation: refuse` MEANS REFUSE, FOR A ZERO-ORDER HISTORY TOO. A
+// zero-order history is read only at t = 0 and at its declared events, all of
+// which lie inside its span. So nothing would read it past its end unless the
+// horizon is checked on purpose. Each capability refuses before its first step
+// a history that ends before the run does. Both kinds of schedule, in both
+// capabilities.
+TEST_F(QuadrotorWorkflow, AZeroOrderHistoryShorterThanTheRunIsRefusedUnderRefuse) {
+  const std::string plant_head =
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: hover\n    capability: trim.hover\n    input: "
+      "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+      "  - id: fly\n    capability: sim.plant\n    input:\n"
+      "      trim: {from: hover}\n      step_s: 0.002\n      steps: 50\n";
+  const auto expect_refused = [&](const std::string& document, const std::string& what) {
+    try {
+      (void)run(document, {.overwrite = true, .write_manifest = false});
+      ADD_FAILURE() << what << " ends at 0.05 s under `extrapolation: refuse` and the run "
+                    << "reaches 0.1 s, but it was flown";
+    } catch (const std::runtime_error& error) {
+      EXPECT_NE(std::string(error.what()).find("outside the declared span"), std::string::npos)
+          << what << ": " << error.what();
+    }
+  };
+  expect_refused(plant_head
+                     + "      wind_schedule:\n        hold: zero_order\n"
+                       "        extrapolation: refuse\n        samples:\n"
+                       "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                       "          - {time_s: 0.05, values: [1.0, 0.0, 0.0]}\n",
+                 "a sim.plant wind_schedule");
+  expect_refused(plant_head
+                     + "      command_schedule:\n        hold: zero_order\n"
+                       "        extrapolation: refuse\n        samples:\n"
+                       "          - {time_s: 0.0, values: [620.0, 620.0, 620.0, 620.0]}\n"
+                       "          - {time_s: 0.05, values: [630.0, 630.0, 630.0, 630.0]}\n",
+                 "a sim.plant command_schedule");
+  expect_refused(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                               "      controller_period_s: 0.01\n"
+                               "      delay_periods: 5\n"
+                               "      wind_schedule:\n"
+                               "        hold: zero_order\n"
+                               "        extrapolation: refuse\n"
+                               "        samples:\n"
+                               "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                               "          - {time_s: 0.05, values: [1.0, 0.0, 0.0]}\n",
+                               50),
+                 "a sim.sampled wind_schedule");
+}
+
+// A RAMP THAT ENDS EXACTLY AT THE HORIZON. The run is 13 steps of 2 ms, and
+// 13 * 0.002 overshoots the declared 0.026 s by one unit in the last place.
+// Two things must not follow from that:
+//   - Refusal by rounding. Under `extrapolation: refuse` the history covers the
+//     run exactly, so reading it at the overshooting horizon must not refuse it.
+//   - A misread last step. The slope change at the horizon is a segment end like
+//     any other. The last RK4 stage must read the ramp's own slope, not the zero
+//     beyond it, which would put a sixth of a step of the whole slope into the
+//     air-relative velocity.
+// The budget is the drag bound of the ramp tests above, over the 0.02 s during
+// which the wind is nonzero. A misread last step moves the ground velocity by
+// h / 6 times the 100 m/s^2 slope, several times that bound.
+TEST_F(QuadrotorWorkflow, ARampEndingAtTheHorizonIsNeitherRefusedByRoundingNorMisreadAtTheEnd) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 13\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: linear\n"
+          "        extrapolation: refuse\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.006, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.026, values: [2.0, 0.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& data = result.find("fly")->payload_as<PlantRun>("plant_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  ASSERT_EQ(data.trajectory.states.size(), 14U);
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  EXPECT_TRUE(data.wind_samples_ned_m_s.back() == Eigen::Vector3d(2.0, 0.0, 0.0))
+      << "the last sample must carry the history's last declared value";
+
+  const double speed_m_s = 2.1;
+  const double velocity_bound = (model.drag_linear_n_s_m.maxCoeff() * speed_m_s
+                                 + model.drag_quadratic_n_s2_m2.maxCoeff() * speed_m_s * speed_m_s)
+                                / model.mass.mass_kg * 0.02;
+  const auto ground = [&](std::size_t sample) -> Eigen::Vector3d {
+    return data.trajectory.states[sample].segment<3>(galata::core::kVelocityU)
+           + data.wind_samples_ned_m_s[sample];
+  };
+  double worst_velocity = 0.0;
+  for (std::size_t sample = 1; sample < data.trajectory.states.size(); ++sample) {
+    worst_velocity = std::fmax(worst_velocity, largest_magnitude(ground(sample) - ground(0)));
+  }
+  EXPECT_LE(worst_velocity, velocity_bound)
+      << "the ground velocity moved by " << worst_velocity << " m/s over a ramp ending at the "
+      << "horizon; drag alone can move it by at most " << velocity_bound << " m/s";
+  record_discrepancy("horizon_ramp_ground_velocity_change_m_s", worst_velocity);
+}
+
+// TWO EVENTS ON ONE STEP. Declared 1e-13 s apart, both round to step 500 of a
+// 1 ms run. The value in force after that step is the second one's, 3 m/s, and
+// the air-relative velocity must absorb the whole change to it, not only the
+// first event's 1 m/s. Otherwise the recorded wind and the state disagree by a
+// ground-velocity jump of 2 m/s that no force produced.
+TEST_F(QuadrotorWorkflow, EveryWindEventThatLandsOnOneStepIsAbsorbed) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.001\n"
+          "      steps: 600\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: zero_order\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.5, values: [1.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.5000000000001, values: [3.0, 0.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& data = result.find("fly")->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.trajectory.states.size(), 601U);
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12);
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12);
+  const auto ground = [&](std::size_t sample) -> Eigen::Vector3d {
+    return data.trajectory.states[sample].segment<3>(galata::core::kVelocityU)
+           + data.wind_samples_ned_m_s[sample];
+  };
+  // THE BUDGET, derived from premises that are asserted. The ground velocity
+  // above adds body components to NED ones, which is exact only at R = I. The
+  // flown attitude at sample 500 is asserted within 2e-11 rad of it: the level
+  // trim accounts for at most 1.5e-12 rad, and 0.5 s of open-loop drift under
+  // the trim's residual gate, 1e-10 rad/s^2, for at most 1.25e-11 rad. Through
+  // that rotation the 3 m/s jump is misread by at most 6e-11 m/s. The 1 ms step
+  // before the event adds the trim's residual, 1e-13 m/s, and the gravity the
+  // drift misprojects, about 1.2e-13 m/s. The budget is 1e-10 m/s, above the
+  // sum of about 6.1e-11. A lost event leaves a step of 2 m/s.
+  ASSERT_LE(trimmed.point.residual_tolerance, 1e-10) << "the budget assumes trim.hover's gate";
+  ASSERT_LE(trimmed.point.residual_norm, trimmed.point.residual_tolerance);
+  const double rotation_rad =
+      2.0 * data.trajectory.states[500].segment<3>(galata::core::kQuaternionX).norm();
+  ASSERT_LE(rotation_rad, 2e-11) << "the budget assumes the flown attitude is within 2e-11 rad "
+                                    "of level at zero heading";
+  constexpr double kCoincidentEventBudget = 1e-10;  // m/s
+  EXPECT_TRUE(data.wind_samples_ned_m_s[500] == Eigen::Vector3d(3.0, 0.0, 0.0));
+  EXPECT_LE(largest_magnitude(ground(500) - ground(499)), kCoincidentEventBudget)
+      << "two wind events on one step moved the ground velocity from " << ground(499).transpose()
+      << " to " << ground(500).transpose();
+}
+
+// A RAMP THE INTEGRATOR CANNOT SEE IS REFUSED. A linear wind's rate enters the
+// air-relative velocity, so a change of slope inside a step is integrated as if
+// it happened at one of RK4's stages, and the error stays in the ground
+// velocity. A ramp 1e-4 s long inside one 2 ms step falls between the stages
+// and is missed entirely: its 3 m/s would reach the recorded wind and never the
+// state. Both capabilities refuse a sample off the lattice, as they refuse a
+// step there. Two samples 1e-13 s apart both land on step 13, so each is on
+// the lattice, and the pair is refused by name: a step written as a ramp.
+TEST_F(QuadrotorWorkflow, ALinearWindThatChangesSlopeInsideAStepIsRefused) {
+  const std::string plant_head =
+      "version: 1\nstages:\n"
+      "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+      "  - id: hover\n    capability: trim.hover\n    input: "
+      "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+      "  - id: fly\n    capability: sim.plant\n    input:\n"
+      "      trim: {from: hover}\n      step_s: 0.002\n      steps: 25\n";
+  const auto expect_refused =
+      [&](const std::string& document, const std::string& what, const std::string& reason) {
+        try {
+          (void)run(document, {.overwrite = true, .write_manifest = false});
+          ADD_FAILURE() << what << " was flown";
+        } catch (const std::runtime_error& error) {
+          const std::string message = error.what();
+          EXPECT_NE(message.find("wind_schedule"), std::string::npos) << what << ": " << message;
+          EXPECT_NE(message.find(reason), std::string::npos) << what << ": " << message;
+        }
+      };
+  const std::string sub_step_ramp =
+      "        samples:\n"
+      "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+      "          - {time_s: 0.0251, values: [0.0, 0.0, 0.0]}\n"
+      "          - {time_s: 0.0252, values: [3.0, 0.0, 0.0]}\n";
+  expect_refused(plant_head
+                     + "      wind_schedule:\n        hold: linear\n        extrapolation: hold\n"
+                     + sub_step_ramp,
+                 "a sim.plant ramp inside one step",
+                 "not a whole number of");
+  expect_refused(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                               "      controller_period_s: 0.01\n"
+                               "      delay_periods: 5\n"
+                               "      wind_schedule:\n"
+                               "        hold: linear\n"
+                               "        extrapolation: hold\n"
+                                   + sub_step_ramp,
+                               50),
+                 "a sim.sampled ramp inside one step",
+                 "not a whole number of");
+  expect_refused(plant_head
+                     + "      wind_schedule:\n        hold: linear\n        extrapolation: hold\n"
+                       "        samples:\n"
+                       "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                       "          - {time_s: 0.026, values: [0.0, 0.0, 0.0]}\n"
+                       "          - {time_s: 0.0260000000001, values: [3.0, 0.0, 0.0]}\n",
+                 "a sim.plant ramp of 1e-13 s on one lattice step",
+                 "on the same integration step");
+}
+
+// A LINEAR COMMAND HISTORY ENDING AT THE HORIZON. The ramp test above cannot see
+// this, because its history is the wind. The same 13 steps of 2 ms overshoot
+// the declared 0.026 s by a unit in the last place. Under `extrapolation:
+// refuse` the command history must be neither refused by that rounding nor read
+// past its end. The last recorded command is its last declared value.
+TEST_F(QuadrotorWorkflow, ALinearCommandHistoryEndingAtTheHorizonIsNotRefusedByRounding) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n      step_s: 0.002\n      steps: 13\n"
+          "      sample_stride: 1\n"
+          "      command_schedule:\n        hold: linear\n        extrapolation: refuse\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [620.0, 620.0, 620.0, 620.0]}\n"
+          "          - {time_s: 0.026, values: [630.0, 630.0, 630.0, 630.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+  const auto& data = result.find("fly")->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.command_samples_rad_s.size(), 14U);
+  EXPECT_TRUE((data.command_samples_rad_s.back().array() == 630.0).all())
+      << "the last sample must carry the history's last declared command, "
+      << data.command_samples_rad_s.back().transpose();
+}
+
+// THE SAME HORIZON THROUGH `sim.sampled`, which handles its horizon in its own
+// code. A linear wind ends exactly at a horizon of 13 steps of 2 ms, under
+// `extrapolation: refuse`, with the controller running every step. The run must
+// not be refused by the rounding, and its last recorded wind is the history's
+// last declared value.
+TEST_F(QuadrotorWorkflow, ALinearWindHistoryEndingAtTheHorizonIsNotRefusedBySimSampled) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                        "      controller_period_s: 0.002\n"
+                        "      delay_periods: 5\n"
+                        "      wind_schedule:\n"
+                        "        hold: linear\n"
+                        "        extrapolation: refuse\n"
+                        "        samples:\n"
+                        "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.006, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.026, values: [2.0, 0.0, 0.0]}\n",
+                        13),
+          {.overwrite = true, .write_manifest = false});
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  ASSERT_EQ(sampled.plant.wind_samples_ned_m_s.size(), 14U);
+  EXPECT_TRUE(sampled.plant.wind_samples_ned_m_s.back() == Eigen::Vector3d(2.0, 0.0, 0.0))
+      << "the last sample must carry the history's last declared wind";
+}
+
+// COINCIDENT EVENTS THROUGH `sim.sampled`. This is the flight of the first sampled
+// wind test, except that its first step is split into two events 1e-13 s apart.
+// Both land on step 13: first to (1, 0, 0), then to (3, 2, 0). Absorbed as their
+// sum, they leave exactly the flight the single step does. The same premises
+// are asserted here, so the analytic window and its budget apply unchanged.
+TEST_F(QuadrotorWorkflow, CoincidentWindEventsBetweenTicksAreAbsorbedBySimSampled) {
+  const RunResult result =
+      run(sampled_chain("{quadrotor: {from: plant}, altitude_m: 120.0}",
+                        "      controller_period_s: 0.01\n"
+                        "      delay_periods: 5\n"
+                        "      wind_schedule:\n"
+                        "        hold: zero_order\n"
+                        "        extrapolation: hold\n"
+                        "        samples:\n"
+                        "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.026, values: [1.0, 0.0, 0.0]}\n"
+                        "          - {time_s: 0.0260000000001, values: [3.0, 2.0, 0.0]}\n"
+                        "          - {time_s: 0.04, values: [1.0, 2.0, -1.0]}\n",
+                        50),
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& sampled = result.find("closed")->payload_as<SampledRun>("sampled_trajectory");
+  const galata::model::Quadrotor& model = trimmed.model;
+  const auto& states = sampled.plant.trajectory.states;
+  const auto& winds = sampled.plant.wind_samples_ned_m_s;
+  const auto& control = sampled.control;
+  ASSERT_EQ(states.size(), 11U);
+  ASSERT_EQ(winds.size(), states.size());
+  ASSERT_LE(trimmed.point.residual_tolerance, 1e-10) << "the budget assumes trim.hover's gate";
+  ASSERT_LE(trimmed.point.residual_norm, trimmed.point.residual_tolerance);
+  ASSERT_TRUE(trimmed.point.wind_ned_m_s.isZero(0.0)) << "the trim must be a still-air hover";
+  ASSERT_EQ(trimmed.point.yaw_rad, 0.0);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12) << "a still-air hover must be level";
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12) << "a still-air hover must be level";
+  for (int axis = 0; axis < 3; ++axis) {
+    ASSERT_GT(model.drag_linear_n_s_m(axis), 0.0);
+    ASSERT_GT(model.drag_quadratic_n_s2_m2(axis), 0.0);
+  }
+  using galata::linearize::kChartAttitudeErrorX;
+  for (std::size_t tick = 0; tick <= 5; ++tick) {
+    ASSERT_LE(largest_magnitude(control.chart_error[tick].segment<3>(kChartAttitudeErrorX)), 1e-12)
+        << "the vehicle tilted inside the trim-held window, at tick " << tick;
+  }
+  EXPECT_TRUE(winds[3] == Eigen::Vector3d(3.0, 2.0, 0.0))
+      << "the wind after both events must be the later one's";
+
+  const WindWindow expected = predict_wind_window(model);
+  const auto air = [&](std::size_t tick) -> Eigen::Vector3d {
+    return states[tick].segment<3>(galata::core::kVelocityU);
+  };
+  EXPECT_LE(largest_magnitude(air(3) - expected.at_tick_3.air_m_s), kWindWindowBudget)
+      << "two events on one step were not absorbed as their sum: " << air(3).transpose()
+      << " against " << expected.at_tick_3.air_m_s.transpose();
+  EXPECT_LE(largest_magnitude(air(4) - expected.after_second), kWindWindowBudget)
+      << air(4).transpose() << " against " << expected.after_second.transpose();
+  EXPECT_LE(largest_magnitude(air(5) - expected.at_tick_5.air_m_s), kWindWindowBudget)
+      << air(5).transpose() << " against " << expected.at_tick_5.air_m_s.transpose();
+}
+
+// A WIND STEP ON THE LATTICE, AT A TIME THE STEP DOES NOT MULTIPLY TO EXACTLY.
+// 0.026 s is thirteen 2 ms steps, but 13 * 0.002 is 0.026000000000000002 in
+// floating point. Until 2026-09-11 `sim.plant` looked the jump up at
+// k * step_s, which the history does not recognise as its declared 0.026 s, so
+// it refused a step that is on the lattice. The trim here is level at a 30
+// degree heading, so the jump is -Rz(30 deg)^T dw. The zero-heading test above
+// cannot tell that apart from the unrotated -dw.
+TEST_F(QuadrotorWorkflow, SimPlantAcceptsALatticeWindStepAtATimeTheStepDoesNotMultiplyTo) {
+  const RunResult result =
+      run("version: 1\nstages:\n"
+          "  - id: plant\n    capability: model.quadrotor\n    input: {path: quad.yaml}\n"
+          "  - id: hover\n    capability: trim.hover\n    input: "
+          "{quadrotor: {from: plant}, altitude_m: 120.0, heading_deg: 30.0}\n"
+          "  - id: fly\n    capability: sim.plant\n    input:\n"
+          "      trim: {from: hover}\n"
+          "      step_s: 0.002\n"
+          "      steps: 50\n"
+          "      sample_stride: 1\n"
+          "      wind_schedule:\n"
+          "        hold: zero_order\n"
+          "        extrapolation: hold\n"
+          "        samples:\n"
+          "          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}\n"
+          "          - {time_s: 0.026, values: [3.0, 2.0, 0.0]}\n",
+          {.overwrite = true, .write_manifest = false});
+  const auto& trimmed = result.find("hover")->payload_as<HoverTrimArtifact>("hover_trim");
+  const auto& data = result.find("fly")->payload_as<PlantRun>("plant_trajectory");
+  ASSERT_EQ(data.trajectory.states.size(), 51U);
+  ASSERT_NEAR(trimmed.point.yaw_rad, std::numbers::pi / 6.0, 1e-15);
+  ASSERT_LE(std::fabs(trimmed.point.roll_rad), 1e-12);
+  ASSERT_LE(std::fabs(trimmed.point.pitch_rad), 1e-12);
+
+  const double c = std::cos(trimmed.point.yaw_rad);
+  const double s = std::sin(trimmed.point.yaw_rad);
+  Eigen::Matrix3d ned_from_body;
+  ned_from_body << c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0;
+  const Eigen::Vector3d wind(3.0, 2.0, 0.0);
+  // Sample 13 is the state after the event at 0.026 s and sample 12 the one
+  // before it, in still air, so nothing but the jump separates them.
+  //
+  // THE BUDGET, derived from premises that are asserted. The code applies
+  // -R^T dw at the attitude FLOWN at sample 13; the expectation uses the trim's
+  // heading alone. The trim's roll and pitch, asserted at 1e-12 rad each, put
+  // its attitude within 1.5e-12 rad of Rz(30 deg). The flown attitude is
+  // asserted within 1e-13 rad of the trim's; 26 ms of drift under the residual
+  // gate allows about 3.4e-14. Through at most 1.6e-12 rad the 3.6 m/s jump is
+  // misread by at most 5.8e-12 m/s, and the 2 ms still-air step before it adds
+  // the trim's residual, at most 2e-13 m/s. The budget is 1e-11 m/s. A jump
+  // through the unrotated -dw is off by about 1.8 m/s.
+  ASSERT_LE(trimmed.point.residual_tolerance, 1e-10) << "the budget assumes trim.hover's gate";
+  ASSERT_LE(trimmed.point.residual_norm, trimmed.point.residual_tolerance);
+  const Eigen::Vector4d trim_attitude =
+      trimmed.point.extended_state.segment<4>(galata::core::kQuaternionW);
+  const Eigen::Vector4d flown_attitude =
+      data.trajectory.states[13].segment<4>(galata::core::kQuaternionW);
+  ASSERT_LE(2.0 * (flown_attitude - trim_attitude).norm(), 1e-13)
+      << "the budget assumes the vehicle has not turned from its trim by sample 13";
+  constexpr double kLatticeJumpBudget = 1e-11;  // m/s
+  const Eigen::Vector3d air_before =
+      data.trajectory.states[12].segment<3>(galata::core::kVelocityU);
+  const Eigen::Vector3d air_after = data.trajectory.states[13].segment<3>(galata::core::kVelocityU);
+  EXPECT_LE(largest_magnitude(air_after - air_before + ned_from_body.transpose() * wind),
+            kLatticeJumpBudget)
+      << "the air-relative velocity did not jump by -Rz^T dw: "
+      << (air_after - air_before).transpose();
+  EXPECT_TRUE(data.wind_samples_ned_m_s[12].isZero(0.0));
+  EXPECT_TRUE(data.wind_samples_ned_m_s[13] == wind)
+      << "the sample at the event must carry the wind that starts there";
 }
 
 // --- a law designed in discrete time -----------------------------------------
