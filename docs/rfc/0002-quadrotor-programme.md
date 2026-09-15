@@ -1175,7 +1175,7 @@ norm, against an optional declared small-perturbation budget.
 Souxmar plant: trim, linearisation, discretisation and sampled synthesis, then nonlinear sampled
 simulation, with rotor lag, a declared one-period delay and per-rotor speed limits. Its
 small-perturbation budget was fixed in the study file before the study first ran, and the run
-lands **just outside** it. That is the acceptance case's result, and it is a FAIL. It was
+lands **just outside** it. That is the original case's result, and it is a FAIL. It was
 localised rather than absorbed:
 
 - The discrepancy is second order in the perturbation.
@@ -1195,9 +1195,12 @@ plant, the discretisation, the gain, the delay line or the prediction.
 
 The budget holds at nine tenths of the declared perturbation and fails at the perturbation
 itself. A case at half the excitation, with the budget and everything else unchanged, passes,
-and so does its horizontal offset alone. It is **proposed, not adopted**, in
-`examples/souxmar-sampled-lqr/proposed-acceptance.yaml`. Until it is adopted, the agreed case
-stands as a FAIL.
+and so does its horizontal offset alone. On 2026-09-11 that case,
+`examples/souxmar-sampled-lqr/acceptance.yaml`, was **adopted** as the small-perturbation
+acceptance case. It accepts a narrower comparison. The original case keeps its excitation, its
+budget and its recorded FAIL, and adopting the smaller one does not make the original pass. The
+envelope behind the choice was measured along one perturbation direction and a few of its
+constituents; it is not a region of validity in the chart.
 
 A two-sided labelled lock holds the finding. The negative control first chosen — a prediction
 one tick out in delay — turned out to be below the comparison's resolution at this
@@ -1218,14 +1221,56 @@ example's README carries all of it.
   timing, re-derive the executed commands from the discrete gain, and refuse a permuted
   basis.
 - `ExampleSouxmarSampledLqr` runs the example and traces its discrepancy term by term. It
-  brackets the envelope, and it checks that the proposed case is the agreed study with only
-  the perturbation halved.
+  brackets the envelope, and it checks that the adopted acceptance case is the original study
+  with only the perturbation halved.
 - `ExampleSouxmarLinearHistories`, `LinearHistoryWorkflow` and `LinearSimulation` hold the
   linear path's declared histories. The correction above records them.
 - `Determinism.ASampledDesignAndItsPredictionAreBitIdenticalAcrossRuns` and the fingerprint
   battery's sampled-design section cover determinism.
 - The case registry records `sampled.discrete_references` and `sampled.small_perturbation`,
   both self-consistent and neither validated.
+
+**Closure, 2026-09-11: the wind contract through `sim.sampled`.** `sim.sampled` accepted a
+`wind_schedule`, but no study file had ever driven one through it. Verifying that through a study,
+as the closure required, found that `sim.sampled` honoured none of the contract `sim.plant`
+established:
+
+- It integrated straight through a wind step, so the step became a permanent ground-velocity
+  error of the whole increment.
+- It flew a step that fell inside an integration step.
+- It dropped a ramp's `−Rᵀ dw/dt`.
+
+It now applies the same contract as `sim.plant`:
+
+- a step, and a ramp's change of slope, must fall on the integration lattice;
+- the hold is split at a step between controller ticks;
+- the air-relative velocity absorbs `−Rᵀ dw`;
+- a step on a tick is applied before that tick's measurement;
+- a ramp contributes its rate;
+- under `extrapolation: refuse`, a history that ends before the run is refused.
+
+The same verification found `sim.plant` wrong in three places, and all three are corrected:
+
+- It looked a wind jump up at `k × step_s`, which refused a lattice-aligned step at 0.026 s.
+- It read a ramp's rate one stage early at a slope change.
+- It accepted a ramp's change of slope inside an integration step. RK4's stages integrate
+  the rate as if it changed at one of them, which leaves a ground-velocity error that no
+  later step repays, and a ramp shorter than a step can vanish. Both capabilities now refuse
+  it, as they refuse a step there. A command history is unaffected: the rotors integrate
+  its value, not its rate.
+
+The study-file tests in `QuadrotorWorkflow` hold each part. Their expected values are closed
+forms rather than recorded outputs, and the budget above them is derived in the comment that
+introduces them, before any run of them, from the trim gate, the asserted level premise, RK4's
+truncation on the decay and a round-off estimate. This is verification of functionality WP5
+already asked for, not new scope: `sim.sampled` accepted a `wind_schedule` before this closure
+and no study file had ever driven one through it.
+
+**Where the closure's verification is recorded.** `docs/reports/quadrotor-programme-acceptance.md`
+carries it, in a section that keeps four strands apart — the full suite, the sanitizer, the
+local fixture checks and the pyulog comparison — each against the revision it covers, with the
+hosted graph kept separate from all four. A later documentation commit does not extend any of
+their reach.
 
 **What this still does not deliver.**
 
