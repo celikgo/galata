@@ -297,6 +297,83 @@ const std::vector<Case>& validation_cases() {
        "one would make every trim infeasible for a reason that has nothing to do with "
        "flight."},
 
+      {"souxmar.helicopter_hover",
+       "Level-1 helicopter hover — momentum theory, the weight balance, and the anti-torque "
+       "balance",
+       {"model.helicopter", "trim.helicopter"},
+       "Closed-form invariants of the rotor and trim equations, and a cross-implementation "
+       "check against the Souxmar design package's own momentum-theory computation "
+       "(turboshaft_rev_i/results.json, revision I, 12 September 2026)",
+       Status::Unvalidated,
+       {E{kValidation, "SouxmarHelicopterHover.InducedVelocityMatchesMomentumTheoryExactly"},
+        E{kValidation, "SouxmarHelicopterHover.MainRotorThrustCarriesTheWeight"},
+        E{kValidation, "SouxmarHelicopterHover.TheAntiTorqueBalancesAndTheYawResidualVanishes"},
+        E{kValidation,
+          "SouxmarHelicopterHover.ThrustCoefficientAgreesWithTheDesignPackagesOwnComputation"},
+        E{kUnit, "HelicopterTrim.TheAntiTorqueBalancesInHover"},
+        E{kUnit, "HelicopterTrim.SolvesHoverForItsDeclaredUnknowns"},
+        E{kUnit, "Helicopter.RefusesAModelWhoseTailRotorReinforcesTheTorqueItOpposes"}},
+       "UNVALIDATED, and the word is exact: NO PUBLISHED ROTORCRAFT REFERENCE HAS BEEN "
+       "COMPARED AGAINST. A published measured helicopter dataset carrying the printed "
+       "precision this project's ritual needs was not obtained, so nothing here claims "
+       "agreement with one. What is checked is two things that are not the implementation. "
+       "First, closed-form invariants: the hover induced velocity reproduces momentum theory "
+       "to 1e-6 relative, main-rotor thrust carries the weight to within the 3% the shaft "
+       "tilt and the tail-rotor bank account for, and the yaw-moment residual vanishes to "
+       "1e-6 N m with the tail rotor's thrust at its 6.7 m arm balancing the main rotor's "
+       "shaft torque to 5%. Second, a cross-implementation check against the design "
+       "package's independently written Python momentum-theory script at the package's own "
+       "3170 kg sizing condition, compared at MATCHED THRUST because the two do not share a "
+       "collective definition: C_T/sigma agrees within a 3% budget derived BEFORE the "
+       "comparison from the two effects the implementations do not share — a 0.97 tip-loss "
+       "factor and -8 degrees of blade twist, neither of which the package models. Agreement "
+       "is NOT validation: both are momentum theory, so a shared modelling error passes. It "
+       "is evidence that two codings of the same physics agree, and the shipped parameter "
+       "set is a DESIGN STUDY rather than a measured aircraft — see "
+       "models/souxmar-heli/PROVENANCE.md, which separates the thirteen parameters taken "
+       "from that package from the six derived and the twenty assumed, and records an "
+       "inertia tensor that was computed from the package's weight statement and REJECTED "
+       "because with no lateral offsets its Izz came out twenty times too small and sat "
+       "exactly on the triangle inequality."},
+
+      {"souxmar.helicopter_linearisation",
+       "Linearising the helicopter about its trim, and the order at which it agrees with the "
+       "nonlinear model",
+       {"linearize.vehicle", "analyze.nonlinear_agreement", "analyze.modes"},
+       "The Taylor remainder's exact second-order scaling, and the actuator lags' exact "
+       "eigenvalues",
+       Status::Unvalidated,
+       {E{kUnit, "HelicopterLinearisation.NonlinearAndLinearAgreeToSecondOrderInForwardFlight"},
+        E{kUnit,
+          "HelicopterLinearisation.HasANonVanishingErrorFloorInExactHoverAndThatIsThePhysics"},
+        E{kUnit, "HelicopterLinearisation.TheActuatorLagsAppearAsTheirOwnEigenvalues"},
+        E{kUnit, "HelicopterLinearisation.RefusesAPointThatIsNotAnEquilibriumAndNamesTheState"},
+        E{kUnit, "HelicopterModes.ClassifiesTheHoverModesAndFindsAnUnstableOscillation"},
+        E{kUnit, "HelicopterModes.AModelWithNoRotorSpeedRoleCannotBeGivenARotorcraftLabel"}},
+       "Checked as an ORDER rather than a magnitude, because no single tolerance at a single "
+       "perturbation size separates a correct linearisation from one carrying a sign error, "
+       "a missing term, or a point that is not quite an equilibrium. In forward flight the "
+       "discrepancy falls as the SQUARE of the perturbation, measured at 1.9984 to 1.9998 "
+       "over four halvings. Each actuator's first-order lag appears as a real eigenvalue at "
+       "exactly -1/tau, which is a closed-form check on the whole path: state layout, "
+       "perturbation and derivative all have to be right for those four to land. "
+       "A DEVIATION IS LOCALISED RATHER THAN ABSORBED. In exact hover the same measurement "
+       "does NOT converge: it stops at a floor of about 3.1e-3 instead of vanishing. Two "
+       "terms cause it and both are physics, not defects. The advance ratio is "
+       "mu = |V|/(Omega R), and |V| has no derivative at V = 0 — the one-sided slopes are "
+       "+1 and -1 — so a central difference returns zero for d(mu)/dV and the linearisation "
+       "carries no flap-back response to a speed perturbation. The empennage compounds it: "
+       "its incidence is atan2(w, u) at a tail sitting in about 4 m/s of rotor downwash with "
+       "no free stream, so the angle swings through a right angle for an arbitrarily small "
+       "perturbation. Removing the empennage isolates the first term and the order becomes a "
+       "clean 1.00. The gate is TWO-SIDED, like the two load-bearing locks above: it fails "
+       "if the floor grows beyond the two known kinks, and it fails if the floor VANISHES, "
+       "because a hover linearisation that converged cleanly would mean the advance ratio "
+       "had been smoothed — a better Jacobian of a worse model. The consequence for use is "
+       "specific: the hover linearisation remains fit for stability analysis and control "
+       "synthesis, which read the matrix, and is NOT fit for trajectory prediction from the "
+       "hover, where no perturbation is small enough to make the error negligible."},
+
       {"quadrotor.hover_linearisation",
        "Hover linearisation on a local attitude-error chart — pole structure, control gain, "
        "disturbance feedthrough, and agreement with the nonlinear plant",

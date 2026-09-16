@@ -35,6 +35,7 @@ add_executable(galata_validation_tests
   test_battery_sag.cpp
   test_identification_recovery.cpp
   test_quadrotor_plant.cpp
+  test_helicopter_hover.cpp
   test_quadrotor_hover_linearisation.cpp
 )
 

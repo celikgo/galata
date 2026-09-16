@@ -1,4 +1,4 @@
-# Souxmar F1 rotor-speed droop under a three-degree collective step
+# Souxmar F1 rotor-speed droop — recovered, and limited by the drive rating
 
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
@@ -11,7 +11,10 @@ galata run examples/heli-governor-droop/study.yaml --output-dir build/heli-droop
 Rotor speed is a **state**, driven by rotor inertia against the torque the rotors
 demand and the torque the engine supplies. Engine torque is itself a **state**,
 relaxing towards the governor's request through the governor's own lag. So a
-collective step raises the demand faster than the engine can answer:
+collective step raises the demand faster than the engine can answer.
+
+**One degree — droop, then recovery.** The governor sees the speed error and
+torque rises until the rotor is back at its reference:
 
 | t (s) | rotor speed (rad/s) | droop | engine torque (N·m) |
 |---|---|---|---|
@@ -21,7 +24,31 @@ collective step raises the demand faster than the engine can answer:
 | 1.0 | 32.331 | −0.52% | 18 165 |
 | 2.0 | 32.502 | +0.01% | 17 933 |
 
-Droop, then recovery, as the governor sees the speed error and torque rises.
+**Three degrees — the drive rating binds and the rotor stays low.** The demand
+exceeds what the drivetrain can pass, the engine torque saturates, and no amount
+of governor error can recover the speed:
+
+| t (s) | rotor speed (rad/s) | droop | engine torque (N·m) | |
+|---|---|---|---|---|
+| 0.0 | 32.500 | — | 15 730 | |
+| 1.0 | 30.862 | −5.04% | 20 260 | |
+| 2.0 | 30.695 | **−5.56%** | 20 454 | |
+| 3.0 | 30.731 | −5.44% | 20 461 | **at the limit** |
+| 8.0 | 31.086 | −4.35% | 20 461 | **at the limit** |
+
+The speed recovers only slowly, and only because the aircraft's climb gradually
+reduces the demand — not because the governor has any authority left.
+
+The limit that binds is **20 461.5 N·m**, and it is the *drive* rating rather than
+the engine's. Two PW207D1 engines could supply about 26 600 N·m at this shaft; the
+design package declines that credit explicitly
+(`drive.no_credit_for_full_910kw_on_existing_rotor_drive`) and caps the rotor-drive
+input at 700 kW, so that is the limit the model carries.
+[`PROVENANCE.md`](../../models/souxmar-heli/PROVENANCE.md) §2 records the
+derivation.
+
+**Running only the one-degree case would teach the wrong lesson** — that the
+governor always recovers. Both are in the study for that reason.
 
 **A model with rotor speed held constant shows none of that** — and this model
 held it constant in a first draft. `governor_time_constant_s` was declared in the

@@ -19,3 +19,5 @@ scripts/check-frozen-headers.sh               # ADR-0001's proposed ABI-freeze g
 src/synth/                                    # RFC-0001 and the roadmap; RFC-0001 explicitly forbids code there until its open questions are answered
 tests/validation/reference/carex1995_care.csv # RFC-0001's proposed CAREX reference file, whose rights position is one of the RFC's open questions
 src/data/ulog/                                # ADR-0016's proposed location for the ULog parser; the decision precedes the code, and the ADR says so
+turboshaft_rev_i/recalculate.py               # the Souxmar design package's own generator, outside this repository, for the same reason as the results file below
+turboshaft_rev_i/results.json                 # the Souxmar design package's own results file, which lives OUTSIDE this repository. Deliberately not vendored: copying a design package into a simulation repo is how the two silently drift apart, and models/souxmar-heli/PROVENANCE.md cites a revision and a date so the reader checks the original

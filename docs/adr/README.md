@@ -27,3 +27,6 @@ The format is in [0000-template.md](0000-template.md).
 | [0017](0017-attitude-error-chart-has-a-public-inverse.md) | The attitude-error chart has a public inverse | accepted |
 | [0018](0018-fitted-models-are-derived-plants.md) | A fitted model is a derived plant with its own identity, never an edit to its source | accepted |
 | [0019](0019-every-pull-request-runs-the-required-graph.md) | Every pull request runs the required graph, and a stack is gated at its integration head | accepted |
+| [0020](0020-rotorcraft-product-scope-and-the-vehicle-interface.md) | Galata is a rotorcraft flight-dynamics tool, and the vehicle is data | accepted |
+| [0021](0021-a-stiff-integrator-is-not-an-adaptive-one.md) | A fixed-step implicit integrator does not weaken the determinism policy | accepted |
+| [0022](0022-trim-is-a-declared-problem.md) | Trim is a declared problem, not a hard-coded unknown set | accepted |

@@ -17,6 +17,12 @@
 # the whole step, to every printed digit. That is the specific kind of silence
 # this example exists to break.
 #
+# TWO STEPS, BECAUSE THE ANSWER CHANGES. One degree is inside the drivetrain's
+# rating and the governor recovers. Three degrees is not: the engine torque
+# saturates at the drive rating and the rotor stays several percent low. Running
+# only the first would suggest a governor that always recovers, which is exactly
+# the wrong lesson.
+#
 # WHAT THIS IS NOT. Not an engine model. There is no fuel flow, no compressor
 # map, no spool dynamics and no temperature limit: the governor is a proportional
 # gain plus a feed-forward of the demand, through one first-order lag. The droop
@@ -38,9 +44,29 @@ stages:
       airspeed_m_s: 0.0
       altitude_m: 100.0
 
-  # Three degrees of collective: a deliberate power demand, well inside the
-  # actuator's travel and its rate limit.
-  - id: droop
+  # ONE DEGREE: inside the drivetrain's rating, so the governor recovers the
+  # rotor speed. This is droop and recovery, the normal case.
+  - id: droop_recovered
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_control: collective_command_rad
+      step_size_rad: 0.0174532925199433
+      step_s: 0.002
+      steps: 4000
+      sample_stride: 10
+
+  # THREE DEGREES: beyond it. The engine torque saturates at the drive rating and
+  # the rotor CANNOT be recovered — it settles several percent low and climbs back
+  # only as the aircraft's climb reduces the demand. That is the correct
+  # behaviour and it is the reason torque limits are in the model at all.
+  #
+  # The limit that binds is 20 461.5 N m, derived from the design package's own
+  # 700 kW drive-input rating and NOT from the two PW207D1 engines, which could
+  # supply 26 600 N m at this shaft. The package declines that credit explicitly
+  # (`drive.no_credit_for_full_910kw_on_existing_rotor_drive`), so the drive
+  # rating is the binding limit and PROVENANCE.md records the derivation.
+  - id: droop_saturated
     capability: sim.helicopter
     input:
       trim: {from: hover}
@@ -50,15 +76,21 @@ stages:
       steps: 4000
       sample_stride: 10
 
-  - id: history
+  - id: recovered_history
     capability: report.helicopter_csv
     input:
-      trajectory: {from: droop}
-      path: droop.csv
+      trajectory: {from: droop_recovered}
+      path: droop-recovered.csv
+
+  - id: saturated_history
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: droop_saturated}
+      path: droop-saturated.csv
 
   - id: report
     capability: report.markdown
     input:
-      title: Souxmar F1 rotor-speed droop under a three-degree collective step
-      sections: [{from: hover}, {from: droop}]
+      title: Souxmar F1 rotor-speed droop — recovered, and limited by the drive rating
+      sections: [{from: hover}, {from: droop_recovered}, {from: droop_saturated}]
       path: governor-droop.md

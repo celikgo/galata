@@ -17,6 +17,7 @@ add_executable(galata_integration_tests
   ${CMAKE_SOURCE_DIR}/tests/support/evidence_check.cpp
   test_pipeline.cpp
   test_example_studies.cpp
+  test_helicopter_examples.cpp
   test_product_hardening.cpp
   test_evidence_contract.cpp
   test_runtime_identity.cpp
