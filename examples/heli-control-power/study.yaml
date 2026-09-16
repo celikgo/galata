@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Collective, cyclic and pedal step responses against the NONLINEAR helicopter,
+# with the actuators' position limits, rate limits and lags active.
+#
+#   galata run examples/heli-control-power/study.yaml
+#
+# WHY THE STEPS ARE SMALL. Each is a few degrees at the stick. A larger step
+# saturates the actuator rate limit, and a response dominated by a rate limit
+# measures the actuator rather than the aircraft. `sim.helicopter` reports how
+# many samples sat outside the declared envelope, which is the check that the
+# step stayed inside the model's validity rather than testing its extrapolation.
+#
+# WHAT THIS IS NOT. Not a handling-qualities assessment. ADS-33 bandwidth, phase
+# delay and attitude quickness are computed from a frequency sweep, not from a
+# step, and galata has no capability for them. Not evidence about any aircraft:
+# the model is a design study and no published rotorcraft reference has been
+# compared against.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 30.0
+
+  # COLLECTIVE. A heave response, and — because the rotor's torque demand rises
+  # with it — a rotor-speed droop and a yaw excursion the pedal has not yet
+  # corrected. All three are in the one run.
+  - id: collective_step
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_control: collective_command_rad
+      step_size_rad: 0.0174532925199433
+      step_s: 0.002
+      steps: 2500
+      sample_stride: 10
+
+  # LONGITUDINAL CYCLIC. A pitch response, and the forward acceleration that
+  # follows from tilting the thrust vector — the force that was identically zero
+  # before the rotor had an orientation.
+  - id: cyclic_step
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_control: longitudinal_cyclic_command_rad
+      step_size_rad: 0.0087266462599716
+      step_s: 0.002
+      steps: 2500
+      sample_stride: 10
+
+  # PEDAL. A yaw response through the tail rotor's thrust at its moment arm.
+  - id: pedal_step
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_control: pedal_command_rad
+      step_size_rad: 0.0174532925199433
+      step_s: 0.002
+      steps: 2500
+      sample_stride: 10
+
+  - id: collective_csv
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: collective_step}
+      path: collective-step.csv
+
+  - id: cyclic_csv
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: cyclic_step}
+      path: cyclic-step.csv
+
+  - id: pedal_csv
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: pedal_step}
+      path: pedal-step.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 control power — collective, cyclic and pedal steps
+      sections: [{from: hover}, {from: collective_step}, {from: cyclic_step}, {from: pedal_step}]
+      path: control-power.md

@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hover equilibrium for the Souxmar F1, and the linearisation about it.
+#
+#   galata run examples/heli-hover-trim/study.yaml
+#
+# WHAT THIS ANSWERS. Where the four pilot controls sit, what attitude the
+# aircraft holds, how much power the rotors demand, and what the aircraft does
+# when it is disturbed from that point.
+#
+# WHAT IT DOES NOT ANSWER. Anything about a real helicopter. The Souxmar model is
+# a preliminary DESIGN STUDY — no aircraft has been built, flown or measured —
+# and models/souxmar-heli/PROVENANCE.md separates the thirteen parameters taken
+# from that package from the six derived and the twenty assumed. The inertia
+# tensor in particular is a radius-of-gyration estimate, and every modal
+# frequency below inherits its uncertainty.
+#
+# THE ONE RESULT WORTH READING TWICE. The linearisation has an UNSTABLE
+# oscillation. That is correct: a hovering helicopter is unstable, which is why
+# a pilot is continuously correcting it and why a stability augmentation system
+# exists. A model that hovered stably would be wrong.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  # Six pilot unknowns — roll, pitch, collective, both cyclics, pedal — plus the
+  # two rotor inflow states, which carry their own dynamics and therefore their
+  # own equilibrium. Eight unknowns against eight residuals.
+  #
+  # The aircraft BANKS in the hover. That is not an error: the tail rotor pushes
+  # sideways, so the lateral forces only balance at a small roll angle. Every
+  # helicopter does it.
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 0.0
+
+  # Linearised in Euler coordinates, so the quaternion's spurious mode never
+  # appears. The position and heading integrators are dropped by name: a
+  # helicopter's position states are genuinely uncontrolled and its heading is
+  # genuinely free in still air, so their eigenvalues at the origin are facts
+  # about the aircraft rather than numerical artefacts — but they are not
+  # dynamics, and a modal table is easier to read without them.
+  - id: linear
+    capability: linearize.vehicle
+    input:
+      trim: {from: hover}
+      drop_position_and_heading: true
+
+  # Eigenvalues, damping and participation factors, with the rotorcraft labels
+  # available because this model declares a rotor-speed state.
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: {from: linear}
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 hover equilibrium and its linearisation
+      sections: [{from: hover}, {from: linear}, {from: modes}]
+      path: hover-trim.md

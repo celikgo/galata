@@ -178,6 +178,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.hinfnorm` | Bound a stable continuous-time H-infinity norm using Hamiltonian level tests | `hinfinity_norm` | implemented, unvalidated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
+| `analyze.nonlinear_agreement` | Measure the ORDER at which a linearisation's error falls with perturbation size — two is exact for a correct one — rather than its magnitude at a single size, which cannot distinguish a correct linearisation from one with a sign error | `nonlinear_agreement` | implemented, unvalidated |
 | `analyze.robust_bounds` | Bound S/T norms and SISO disk size for an internally stable feedback loop | `robust_bounds` | implemented, unvalidated |
 | `analyze.sensitivity` | Sensitivity and complementary sensitivity peaks M_S and M_T of a loop closed with negative unit feedback, and the frequencies at which they occur | `sensitivity_peaks` | implemented and validated |
 | `analyze.sigma` | Singular values of a MIMO transfer matrix over frequency — the principal gains, their spread, and the peak gain | `singular_values` | implemented and validated |
@@ -189,12 +190,14 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with separation from the training data classified on stated grounds rather than inferred from a digest | `validation` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
+| `linearize.vehicle` | Linearise any vehicle model about a declared trim by central differences in Euler coordinates, refusing a point whose dynamic residual exceeds its budget and naming any control that was at a stop | `linear_system` | implemented, unvalidated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
 | `model.compile` | Compile supported continuous model profiles with typed ports and explicit feedback semantics | `executable_model` | implemented, unvalidated |
 | `model.control_system` | Extract an LQR design's closed loop, its plant-input return ratio, or the single loop at one input with the other loops still closed | `linear_system` | implemented, unvalidated |
 | `model.discretize` | Discretise a continuous linear model exactly under a declared zero-order hold at a declared sample time, reporting the fastest mode against the Nyquist frequency | `discrete_linear_system` | implemented, unvalidated |
 | `model.feedback` | Close a square state-space loop with negative identity feedback | `linear_system` | implemented, unvalidated |
+| `model.helicopter` | Load a Level-1 single-main-rotor helicopter — oriented main and tail rotors with momentum-theory inflow and quasi-static flapping, component fuselage and empennage aerodynamics, a governed rotor-speed state and four limited actuators | `helicopter` | implemented, unvalidated |
 | `model.linear.export` | Write a linear model as the named-matrix YAML that model.linear.statespace reads | `linear_system` | implemented, unvalidated |
 | `model.linear.statespace` | Load a linear state-space model (A, B, state and input names) from a YAML file | `linear_system` | implemented, unvalidated |
 | `model.linear_graph` | Lower a typed linear system or LQR plant and feedback into an executable graph with origin evidence | `executable_model` | implemented, unvalidated |
@@ -202,9 +205,11 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `model.quadrotor.export` | Write a multirotor as the YAML model.quadrotor reads, with a required record of where its numbers came from — which parameters were fitted, from what, and which were carried over untouched | `quadrotor` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
+| `report.helicopter_csv` | Export a helicopter trajectory as CSV with every state and output named, carrying the run's termination reason so a refused run cannot be read as a completed one | `report` | implemented, unvalidated |
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
+| `sim.helicopter` | Integrate the nonlinear helicopter from a trim under a declared control step, with a declared integration method and per-state magnitude bounds that refuse a divergence instead of reporting it as a completed run | `helicopter_trajectory` | implemented, unvalidated |
 | `sim.linear` | Integrate a continuous linear model with fixed-step RK4 under a constant input or a declared input history with a stated hold and extrapolation | `linear_trajectory` | implemented, unvalidated |
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
@@ -215,6 +220,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |
 | `synth.pid` | Realise explicitly supplied PID gains with a mandatory derivative filter | `linear_system` | implemented, unvalidated |
 | `synth.sampled_lqr` | Design sampled full-state feedback: discretise the plant and the continuous cost under one hold, retain the cost's state-input cross term, and solve the discrete Riccati equation | `sampled_control_law` | implemented, unvalidated |
+| `trim.helicopter` | Solve helicopter equilibrium for attitude, collective, both cyclics and pedal — and for the rotor inflow states, which have their own equilibrium — reporting the Jacobian's rank and condition number | `helicopter_trim` | implemented, unvalidated |
 | `trim.hover` | Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a relative equilibrium — for attitude and rotor speeds, reporting each rotor's margin | `hover_trim` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
 <!-- END GENERATED CAPABILITY TABLE -->

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Rotor-speed droop and recovery under a collective step.
+#
+#   galata run examples/heli-governor-droop/study.yaml
+#
+# WHY THIS IS THE CASE THAT PROVES THE DRIVETRAIN IS REAL. Rotor speed is a
+# STATE here, driven by rotor inertia against the torque the rotors demand and
+# the torque the engine supplies, and engine torque is itself a state with the
+# governor's own lag. A collective step raises the demand faster than the engine
+# can answer, so the rotor droops, the governor sees the speed error, torque
+# rises, and the speed recovers.
+#
+# A model with rotor speed held constant shows none of that. It was held constant
+# in a first draft of this model — `governor_time_constant_s` was declared and
+# had no effect — and the rotor speed came out at exactly its reference through
+# the whole step, to every printed digit. That is the specific kind of silence
+# this example exists to break.
+#
+# WHAT THIS IS NOT. Not an engine model. There is no fuel flow, no compressor
+# map, no spool dynamics and no temperature limit: the governor is a proportional
+# gain plus a feed-forward of the demand, through one first-order lag. The droop
+# MAGNITUDE therefore depends on parameters that are assumptions, not
+# measurements — see models/souxmar-heli/PROVENANCE.md, section 4.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 100.0
+
+  # Three degrees of collective: a deliberate power demand, well inside the
+  # actuator's travel and its rate limit.
+  - id: droop
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_control: collective_command_rad
+      step_size_rad: 0.0523598775598299
+      step_s: 0.002
+      steps: 4000
+      sample_stride: 10
+
+  - id: history
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: droop}
+      path: droop.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 rotor-speed droop under a three-degree collective step
+      sections: [{from: hover}, {from: droop}]
+      path: governor-droop.md

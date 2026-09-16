@@ -63,8 +63,8 @@ TrimCondition hover_condition(const HelicopterModel& heli, const Environment& en
 TEST(Helicopter, LoadsFromYamlAndValidates) {
   const auto heli = souxmar();
   EXPECT_NO_THROW(heli.validate());
-  EXPECT_EQ(heli.extended_state_size(), 20);
-  EXPECT_EQ(heli.auxiliary_state_count(), 7);
+  EXPECT_EQ(heli.extended_state_size(), 21);
+  EXPECT_EQ(heli.auxiliary_state_count(), 8);
   EXPECT_EQ(heli.control_count(), 4);
   EXPECT_FALSE(heli.citation.empty());
 }
@@ -171,8 +171,14 @@ TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   // invisible in the forces, which trimmed to 1e-17, and was caught only when
   // linearize_vehicle asked for the inflow's own rate and refused the point
   // with `tail_inflow_ratio` named.
-  ASSERT_EQ(problem.unknowns.size(), 8u);
-  ASSERT_EQ(problem.residuals.size(), 8u);
+  // NINE: the six pilot unknowns, the two rotor inflow states, and the engine
+  // torque. The last three are there because each is a STATE with its own
+  // equilibrium — a rotor's inflow settles, and the governed engine torque is
+  // the value at which the rotor neither accelerates nor decelerates. Solving
+  // the six force-and-moment equations alone leaves all three wherever the guess
+  // put them, which is an equilibrium of the airframe and not of the aircraft.
+  ASSERT_EQ(problem.unknowns.size(), 9u);
+  ASSERT_EQ(problem.residuals.size(), 9u);
   const auto has_unknown = [&](const std::string& name) {
     return std::any_of(problem.unknowns.begin(), problem.unknowns.end(),
                        [&](const auto& u) { return u.name == name; });
@@ -181,6 +187,7 @@ TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   EXPECT_TRUE(has_unknown("pedal_rad"));
   EXPECT_TRUE(has_unknown("main_inflow_ratio"));
   EXPECT_TRUE(has_unknown("tail_inflow_ratio"));
+  EXPECT_TRUE(has_unknown("engine_torque_n_m"));
 
   const auto result = solve_trim(heli, problem, hover_condition(heli, environment));
 
@@ -188,10 +195,13 @@ TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   // The residual is body accelerations, so this is metres per second squared
   // and radians per second squared: 1e-8 is a very tight equilibrium.
   EXPECT_LT(result.residual_norm, 1.0e-8);
-  EXPECT_EQ(result.jacobian_rank, 8);
-  EXPECT_EQ(result.unknown_count, 8);
-  // A well-conditioned problem. Above about 1e6 the solved controls would carry
-  // fewer significant figures than the report prints.
+  EXPECT_EQ(result.jacobian_rank, 9);
+  EXPECT_EQ(result.unknown_count, 9);
+  // A WELL-CONDITIONED PROBLEM, and the gate is tight on purpose. The unknowns
+  // are non-dimensionalised by their declared scales before the Jacobian is
+  // taken, so a large condition number here means the PHYSICS is
+  // ill-conditioned rather than the units. Before that scaling was applied
+  // correctly this measured 7.4e6, all of it units; it now measures about 1.9e2.
   EXPECT_LT(result.jacobian_condition_number, 1.0e4);
   EXPECT_TRUE(result.unconstrained_unknowns.empty());
   EXPECT_TRUE(result.out_of_bounds_unknowns.empty());
@@ -360,15 +370,42 @@ TEST(HelicopterTrim, RefusesAnUnconstrainedUnknownAndNamesIt) {
 TEST(HelicopterTrim, RefusesATrimOutsideTheDeclaredActuatorTravel) {
   auto heli = souxmar();
   const auto environment = Environment::sea_level_still_air();
-  // Four times the mass cannot be lifted within the collective travel.
-  heli.mass.mass_kg *= 4.0;
+  // The collective travel is cut to a quarter of what the hover needs. The
+  // AIRCRAFT can still lift itself — the engine and rotor are untouched — so
+  // this isolates the bounds refusal from the saturation refusal below.
+  auto problem = helicopter_trim_problem(heli);
+  for (auto& unknown : problem.unknowns) {
+    if (unknown.name == "collective_rad") {
+      unknown.maximum = 0.06;  // about 3.4 degrees; hover needs 15
+    }
+  }
   try {
-    (void)solve_trim(heli, helicopter_trim_problem(heli), hover_condition(heli, environment));
-    FAIL() << "a trim needing more collective than the aircraft has must be refused";
+    (void)solve_trim(heli, problem, hover_condition(heli, environment));
+    FAIL() << "a trim needing more collective than the declared travel must be refused";
   } catch (const std::runtime_error& error) {
     const std::string what = error.what();
     EXPECT_NE(what.find("Outside declared bounds"), std::string::npos) << what;
     EXPECT_NE(what.find("collective_rad"), std::string::npos) << what;
+  }
+}
+
+TEST(HelicopterTrim, RefusesAConditionBeyondTheDrivetrainAndExplainsSaturation) {
+  auto heli = souxmar();
+  const auto environment = Environment::sea_level_still_air();
+  // Four times the mass needs far more torque than the drivetrain has. The
+  // engine torque saturates, its Jacobian column goes flat, and the solve
+  // becomes rank deficient. That is a real signal and the message has to make it
+  // actionable rather than leaving the reader with "rank 8 of 9".
+  heli.mass.mass_kg *= 4.0;
+  try {
+    (void)solve_trim(heli, helicopter_trim_problem(heli), hover_condition(heli, environment));
+    FAIL() << "a condition beyond the drivetrain must be refused";
+  } catch (const std::runtime_error& error) {
+    const std::string what = error.what();
+    EXPECT_NE(what.find("engine_torque_n_m"), std::string::npos) << what;
+    EXPECT_NE(what.find("SATURATED"), std::string::npos)
+        << "the refusal must explain that a flat column is usually a saturation: " << what;
+    EXPECT_NE(what.find("beyond the aircraft"), std::string::npos) << what;
   }
 }
 

@@ -109,7 +109,8 @@ std::vector<std::string> HelicopterModel::state_names() const {
           "collective_rad",
           "longitudinal_cyclic_rad",
           "lateral_cyclic_rad",
-          "pedal_rad"};
+          "pedal_rad",
+          "engine_torque_n_m"};
 }
 
 std::vector<std::string> HelicopterModel::control_names() const {
@@ -148,6 +149,18 @@ Eigen::VectorXd HelicopterModel::initial_auxiliary(const Eigen::VectorXd& contro
       tail_rotor.radius_m * drivetrain.reference_rotor_speed_rad_s * drivetrain.tail_gear_ratio;
   if (tail_tip_speed > 0.0) {
     auxiliary(kTailInflowRatio) = 0.0;
+  }
+  // Engine torque seeded at the torque a hover needs, so a trim does not have to
+  // walk it up from zero through a rotor-speed excursion.
+  const double tip = main_rotor.radius_m * drivetrain.reference_rotor_speed_rad_s;
+  if (tip > 0.0) {
+    const double hover_power =
+        weight_n * rotor::hover_induced_velocity_m_s(main_rotor, weight_n, environment.density_kg_m3)
+        * main_rotor.induced_power_factor;
+    auxiliary(kEngineTorque) =
+        saturate(hover_power / drivetrain.reference_rotor_speed_rad_s
+                     / std::max(drivetrain.transmission_efficiency, 1.0e-6),
+                 drivetrain.minimum_engine_torque_n_m, drivetrain.maximum_engine_torque_n_m);
   }
   if (controls.size() == kHelicopterControlCount) {
     for (int i = 0; i < kHelicopterControlCount; ++i) {
@@ -290,13 +303,19 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
       out.main.torque_n_m + drivetrain.tail_gear_ratio * out.tail.torque_n_m
       + drivetrain.accessory_torque_n_m;
   const double error = drivetrain.reference_rotor_speed_rad_s - omega;
-  const double requested =
-      demanded / std::max(drivetrain.transmission_efficiency, 1.0e-6)
-      + drivetrain.governor_proportional_n_m_s * error;
+  out.governor_requested_torque_n_m =
+      failures.engine_available_fraction
+      * saturate(demanded / std::max(drivetrain.transmission_efficiency, 1.0e-6)
+                     + drivetrain.governor_proportional_n_m_s * error,
+                 drivetrain.minimum_engine_torque_n_m, drivetrain.maximum_engine_torque_n_m);
+  // THE TORQUE THE ENGINE IS ACTUALLY DELIVERING is the state, not the request.
+  // A failed engine delivers none of it whatever the state says, which is what
+  // makes a flameout instantaneous while a governor correction is not.
   out.engine_torque_n_m =
       failures.engine_available_fraction
-      * saturate(requested, drivetrain.minimum_engine_torque_n_m,
+      * saturate(auxiliary(kEngineTorque), drivetrain.minimum_engine_torque_n_m,
                  drivetrain.maximum_engine_torque_n_m);
+  out.governor_error_rad_s = error;
   out.total_power_w = out.main.power_w + out.tail.power_w;
   out.anti_torque_residual_n_m = out.total.moment_cg_body_n_m.z();
   return out;
@@ -337,6 +356,17 @@ Eigen::VectorXd HelicopterModel::auxiliary_derivative(const core::State& state,
   // ---- inflow lags ----------------------------------------------------
   rate(kMainInflowRatio) = parts.main.inflow_rate_per_s;
   rate(kTailInflowRatio) = parts.tail.inflow_rate_per_s;
+
+  // ---- engine torque --------------------------------------------------
+  //
+  // First order towards what the governor asks for. With no declared time
+  // constant the engine is treated as instantaneous, which is a legitimate
+  // declared choice and visibly so: the state then tracks the request exactly
+  // and no droop appears.
+  if (drivetrain.governor_time_constant_s > 0.0) {
+    rate(kEngineTorque) = (parts.governor_requested_torque_n_m - auxiliary(kEngineTorque))
+                          / drivetrain.governor_time_constant_s;
+  }
 
   // ---- actuators ------------------------------------------------------
   //
@@ -468,7 +498,8 @@ numerics::StateBounds HelicopterModel::state_bounds() const {
       2.0e1, 2.0e1, 2.0e1,                  // body rates, rad/s (1100 deg/s)
       4.0 * std::max(drivetrain.reference_rotor_speed_rad_s, 1.0),  // rotor speed, rad/s
       5.0, 5.0,                             // inflow ratios, dimensionless
-      3.14, 3.14, 3.14, 3.14;               // actuator positions, rad
+      3.14, 3.14, 3.14, 3.14,               // actuator positions, rad
+      4.0 * std::max(drivetrain.maximum_engine_torque_n_m, 1.0);  // engine torque, N m
   return numerics::StateBounds(names, limits);
 }
 

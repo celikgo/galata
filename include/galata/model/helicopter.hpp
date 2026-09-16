@@ -126,7 +126,16 @@ enum HelicopterAuxIndex : int {
   kLongitudinalCyclicPosition = 4,  // rad
   kLateralCyclicPosition = 5,       // rad
   kPedalPosition = 6,               // rad
-  kHelicopterAuxCount = 7,
+  // Engine torque at the main shaft, as a STATE with the governor's own lag.
+  //
+  // It is a state because a turboshaft's torque does not change instantly. A
+  // first draft computed it algebraically from the demand, which made
+  // `governor_time_constant_s` a declared parameter with no effect and — worse —
+  // made rotor speed hold at exactly its reference through a collective step,
+  // with no droop at all. Droop IS the governed rotor's first-order behaviour,
+  // and a model that cannot show it cannot be used for a drivetrain study.
+  kEngineTorque = 7,                // N m
+  kHelicopterAuxCount = 8,
 };
 
 enum HelicopterControlIndex : int {
@@ -292,7 +301,9 @@ class HelicopterModel final : public VehicleModel {
     sim::Wrench horizontal_tail;
     sim::Wrench vertical_tail;
     sim::Wrench total;  // excluding gravity, as VehicleModel::wrench returns
-    double engine_torque_n_m = 0.0;     // N m at the main shaft
+    double engine_torque_n_m = 0.0;            // N m at the main shaft, DELIVERED
+    double governor_requested_torque_n_m = 0.0; // N m, what the governor asked for
+    double governor_error_rad_s = 0.0;          // rad/s, reference minus actual
     double total_power_w = 0.0;         // W
     double rotor_speed_rad_s = 0.0;     // rad/s
     double anti_torque_residual_n_m = 0.0;  // N m; zero in a yaw-trimmed state

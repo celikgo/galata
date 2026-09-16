@@ -309,9 +309,11 @@ struct SampledRun {
 void register_design_capabilities(Registry& registry);
 void register_model_capabilities(Registry& registry);
 void register_quadrotor_capabilities(Registry& registry);
+void register_helicopter_capabilities(Registry& registry);
 void register_discrete_capabilities(Registry& registry);
 void register_linear_graph_capability(Registry& registry);
 bool write_design_section(std::ostream& out, const Artifact& artifact);
 bool write_discrete_section(std::ostream& out, const Artifact& artifact);
+bool write_helicopter_section(std::ostream& out, const Artifact& artifact);
 }  // namespace galata::pipeline
 #endif

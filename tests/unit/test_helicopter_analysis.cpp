@@ -89,12 +89,13 @@ TEST(HelicopterLinearisation, LinearisesAboutTheHoverTrim) {
   const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
                                         trimmed.environment);
 
-  // Twelve Euler coordinates plus the model's seven auxiliary states.
-  EXPECT_EQ(linear.a.rows(), 19);
-  EXPECT_EQ(linear.a.cols(), 19);
-  EXPECT_EQ(linear.b.rows(), 19);
+  // Twelve Euler coordinates plus the model's eight auxiliary states: rotor
+  // speed, two inflows, four actuator positions and the engine torque.
+  EXPECT_EQ(linear.a.rows(), 20);
+  EXPECT_EQ(linear.a.cols(), 20);
+  EXPECT_EQ(linear.b.rows(), 20);
   EXPECT_EQ(linear.b.cols(), 4);
-  EXPECT_EQ(linear.state_names.size(), 19u);
+  EXPECT_EQ(linear.state_names.size(), 20u);
 
   // The quaternion never appears: that is the whole reason for Euler
   // coordinates, and a spurious zero eigenvalue from an over-parameterised
@@ -155,7 +156,7 @@ TEST(HelicopterLinearisation, ReducedDropsThePositionAndHeadingIntegratorsByName
                                       trimmed.environment);
   const auto reduced = full.reduced();
 
-  EXPECT_EQ(reduced.a.rows(), 15);
+  EXPECT_EQ(reduced.a.rows(), 16);
   for (const char* dropped :
        {"position_north_m", "position_east_m", "position_down_m", "yaw_rad"}) {
     EXPECT_EQ(std::find(reduced.state_names.begin(), reduced.state_names.end(), dropped),

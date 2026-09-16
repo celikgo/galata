@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Loss of tail-rotor thrust in the hover.
+#
+#   galata run examples/heli-tail-rotor-failure/study.yaml
+#
+# WHY THIS EXAMPLE EXISTS. It is the demo that was STRUCTURALLY IMPOSSIBLE to
+# write against the previous model. Rotor thrust was the fixed body-axis vector
+# (0, 0, -k_T omega^2), so a tail rotor produced a downward force and a pitching
+# moment — not a side force, and not a yaw moment. There was no anti-torque to
+# lose. Being able to run this at all is the evidence that the audit's first
+# blocking capability is closed.
+#
+# WHAT IT SHOWS. With the tail rotor's thrust removed, the main rotor's shaft
+# torque is unopposed and the aircraft yaws. The yaw accelerates: there is no
+# fin authority at zero airspeed to arrest it, which is exactly why the real
+# failure is survivable in forward flight and not in the hover.
+#
+# WHAT THIS IS NOT. Not a survivability assessment, and not a recovery
+# procedure. A real pilot's response — collective down to cut the torque, and
+# forward cyclic to gain the airspeed that gives the fin authority — is not
+# modelled here: the controls are HELD at their trim values throughout, so this
+# is the uncorrected divergence and nothing more. Autorotation is outside this
+# model entirely (see the helicopter header's WHAT THIS IS NOT).
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  # Trimmed healthy: the failure is applied to a trimmed aircraft, so the yaw
+  # excursion that follows is entirely the failure's and not a trim error's.
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 150.0
+
+  # No failure applied yet: this is the control case, and it must stay put. A
+  # trimmed aircraft that drifts here would invalidate the comparison below.
+  - id: healthy
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 2000
+      sample_stride: 20
+
+  - id: healthy_csv
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: healthy}
+      path: healthy-hover.csv
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 hover hold, as the control case for a tail-rotor failure
+      sections: [{from: hover}, {from: healthy}]
+      path: tail-rotor-failure.md

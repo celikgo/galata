@@ -275,6 +275,10 @@ TrimResult solve_trim(const model::VehicleModel& model,
   if (options.iterations < 1) {
     throw std::invalid_argument("trim: iterations must be at least 1");
   }
+  if (!(options.max_scaled_step > 0.0)) {
+    throw std::invalid_argument(
+        "trim: max_scaled_step must be positive; zero would freeze the iteration");
+  }
   if (!(options.residual_tolerance > 0.0)) {
     throw std::invalid_argument(
         "trim: residual_tolerance must be positive; a budget of zero or less is a gate nothing "
@@ -301,8 +305,14 @@ TrimResult solve_trim(const model::VehicleModel& model,
 
   // FIXED ITERATION COUNT. No residual test in the loop: ADR-0004.
   for (int iteration = 0; iteration < options.iterations; ++iteration) {
-    // Central differences, each unknown stepped by its own scale so that a
-    // problem mixing radians and rad/s is not conditioned by its units.
+    // THE JACOBIAN IS TAKEN IN SCALED UNKNOWNS, not merely stepped by the scale.
+    //
+    // A first version used each unknown's scale for the finite-difference step
+    // only, which left the MATRIX conditioned by its units: an engine torque of
+    // order 1e4 N m against attitude angles of order 1e-1 rad gave a condition
+    // number of 7.4e6, none of which was physics. Differentiating with respect
+    // to y_j = x_j / scale_j instead multiplies column j by scale_j and removes
+    // the unit disparity, which is what `TrimUnknown::scale` says it does.
     for (Eigen::Index j = 0; j < n; ++j) {
       const double step = options.jacobian_relative_step * scales(j);
       Eigen::VectorXd probe = values;
@@ -312,7 +322,7 @@ TrimResult solve_trim(const model::VehicleModel& model,
       probe(j) = values(j) - step;
       const double lower = probe(j);
       const Eigen::VectorXd backward = evaluate_residual(model, problem, probe, condition);
-      jacobian.col(j) = (forward - backward) / (upper - lower);
+      jacobian.col(j) = (forward - backward) * (scales(j) / (upper - lower));
     }
 
     const Eigen::JacobiSVD<Eigen::MatrixXd> svd(jacobian,
@@ -350,11 +360,21 @@ TrimResult solve_trim(const model::VehicleModel& model,
       break;
     }
 
-    const Eigen::VectorXd step = svd.solve(residual);
-    if (!step.allFinite()) {
+    // The step comes back in SCALED coordinates, so it is scaled back before it
+    // is applied. Getting this wrong would move every unknown by its own scale
+    // factor and diverge immediately, which is the reassuring failure mode.
+    Eigen::VectorXd scaled_step = svd.solve(residual);
+    if (!scaled_step.allFinite()) {
       break;
     }
-    values -= options.step_fraction * step;
+    // The trust region, applied in scaled coordinates. See TrimOptions.
+    if (options.max_scaled_step > 0.0) {
+      const double largest_step = scaled_step.cwiseAbs().maxCoeff();
+      if (largest_step > options.max_scaled_step) {
+        scaled_step *= options.max_scaled_step / largest_step;
+      }
+    }
+    values -= options.step_fraction * scaled_step.cwiseProduct(scales);
     residual = evaluate_residual(model, problem, values, condition);
     result.iterations = iteration + 1;
   }
@@ -395,7 +415,12 @@ TrimResult solve_trim(const model::VehicleModel& model,
         message << (i ? ", " : "") << result.unconstrained_unknowns[i];
       }
       message << ". Either the problem is genuinely singular at this condition, or an unknown was "
-                 "declared that nothing in the residual set depends on.";
+                 "declared that nothing in the residual set depends on, or — most often — one of "
+                 "them has SATURATED: an unknown that has reached a physical limit in the model "
+                 "has a flat Jacobian column, because perturbing it changes nothing. Check "
+                 "whether the named unknown is at a stop, a rating or a travel limit at this "
+                 "condition; if it is, the condition is beyond the aircraft rather than beyond "
+                 "the solver.";
     }
     if (!result.out_of_bounds_unknowns.empty()) {
       message << " Outside declared bounds: ";
@@ -486,6 +511,23 @@ TrimProblem helicopter_trim_problem(const model::VehicleModel& model) {
     }
     problem.unknowns.push_back({inflow, 0.05, 0.0, 0.0, 0.01});
     problem.residuals.push_back({TrimResidualKind::AuxiliaryRate, inflow, nullptr, 1.0});
+  }
+
+  // AND SO DOES THE ENGINE TORQUE, for exactly the same reason. It is a state
+  // with a governor lag, so it has an equilibrium — the torque at which the
+  // rotor neither accelerates nor decelerates — and leaving it out makes the
+  // point an equilibrium of the airframe and not of the drivetrain. The
+  // rotor-speed rate is added alongside it: with the torque free, holding the
+  // rotor speed stationary is what pins it down.
+  if (has("engine_torque_n_m") && has("main_rotor_speed_rad_s")) {
+    // Scaled by its own magnitude: a torque of order 1e4 N m mixed with angles of
+    // order 1e-1 rad gives a Jacobian conditioned by its UNITS rather than by the
+    // physics, and the condition number rose to 7e6 before this scale was set.
+    // Bounded, so a condition needing more torque than the drivetrain has is
+    // refused naming the torque rather than returning a saturated answer.
+    problem.unknowns.push_back({"engine_torque_n_m", 10000.0, 0.0, 1.0e7, 10000.0});
+    problem.residuals.push_back(
+        {TrimResidualKind::AuxiliaryRate, "main_rotor_speed_rad_s", nullptr, 1.0});
   }
   return problem;
 }

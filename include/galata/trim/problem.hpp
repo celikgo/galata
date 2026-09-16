@@ -154,6 +154,21 @@ struct TrimOptions {
   // Newton step damping. 1.0 is full Newton; below 1 trades convergence rate
   // for robustness on a stiff residual map. Fixed, never line-searched.
   double step_fraction = 1.0;
+
+  // A TRUST REGION, in scaled units, and the reason it is not a line search.
+  //
+  // Newton's first step from a poor guess can be enormous, and a large step
+  // through a SATURATION makes the next Jacobian singular: the engine-torque
+  // column of a helicopter trim goes flat the moment the iterate leaves the
+  // torque range, and the solver then refuses a perfectly feasible problem
+  // reporting a rank deficiency. Capping the step's infinity norm in scaled
+  // coordinates — one natural unit per iteration by default — removes that
+  // without a line search, which would need a residual comparison and is
+  // exactly the tolerance-driven control flow ADR-0004 forbids.
+  //
+  // Deterministic: the cap is a fixed number compared against a fixed norm, and
+  // the SAME arithmetic happens whether or not it binds.
+  double max_scaled_step = 1.0;
 };
 
 struct TrimProblem {

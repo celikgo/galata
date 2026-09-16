@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Forward-flight trim, and the linearisation about it.
+#
+#   galata run examples/heli-forward-flight-trim/study.yaml
+#
+# WHY THIS EXISTS SEPARATELY FROM THE HOVER CASE. Two reasons, and both matter.
+#
+# First, forward flight is where the linearisation is SECOND ORDER. At exactly
+# zero airspeed the advance ratio mu = |V|/(Omega R) has no derivative, so a
+# central difference returns zero for it and the hover linearisation is only
+# first order with a non-vanishing error floor. The rotor header's
+# "NOT DIFFERENTIABLE AT EXACTLY ZERO AIRSPEED" block states this in full, and
+# `HelicopterLinearisation.NonlinearAndLinearAgreeToSecondOrderInForwardFlight`
+# measures order 2.004 here against a floor of 3.1e-3 in hover.
+#
+# Second, the trim itself is different in kind: forward cyclic must rise with
+# airspeed to overcome fuselage drag and the rotor's own flap-back, and the
+# empennage starts carrying load instead of sitting in the rotor downwash at a
+# right angle.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  # 40 m/s is about 78 knots: inside the declared advance-ratio limit of 0.35
+  # (mu = 40/195 = 0.205) and inside the C_T/sigma screen.
+  - id: cruise
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 40.0
+      altitude_m: 500.0
+
+  - id: linear
+    capability: linearize.vehicle
+    input:
+      trim: {from: cruise}
+      drop_position_and_heading: true
+
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: {from: linear}
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 forward-flight trim at 40 m/s
+      sections: [{from: cruise}, {from: linear}, {from: modes}]
+      path: forward-flight-trim.md

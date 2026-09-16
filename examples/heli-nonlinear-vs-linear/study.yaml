@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Does the linearisation predict the nonlinear model? Measured as an ORDER.
+#
+#   galata run examples/heli-nonlinear-vs-linear/study.yaml
+#
+# WHY AN ORDER AND NOT A TOLERANCE. A linearisation can be wrong in a way no
+# eigenvalue shows — a sign error, a missing term, a point that is not quite an
+# equilibrium — and no single tolerance at a single perturbation size separates
+# that from a correct linearisation. What separates them is how the error SCALES:
+# a correct linearisation's error falls as the SQUARE of the perturbation, and a
+# first-order error falls only linearly.
+#
+# The two conditions below are run for a reason, not for coverage. Forward flight
+# measures order 2. Exact hover does not, and the cause is localised: the advance
+# ratio mu = |V|/(Omega R) has no derivative at V = 0.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/souxmar-heli/souxmar-heli.yaml
+
+  # ---- forward flight: the linearisation is second order ----------------
+  - id: cruise
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 30.0
+
+  - id: cruise_agreement
+    capability: analyze.nonlinear_agreement
+    input:
+      trim: {from: cruise}
+      perturb_state: velocity_u_m_s
+      perturbations: [0.4, 0.2, 0.1, 0.05, 0.025]
+      horizon_s: 0.5
+      step_s: 0.001
+
+  # ---- exact hover: it is not, and that is the physics -----------------
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+
+  - id: hover_agreement
+    capability: analyze.nonlinear_agreement
+    input:
+      trim: {from: hover}
+      perturb_state: velocity_u_m_s
+      perturbations: [0.4, 0.2, 0.1, 0.05, 0.025]
+      horizon_s: 0.5
+      step_s: 0.001
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 nonlinear-versus-linear agreement, in cruise and in exact hover
+      sections: [{from: cruise}, {from: cruise_agreement}, {from: hover}, {from: hover_agreement}]
+      path: nonlinear-vs-linear.md

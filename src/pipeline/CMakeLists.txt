@@ -16,6 +16,7 @@ add_library(galata_pipeline
   design_capabilities.cpp
   model_capabilities.cpp
   quadrotor_capabilities.cpp
+  helicopter_capabilities.cpp
   discrete_capabilities.cpp
   input_schedule_parse.cpp
   linear_graph_capability.cpp

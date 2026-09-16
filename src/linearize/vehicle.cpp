@@ -401,8 +401,22 @@ NonlinearAgreement nonlinear_agreement(const model::VehicleModel& model,
     const auto linear = numerics::integrate(linear_rate, offset, 0.0, integration);
 
     const Eigen::VectorXd nonlinear_difference = nonlinear.trajectory.states.back() - base_final;
-    const double discrepancy = (nonlinear_difference - linear.trajectory.states.back()).norm();
-    out.discrepancies.push_back(discrepancy);
+    // SCALED BEFORE THE NORM IS TAKEN. The state vector mixes m/s, rad, rad/s
+    // and — since the engine torque became a state — N m of order 1e4. A
+    // Euclidean norm over those is dominated by whichever carries the largest
+    // units, and the measured "discrepancy" then reports the torque's relative
+    // error in absolute newton-metres. Dividing each component by the base
+    // point's own magnitude makes the norm dimensionless and comparable between
+    // models. The scaling is independent of epsilon, so the ORDER the ratios
+    // measure is unchanged by it.
+    const Eigen::VectorXd error = nonlinear_difference - linear.trajectory.states.back();
+    double sum = 0.0;
+    for (Eigen::Index i = 0; i < error.size(); ++i) {
+      const double scale = std::max(std::fabs(base(i)), 1.0);
+      const double term = error(i) / scale;
+      sum += term * term;
+    }
+    out.discrepancies.push_back(std::sqrt(sum));
   }
 
   for (std::size_t i = 1; i < out.discrepancies.size(); ++i) {
