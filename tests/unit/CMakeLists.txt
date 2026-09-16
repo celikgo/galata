@@ -31,6 +31,9 @@ add_executable(galata_unit_tests
   test_frames.cpp
   test_state.cpp
   test_integrator.cpp
+  test_integration_method.cpp
+  test_table.cpp
+  test_rotor.cpp
   test_matrix_exponential.cpp
   test_discrete_system.cpp
   test_discrete_control.cpp

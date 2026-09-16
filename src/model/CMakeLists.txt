@@ -10,6 +10,8 @@ add_library(galata_model
   linear_system.cpp
   discrete_system.cpp
   aircraft.cpp
+  vehicle.cpp
+  rotor/rotor.cpp
   quadrotor.cpp
 )
 add_library(galata::model ALIAS galata_model)

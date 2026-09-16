@@ -6,10 +6,12 @@
 galata_find_eigen()
 
 add_library(galata_numerics
+  integration_method.cpp
   integrator.cpp
   jacobian.cpp
   matrix_exponential.cpp
   newton.cpp
+  table.cpp
 )
 add_library(galata::numerics ALIAS galata_numerics)
 
