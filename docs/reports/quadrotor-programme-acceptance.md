@@ -103,10 +103,15 @@ Three statements, kept apart:
    reasons given in the outstanding-requirements section.
 
 **What carries statements 1 and 2 at the closure head.** Four local strands, kept apart in the
-closure-verification section, each naming the revision it covers; and the hosted graph, which
-is separate from all four and recorded in its own columns. The local strands cannot run Linux,
-GCC, the static analyzer or the cross-platform determinism comparison at all, so a green local
-set is not a prediction of a green hosted one, and statement 1 is not upgraded by one.
+closure-verification section, each naming the revision it covers; and the hosted graph, which is
+separate from all four. The complete required graph passed at
+[988a7b9](https://github.com/celikgo/galata/commit/988a7b9821b166870961377d83304cd9c6647b17) —
+[run 35027789300](https://github.com/celikgo/galata/actions/runs/35027789300), 11 of 11 — and
+that revision is `057d8d5` plus two Markdown files, so it covers the closure's code and nothing
+later. What a green graph is evidence **of** does not widen: it says the tests that exist
+passed on the platforms that ran them. It does not make statement 1's comparison any less
+narrow, and it does not touch statement 2, whose FAIL is held by a test that asserts the run is
+outside its budget — so the graph goes green *because* that lock holds, not despite it.
 
 None of this is a merge authorisation.
 
@@ -148,33 +153,38 @@ JUnit, and every own-PR and merged cell against the pull requests' rollups. The 
 evidence directory's `evidence-digests.txt` lists 388 files and has SHA-256
 `a5fc094e05a5e8248f3545b5da25d6974e793b2e7563690a9a9b7b86977eeb75`.
 
-**The combined-stack column** is the integration pull request's hosted run at the head that
-carries this table. A commit cannot record its own run, so that column is filled in by the
-commit after it.
+**The combined-stack column** is the integration pull request's hosted run at
+[988a7b9](https://github.com/celikgo/galata/commit/988a7b9821b166870961377d83304cd9c6647b17),
+[run 35027789300](https://github.com/celikgo/galata/actions/runs/35027789300): **11 of 11**.
+A commit cannot record its own run, so that column was filled in by the commit after it, which
+is the commit carrying this sentence. The column therefore names `988a7b9` rather than "the
+head that carries this table", because those are no longer the same revision. `988a7b9` is
+`057d8d5` plus two Markdown files, so that run covers the closure's code and nothing later
+than it.
 
 **The own-PR column** was read from each pull request's check rollup on 2026-09-11.
 
-| # | Requirement | Callable as | Local at `057d8d5` | CI, own PR | CI, combined stack | Merged | Verdict |
+| # | Requirement | Callable as | Local at `057d8d5` | CI, own PR | CI, combined stack at `988a7b9` | Merged | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1 | Trim a quadrotor whose rotors have different thrust coefficients | `trim.hover` | `QuadrotorHoverTrim` 3/3, `HoverTrim` 10/10 | #18: 11 of 11 | pending | no | **PASS** |
-| 2 | Reconcile the reported mode count with the state count | `analyze.modes` | `QuadrotorWorkflow` 43/43 | #19: 11 of 11 | pending | no | **PASS** |
-| 3 | Make the Hurwitz refusal name the cause a caller can act on | `analyze.margins`, `analyze.diskmargin` | `Margins` 15/15, `StabilityMarginDiagnostics` 2/2 | #20: 11 of 11 | pending | no | **PASS** |
-| 4 | Integrate the nonlinear plant through a public capability | `sim.plant` | `QuadrotorWorkflow` 43/43, `Determinism` 13/13 | #22: 11 of 11 | pending | no | **PASS** |
-| 5 | Declared input histories, and wind that changes over time | `sim.plant` (`command_schedule`, `wind_schedule`), `sim.sampled` (`wind_schedule`) and `sim.linear` (`input_schedule`) | `InputSchedule` 4/4, `LinearSimulation` 10/10, `LinearHistoryWorkflow` 3/3, `ExampleSouxmarLinearHistories` 3/3, `QuadrotorWorkflow` 43/43, `ExampleQuadrotorIdentification.TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule` | #23: **0 checks**; the linear half has no pull request | pending | no | **PASS** for all three. The linear half was **missing** until the two commits above. `sim.sampled`'s wind history broke the established contract until this closure. It integrated through a step, so the ground velocity took the whole increment. It is fixed, together with two defects in `sim.plant`'s own wind handling, and study-file tests now hold it |
-| 6 | A public two-way attitude-error chart map | public C++ API, not a capability; `sim.sampled` uses it | `ChartMapping` 4/4 | #24 (ADR): 11 of 11; #25: **0 checks** | pending | no | **PASS** |
-| 7 | Execute a controller at a declared rate against the plant | `sim.sampled` | `QuadrotorWorkflow` 43/43, `ExampleQuadrotorSampledControl` 4/4 | #26: **0 checks** | pending | no | **PASS** |
-| 8 | A measured record, and a CSV reader that refuses to guess | `data.import.csv` | `CsvImport` 6/6 | #27: 11 of 11 | pending | no | **PASS** |
-| 9 | A pack whose voltage falls under the load it is carrying | `model.quadrotor` with a battery block | `BatterySag` 6/6, `QuadrotorBattery` 2/2 | #28: 11 of 11 | pending | no | **PASS**; the parameters are unmeasured |
-| 10 | Read a PX4 ULog, and refuse what it does not contain | `data.import.ulog`; no CI-gated study drives it | `UlogImport` 8/8, and the pyulog comparison run locally | #21 (ADR): 11 of 11; #29: **0 checks** | pending | no | **PASS** on the generated fixture |
-| 11 | Bench maps by least squares, with honest uncertainty | `identify.static_fit` | `StaticFit` 7/7, `IdentifyWorkflow` 17/17 | #30: **0 checks** | pending | no | **PASS** on a synthetic record |
-| 12 | Grey-box identification against the nonlinear plant | `identify.greybox`, `model.quadrotor.export` | `Greybox` 5/5, `IdentifyWorkflow` 17/17, `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | #31: **0 checks** | pending | no | **PASS** on a synthetic record. Its output says a model was "identified against a measured record"; there, *measured record* is the artefact kind every imported record carries, not a claim that anything was measured |
-| 13 | Held-out validation, and the identity that makes it one | `identify.validate`, `data.window` | `RecordSeparation` 8/8, `Validate` 5/5, `RecordWindow` 5/5 | #32: **0 checks** | pending | no | **PASS**; separation, not independence |
-| F14.1 | Register the three discrete capabilities with strict schemas | `model.discretize`, `synth.dare`, `synth.sampled_lqr` | `DiscreteWorkflow` 7/7, `DiscreteControl` 11/11, `DiscreteSystem` 9/9 | none: F14 has no pull request of its own | pending | no | **PASS** |
-| F14.2 | `sim.sampled` consumes the sampled law, at its design period only | `sim.sampled` | `QuadrotorWorkflow` 43/43 | none | pending | no | **PASS** |
-| F14.3 | Retain the cross term, and document the conventions | `synth.sampled_lqr` | `DiscreteControl` 11/11, `DiscreteWorkflow` 7/7 | none | pending | no | **PASS** |
-| F14.4 | The Souxmar example compares the discrete prediction with the nonlinear response under a stated small-perturbation budget. **The acceptance case**, adopted 2026-09-11: half the original excitation, everything else unchanged | `examples/souxmar-sampled-lqr/acceptance.yaml` | `ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget`: the case, and its horizontal offset alone, both inside the unchanged budget | none | pending | no | **PASS**, within the revised small-perturbation case. That case accepts a narrower linear-versus-nonlinear comparison envelope |
-| F14.4, original case | The same comparison at the originally agreed excitation | `examples/souxmar-sampled-lqr/study.yaml` | `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` asserts that the run is **outside** the budget; the trace and envelope tests hold the mechanism and the scaling | none | pending | no | **FAIL, retained**: outside its budget, traced to the kinematics the linearisation drops, no defect found. Adopting the smaller case does not change this verdict |
-| F14.5 | Retain the references and refusals, and run the hosted checks at the final head | — | `DiscretePrediction` 4/4, `Determinism` 13/13 | none | pending | no | **PASS** locally; the hosted half is the combined-stack column |
+| 1 | Trim a quadrotor whose rotors have different thrust coefficients | `trim.hover` | `QuadrotorHoverTrim` 3/3, `HoverTrim` 10/10 | #18: 11 of 11 | 11 of 11 | no | **PASS** |
+| 2 | Reconcile the reported mode count with the state count | `analyze.modes` | `QuadrotorWorkflow` 43/43 | #19: 11 of 11 | 11 of 11 | no | **PASS** |
+| 3 | Make the Hurwitz refusal name the cause a caller can act on | `analyze.margins`, `analyze.diskmargin` | `Margins` 15/15, `StabilityMarginDiagnostics` 2/2 | #20: 11 of 11 | 11 of 11 | no | **PASS** |
+| 4 | Integrate the nonlinear plant through a public capability | `sim.plant` | `QuadrotorWorkflow` 43/43, `Determinism` 13/13 | #22: 11 of 11 | 11 of 11 | no | **PASS** |
+| 5 | Declared input histories, and wind that changes over time | `sim.plant` (`command_schedule`, `wind_schedule`), `sim.sampled` (`wind_schedule`) and `sim.linear` (`input_schedule`) | `InputSchedule` 4/4, `LinearSimulation` 10/10, `LinearHistoryWorkflow` 3/3, `ExampleSouxmarLinearHistories` 3/3, `QuadrotorWorkflow` 43/43, `ExampleQuadrotorIdentification.TheCommittedRecordIsRegeneratedFromItsOwnCommandSchedule` | #23: **0 checks**; the linear half has no pull request | 11 of 11 | no | **PASS** for all three. The linear half was **missing** until the two commits above. `sim.sampled`'s wind history broke the established contract until this closure. It integrated through a step, so the ground velocity took the whole increment. It is fixed, together with two defects in `sim.plant`'s own wind handling, and study-file tests now hold it |
+| 6 | A public two-way attitude-error chart map | public C++ API, not a capability; `sim.sampled` uses it | `ChartMapping` 4/4 | #24 (ADR): 11 of 11; #25: **0 checks** | 11 of 11 | no | **PASS** |
+| 7 | Execute a controller at a declared rate against the plant | `sim.sampled` | `QuadrotorWorkflow` 43/43, `ExampleQuadrotorSampledControl` 4/4 | #26: **0 checks** | 11 of 11 | no | **PASS** |
+| 8 | A measured record, and a CSV reader that refuses to guess | `data.import.csv` | `CsvImport` 6/6 | #27: 11 of 11 | 11 of 11 | no | **PASS** |
+| 9 | A pack whose voltage falls under the load it is carrying | `model.quadrotor` with a battery block | `BatterySag` 6/6, `QuadrotorBattery` 2/2 | #28: 11 of 11 | 11 of 11 | no | **PASS**; the parameters are unmeasured |
+| 10 | Read a PX4 ULog, and refuse what it does not contain | `data.import.ulog`; no CI-gated study drives it | `UlogImport` 8/8, and the pyulog comparison run locally | #21 (ADR): 11 of 11; #29: **0 checks** | 11 of 11 | no | **PASS** on the generated fixture |
+| 11 | Bench maps by least squares, with honest uncertainty | `identify.static_fit` | `StaticFit` 7/7, `IdentifyWorkflow` 17/17 | #30: **0 checks** | 11 of 11 | no | **PASS** on a synthetic record |
+| 12 | Grey-box identification against the nonlinear plant | `identify.greybox`, `model.quadrotor.export` | `Greybox` 5/5, `IdentifyWorkflow` 17/17, `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | #31: **0 checks** | 11 of 11 | no | **PASS** on a synthetic record. Its output says a model was "identified against a measured record"; there, *measured record* is the artefact kind every imported record carries, not a claim that anything was measured |
+| 13 | Held-out validation, and the identity that makes it one | `identify.validate`, `data.window` | `RecordSeparation` 8/8, `Validate` 5/5, `RecordWindow` 5/5 | #32: **0 checks** | 11 of 11 | no | **PASS**; separation, not independence |
+| F14.1 | Register the three discrete capabilities with strict schemas | `model.discretize`, `synth.dare`, `synth.sampled_lqr` | `DiscreteWorkflow` 7/7, `DiscreteControl` 11/11, `DiscreteSystem` 9/9 | none: F14 has no pull request of its own | 11 of 11 | no | **PASS** |
+| F14.2 | `sim.sampled` consumes the sampled law, at its design period only | `sim.sampled` | `QuadrotorWorkflow` 43/43 | none | 11 of 11 | no | **PASS** |
+| F14.3 | Retain the cross term, and document the conventions | `synth.sampled_lqr` | `DiscreteControl` 11/11, `DiscreteWorkflow` 7/7 | none | 11 of 11 | no | **PASS** |
+| F14.4 | The Souxmar example compares the discrete prediction with the nonlinear response under a stated small-perturbation budget. **The acceptance case**, adopted 2026-09-11: half the original excitation, everything else unchanged | `examples/souxmar-sampled-lqr/acceptance.yaml` | `ExampleSouxmarSampledLqr.TheAdoptedSmallPerturbationCasePassesTheUnchangedBudget`: the case, and its horizontal offset alone, both inside the unchanged budget | none | 11 of 11 | no | **PASS**, within the revised small-perturbation case. That case accepts a narrower linear-versus-nonlinear comparison envelope |
+| F14.4, original case | The same comparison at the originally agreed excitation | `examples/souxmar-sampled-lqr/study.yaml` | `ExampleSouxmarSampledLqr.TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` asserts that the run is **outside** the budget; the trace and envelope tests hold the mechanism and the scaling | none | 11 of 11 — and that is the graph passing, not the comparison passing. `TheOverBudgetDiscrepancyIsHeldByATwoSidedLock` asserts the run is OUTSIDE its budget, so a green graph is the lock holding the FAIL, not lifting it | no | **FAIL, retained**: outside its budget, traced to the kinematics the linearisation drops, no defect found. Adopting the smaller case does not change this verdict |
+| F14.5 | Retain the references and refusals, and run the hosted checks at the final head | — | `DiscretePrediction` 4/4, `Determinism` 13/13 | none | 11 of 11 | no | **PASS**. The hosted half is discharged at `988a7b9`, the head carrying the closure; see the results-by-revision table |
 | — | Sampled-loop margins | none | — | — | — | — | **DEFERRED**: no capability computes one, and F14 and F17 stay open |
 | — | Simultaneous variation across channels (MIMO structured robustness) | none | — | — | — | — | **DEFERRED** |
 | — | Physical validation and hardware calibration | none | — | — | — | — | **DEFERRED**: no aircraft, bench or measured record exists |
@@ -182,13 +192,13 @@ commit after it.
 
 The workflows, each run through public capabilities only:
 
-| Workflow | Study | Local at `057d8d5` | CI, combined stack | Verdict |
+| Workflow | Study | Local at `057d8d5` | CI, combined stack at `988a7b9` | Verdict |
 |---|---|---|---|---|
-| Handoff workflow A: plant, trim, linearisation, sampled synthesis, nonlinear sampled simulation | `examples/souxmar-sampled-lqr/study.yaml` | runs end to end in the retained run; the comparison is outside its budget | pending | **FAIL**, as F14.4 |
-| This record's workflow A: a continuous design flown at a rate | `examples/quadrotor-sampled-control/study.yaml` | `ExampleQuadrotorSampledControl` 4/4 | pending | **PASS** |
-| B: import, identification, export, trim and analysis, held-out validation | `examples/quadrotor-identification/study.yaml` | `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | pending | **PASS** on a synthetic record |
+| Handoff workflow A: plant, trim, linearisation, sampled synthesis, nonlinear sampled simulation | `examples/souxmar-sampled-lqr/study.yaml` | runs end to end in the retained run; the comparison is outside its budget | 11 of 11, the graph passing with the lock holding this FAIL | **FAIL**, as F14.4 |
+| This record's workflow A: a continuous design flown at a rate | `examples/quadrotor-sampled-control/study.yaml` | `ExampleQuadrotorSampledControl` 4/4 | 11 of 11 | **PASS** |
+| B: import, identification, export, trim and analysis, held-out validation | `examples/quadrotor-identification/study.yaml` | `ExampleQuadrotorIdentification` 5/5, `IdentificationRecovery` 6/6 | 11 of 11 | **PASS** on a synthetic record |
 | C: the unchanged Souxmar bridge, and the independent comparison | the fixture's own study file | Re-established at this revision as closure strand 3: the fixture's study ran unchanged and its four outputs are byte-identical to the fixture's own; the Souxmar-side round trip passed against the binary built here; the fixture's thirteen files were digested before and after and are unchanged; `QuadrotorCrossImplementation` 1/1 and `QuadrotorHoverLinearisation.MatricesAgreeWithTheIndependentSouxmarExport` **ran** against the fixture rather than skipping. No test in the suite runs the fixture's study file itself | **SKIP**: no workflow configures the fixture | **PASS** locally; **SKIP** in CI |
-| Declared input histories through `sim.linear` | `examples/souxmar-linear-histories/study.yaml` | `ExampleSouxmarLinearHistories` 3/3 | pending | **PASS** |
+| Declared input histories through `sim.linear` | `examples/souxmar-linear-histories/study.yaml` | `ExampleSouxmarLinearHistories` 3/3 | 11 of 11 | **PASS** |
 | Independent ULog reading | `scripts/compare-ulog-against-pyulog.py` | Closure strand 4, re-run at this revision: pyulog 1.2.4 on CPython 3.14.0 and galata agree exactly on every compared channel of the generated fixture. Retained in the closure evidence | not run in CI | **PASS** locally, on the generated fixture |
 
 The four trajectory gates in `QuadrotorCrossImplementation` now each carry a derivation, in the
@@ -225,21 +235,28 @@ not extend that run's reach, and no row below is re-read onto a later head.
 | Strand | Revision it covers | Environment | Result |
 |---|---|---|---|
 | **1. The full suite** | [057d8d5](https://github.com/celikgo/galata/commit/057d8d5e99dd5005dcebcda938f63d352a485d75) | a clean clone, Darwin arm64, AppleClang, Debug, preset defaults, Souxmar fixture configured | 724 of 724 passed, none skipped. This is the **Local at `057d8d5`** column above |
-| **2. The sanitizer** | `057d8d5` | ASan and UBSan, the `asan` preset, Darwin arm64, no fixture configured | pending; recorded by the commit after this head |
+| **2. The sanitizer** | `057d8d5` | ASan and UBSan, the `asan` preset, Darwin arm64, no fixture configured | 722 passed and 2 skipped, of 724, with no sanitizer diagnostic anywhere in the log |
 | **3. The local fixture checks** | `057d8d5` | a working-tree build at that revision, differing from it only in the two Markdown files this closure edits, with `GALATA_SOUXMAR_FIXTURE_DIR` set | four checks, all passed; recorded below |
 | **4. The pyulog comparison** | `057d8d5` | pyulog 1.2.4 on CPython 3.14.0, against the CLI built at that revision | agreement on every compared channel of the generated fixture; recorded below |
 
-The hosted graph is a fifth body of evidence and is **not** one of these. It is recorded in
-the combined-stack column and in the results-by-revision table, each against its own head.
+The hosted graph is a fifth body of evidence and is **not** one of these. It is recorded in the
+combined-stack column and in the results-by-revision table, each against its own head, and at
+this closure that head is `988a7b9`.
 
 **Strand 2, the sanitizer.** Run locally under the `asan` preset at `057d8d5`, which enables
-both ASan and UBSan. The build configures no Souxmar fixture, so the two cross-checks skip
-there exactly as they skip in the hosted sanitizer job; a skip is not a pass, and strand 3 is
-where those two are established. **Its result is not in this commit.** A commit cannot record
-a run that is still going when it is written, so the result is filled in here by the commit
-after this head, against `057d8d5` and against no later revision. A local sanitizer run is
-**not** a substitute for the hosted one either: it is one platform and one toolchain, and the
-hosted job is what the required graph gates on.
+both ASan and UBSan. 722 passed and 2 were skipped, of 724. The two skipped are the Souxmar
+cross-checks: the `asan` build configures no fixture, so they skip there exactly as they skip
+in the hosted sanitizer job. A skip is not a pass, and strand 3 is where those two are
+established. The retained log contains no ASan or UBSan diagnostic of any kind — the check is
+the absence of a report, not merely a zero exit code, because a recovering UBSan can print and
+still exit zero.
+
+This result was not in the commit that introduced this section: the run was still going when
+that commit was written, and a commit cannot record a run it has not seen. It is filled in by
+the commit after it, against `057d8d5`, and it is not re-read onto any later revision. A local
+sanitizer run is **not** a substitute for the hosted one either — it is one platform and one
+toolchain, and the hosted job is what the required graph gates on. The hosted sanitizer result
+for this closure is in the results-by-revision table, against `988a7b9`.
 
 **Strand 3, the local fixture checks.** These are the two cases that SKIP without the fixture
 and that therefore no hosted job establishes, plus the fixture's own study file:
@@ -398,10 +415,12 @@ clone detached at that revision, never from a working tree.
 - A second directory at `057d8d5` holds the closure-verification strands that are not the
   clean-clone suite run: the sanitizer log, the two fixture cross-checks' gtest XML, the
   fixture digests taken before and after, the pyulog comparison and its environment, the six
-  generated-artefact `--check` results, and the five workflow runs with their manifests. Its
-  build is the working tree at `057d8d5`, whose only difference from that revision is the two
-  Markdown files this closure edits, and its identity file records that rather than describing
-  it as a clean clone.
+  generated-artefact `--check` results, the budget-derivation output, the five workflow runs
+  with their manifests, and the hosted run's own job summary. Its build is the working tree at
+  `057d8d5`, whose only difference from that revision is the two Markdown files this closure
+  edits, and its identity file records that rather than describing it as a clean clone. Its
+  `evidence-digests.txt` lists 51 files and has SHA-256
+  `3b750e450d36e70652cfce8f942d4cb4658886ef12c40ad2b661c36f4b3cb543`.
 - **Acceptance runs before `0efdb44` wrote to temporary directories that were not kept.** Their
   results stand only through the hosted runs this record cites, and their local outputs cannot
   be re-read.
@@ -603,7 +622,7 @@ cancels a superseded run, so a result is recorded only for a head whose run comp
 | [8042fb2](https://github.com/celikgo/galata/commit/8042fb218e20c1b6f293eccbb58a500b8e8f31c2) | A mislabelled verdict fixed: a declared budget on a run that starts at the reference has an undefined comparison, and it had been printed as OUTSIDE the budget. It also adds a test for the chart refusal requirement 2 names, and corrects wording in this record | [34547686368](https://github.com/celikgo/galata/actions/runs/34547686368) | **not a result.** In both attempts every job passed except the sanitizer, which was cancelled at the job's 120-minute limit, so the `CI` aggregate failed | — |
 | [f5b9b2f](https://github.com/celikgo/galata/commit/f5b9b2f7bf75a2f1610955ac4ca18a35cc357983) | The sanitizer job's limit sized from the runtime it was measured to need, with the derivation beside it in `.github/workflows/ci.yml` | [34563887885](https://github.com/celikgo/galata/actions/runs/34563887885) | **11 of 11.** Under the sanitizer, 690 passed and 2 were skipped, of 692, with `Total Test time (real) = 6206.06 sec`. On each Linux engine, 690 passed and 2 were skipped, of 692. On macOS, 722 passed and 2 were skipped, of 724 | **yes** |
 | [f31dc2f](https://github.com/celikgo/galata/commit/f31dc2f4aef119080442cc88e1d51eb2c488f062) | Several changes, from [c2c0729](https://github.com/celikgo/galata/commit/c2c072939c1cb0dd9892e2d569b0a8ba00779a10) to [803326a](https://github.com/celikgo/galata/commit/803326a1fbadadd27bce21e8e7b71d2d8d7d621b): the linear path's declared input histories; the Souxmar histories example; the F14 comparison's trace, its envelope and the half-excitation case, then only proposed. It also carries this record's first corrections | [34584733774](https://github.com/celikgo/galata/actions/runs/34584733774) | **11 of 11.** Under the sanitizer, 706 passed and 2 were skipped, of 708, with `Total Test time (real) = 7967.38 sec`. On each Linux engine, 706 passed and 2 were skipped, of 708. On macOS, 738 passed and 2 were skipped, of 740 | **yes**, up to that tree; not the closure commits after it |
-| The closure commits after `f31dc2f`: [844e480](https://github.com/celikgo/galata/commit/844e480cddab59536f82579afba14f52825d2a18), [29ae18d](https://github.com/celikgo/galata/commit/29ae18db3d1652797ca338f10925375f5c48d31d), [057d8d5](https://github.com/celikgo/galata/commit/057d8d5e99dd5005dcebcda938f63d352a485d75), and the documentation commit that carries this row. No commit before that head is run on its own | The half-excitation case adopted as the acceptance case; the wind contract honoured in `sim.sampled` and corrected in `sim.plant`, with a ramp's change of slope now held to the lattice as a step is; the Souxmar cross-check budgets derived, and their banner corrected | recorded by the commit after the head | pending | — |
+| [988a7b9](https://github.com/celikgo/galata/commit/988a7b9821b166870961377d83304cd9c6647b17), carrying the three closure commits [844e480](https://github.com/celikgo/galata/commit/844e480cddab59536f82579afba14f52825d2a18), [29ae18d](https://github.com/celikgo/galata/commit/29ae18db3d1652797ca338f10925375f5c48d31d) and [057d8d5](https://github.com/celikgo/galata/commit/057d8d5e99dd5005dcebcda938f63d352a485d75). None of those three is run on its own; `988a7b9` is `057d8d5` plus two Markdown files | The half-excitation case adopted as the acceptance case; the wind contract honoured in `sim.sampled` and corrected in `sim.plant`, with a ramp's change of slope now held to the lattice as a step is; the Souxmar cross-check budgets derived, and their banner corrected | [35027789300](https://github.com/celikgo/galata/actions/runs/35027789300) | **11 of 11.** Under the sanitizer, 720 passed and 2 were skipped, of 722, with `Total Test time (real) = 8079.67 sec`. On each Linux engine, 720 passed and 2 were skipped, of 722. On macOS, 752 passed and 2 were skipped, of 754. Every skip is one of the two Souxmar cross-checks | **yes** — this is the head that carries the closure, and the run covers its tree and nothing after it |
 
 Each result above covers its own tree and nothing after it. Every skipped test in every row is
 one of the same two Souxmar cross-checks.
