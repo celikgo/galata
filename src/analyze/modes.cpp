@@ -127,6 +127,25 @@ struct Signature {
   // the phugoid's — would compete for the phugoid's mode on a fixed-wing
   // model, and the five classical labels would stop meaning what they meant.
   bool rotorcraft_only = false;
+
+  // MINIMUM PARTICIPATION FOR THIS LABEL TO BE ASSIGNED AT ALL.
+  //
+  // The greedy assignment below admits any candidate scoring above zero, so once
+  // the strong candidates are taken a label can land on a mode with negligible
+  // evidence. That happened: the Souxmar hover's rotor-speed label was assigned
+  // to a mode with 0.939 of its participation in `main_inflow_ratio` and
+  // effectively none in `main_rotor_speed_rad_s` — the inflow lag, wearing the
+  // rotor-speed name. A label on noise is worse than Unclassified, because a
+  // reader believes it.
+  //
+  // WHY THIS IS ZERO FOR THE CLASSICAL FIVE. Raising their floor would change
+  // labels the NT-33A validation cases already gate — roll subsidence is
+  // legitimately assigned there at 0.003 participation, because a heavily damped
+  // pure roll mode's participation is spread thin by construction. Those labels
+  // are validated against a published document and are not being renegotiated
+  // here. The asymmetry is deliberate and is the conservative direction: the new
+  // labels get the stricter rule.
+  double minimum_score = 0.0;
 };
 
 const std::array<Signature, 10> kSignatures = {{
@@ -148,20 +167,33 @@ const std::array<Signature, 10> kSignatures = {{
     // same speed-and-attitude exchange happens, but the rotor's thrust-vector
     // tilt makes it unstable instead of lightly damped. Same participation,
     // different aircraft, and the gate is what keeps them apart.
+    // The floor of 0.10 is one tenth of a mode's participation. A mode with less
+    // than that in its signature state is not that mode.
     {ModeLabel::HoveringCubic,
      true,
      {&StateRoles::axial_speed, &StateRoles::pitch_attitude},
-     true},
+     true,
+     0.10},
     {ModeLabel::LateralHoveringOscillation,
      true,
      {&StateRoles::sideslip, &StateRoles::bank_angle},
-     true},
+     true,
+     0.10},
     {ModeLabel::HeaveSubsidence,
      false,
      {&StateRoles::heave_velocity, &StateRoles::heave_velocity},
-     true},
-    {ModeLabel::YawSubsidence, false, {&StateRoles::yaw_rate, &StateRoles::yaw_rate}, true},
-    {ModeLabel::RotorSpeedMode, false, {&StateRoles::rotor_speed, &StateRoles::rotor_speed}, true},
+     true,
+     0.10},
+    {ModeLabel::YawSubsidence,
+     false,
+     {&StateRoles::yaw_rate, &StateRoles::yaw_rate},
+     true,
+     0.10},
+    {ModeLabel::RotorSpeedMode,
+     false,
+     {&StateRoles::rotor_speed, &StateRoles::rotor_speed},
+     true,
+     0.10},
 }};
 
 double signature_score(const Mode& mode, const StateRoles& roles, const Signature& signature) {
@@ -410,7 +442,7 @@ ModalDecomposition analyze_modes(const Eigen::MatrixXd& a,
         continue;
       }
       const double score = signature_score(result.modes[m], roles, kSignatures[s]);
-      if (score > 0.0) {
+      if (score > 0.0 && score >= kSignatures[s].minimum_score) {
         candidates.push_back({m, s, score});
       }
     }

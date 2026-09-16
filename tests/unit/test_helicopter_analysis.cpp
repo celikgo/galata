@@ -314,15 +314,59 @@ TEST(HelicopterModes, ClassifiesTheHoverModesAndFindsAnUnstableOscillation) {
          "none, which would mean the rotor's thrust-vector tilt is not reaching the attitude "
          "equations";
 
-  // The heave root and the rotor-speed mode are both identified, and both are
-  // stable convergences.
+  // The heave root is identified, and it is a stable convergence.
   const auto* heave = modes.find(ModeLabel::HeaveSubsidence);
   ASSERT_NE(heave, nullptr) << "the heave root should be identified in hover";
   EXPECT_LT(heave->eigenvalue.real(), 0.0);
+  EXPECT_GT(heave->label_score, 0.5) << "the heave label should rest on most of the mode";
 
+  const auto* yaw = modes.find(ModeLabel::YawSubsidence);
+  ASSERT_NE(yaw, nullptr) << "the yaw convergence should be identified in hover";
+  EXPECT_LT(yaw->eigenvalue.real(), 0.0);
+
+  // NO ROTOR-SPEED MODE IS IDENTIFIED, AND THAT IS THE CORRECT ANSWER HERE.
+  //
+  // Once engine torque became a state with the governor's lag, the rotor-speed
+  // dynamics stopped being one slow root: the governor makes them fast and mixes
+  // them with the drivetrain, so no single mode is dominated by rotor speed. The
+  // classifier's participation floor therefore declines the label rather than
+  // hanging it on the nearest candidate.
+  //
+  // It DID hang it on the nearest candidate before that floor existed, and the
+  // result was actively misleading: the label landed on a mode carrying 0.939 of
+  // its participation in `main_inflow_ratio` and effectively none in rotor speed
+  // — the inflow lag wearing the rotor-speed name. A label on noise is worse
+  // than Unclassified, because a reader believes it.
   const auto* rotor = modes.find(ModeLabel::RotorSpeedMode);
-  ASSERT_NE(rotor, nullptr) << "the governed rotor-speed mode should be identified";
-  EXPECT_LT(rotor->eigenvalue.real(), 0.0);
+  EXPECT_EQ(rotor, nullptr)
+      << "a rotor-speed label was assigned; check it rests on real participation in "
+         "main_rotor_speed_rad_s and is not the inflow lag wearing that name";
+}
+
+TEST(HelicopterModes, ALabelIsNeverAssignedOnNegligibleParticipation) {
+  // THE FLOOR, ASSERTED DIRECTLY. Every rotorcraft label that IS assigned must
+  // rest on at least a tenth of its mode's participation. Without this the
+  // greedy assignment hands a spare label to whatever scores above zero once the
+  // strong candidates are taken.
+  const auto trimmed = trimmed_hover();
+  const auto reduced = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
+                                         trimmed.environment)
+                           .reduced();
+  const auto modes =
+      analyze_modes(reduced.a, reduced.state_names, StateRoles::from_names(reduced.state_names));
+
+  for (const auto& mode : modes.modes) {
+    const bool rotorcraft = mode.label == ModeLabel::HoveringCubic
+                            || mode.label == ModeLabel::LateralHoveringOscillation
+                            || mode.label == ModeLabel::HeaveSubsidence
+                            || mode.label == ModeLabel::YawSubsidence
+                            || mode.label == ModeLabel::RotorSpeedMode;
+    if (rotorcraft) {
+      EXPECT_GE(mode.label_score, 0.10)
+          << galata::analyze::to_string(mode.label) << " was assigned on only "
+          << mode.label_score << " of participation";
+    }
+  }
 }
 
 TEST(HelicopterModes, AModelWithNoRotorSpeedRoleCannotBeGivenARotorcraftLabel) {
