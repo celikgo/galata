@@ -34,6 +34,7 @@ add_executable(galata_unit_tests
   test_integration_method.cpp
   test_table.cpp
   test_rotor.cpp
+  test_helicopter.cpp
   test_matrix_exponential.cpp
   test_discrete_system.cpp
   test_discrete_control.cpp
@@ -86,6 +87,10 @@ target_link_libraries(galata_unit_tests
 
 target_compile_definitions(galata_unit_tests
   PRIVATE GALATA_TEST_BINARY=galata::validation::Binary::Unit
+  # The helicopter tests load models/souxmar-heli/souxmar-heli.yaml, which is a
+  # committed fixture rather than a generated one: a model file a test cannot
+  # read is a model file nobody checks.
+  PRIVATE GALATA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 target_link_libraries(galata_unit_tests PRIVATE galata::validation_case_check)

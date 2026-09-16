@@ -12,6 +12,8 @@ add_library(galata_model
   aircraft.cpp
   vehicle.cpp
   rotor/rotor.cpp
+  helicopter.cpp
+  helicopter_io.cpp
   quadrotor.cpp
 )
 add_library(galata::model ALIAS galata_model)

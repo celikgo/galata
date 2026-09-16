@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Souxmar F1 — four-seat twin-turboshaft helicopter, Level-1 flight-dynamics
+# model. See PROVENANCE.md in this directory for the source of every number, the
+# conversions applied, and — importantly — which numbers the design package
+# supplies and which this model had to assume.
+#
+# Units are SI and every key carries its unit (ADR-0003). Unknown keys are errors.
+#
+# THIS IS A DESIGN STUDY, NOT AN AIRCRAFT. No Souxmar helicopter has been built,
+# flown or measured. A completed run against this model is evidence about the
+# equations, never about an aircraft.
+
+description: "Souxmar F1 four-seat twin-turboshaft helicopter, 2829.7 kg gross, 12 m four-blade main rotor"
+citation: "Souxmar helicopter programme, design revision I (12 September 2026), turboshaft_rev_i/results.json; a preliminary design package, not measured aircraft data and not a published source. Flight-dynamics parameters absent from that package are assumptions recorded in PROVENANCE.md."
+
+mass:
+  mass_kg: 2829.7
+  # Radius-of-gyration estimates, NOT a mass-properties breakdown. The design
+  # package's weight statement carries no lateral offsets and no tail-boom
+  # distribution, so its point-mass inertia is a lower bound that fails the
+  # principal-moment triangle inequality. PROVENANCE.md shows that computation
+  # and why it is not used.
+  inertia_xx_kg_m2: 2608.0
+  inertia_yy_kg_m2: 9168.0
+  inertia_zz_kg_m2: 7426.0
+  product_of_inertia_xz_kg_m2: 175.0
+
+main_rotor:
+  radius_m: 6.0
+  chord_m: 0.339292006587698
+  blade_count: 4
+  lift_curve_slope: 5.73
+  profile_drag_coefficient: 0.011
+  induced_power_factor: 1.15
+  blade_twist_rad: -0.13962634015954636
+  tip_loss_factor: 0.97
+  hinge_offset_m: 0.18
+  flap_stiffness_n_m_rad: 48000.0
+  blade_flap_inertia_kg_m2: 288.0
+  polar_inertia_kg_m2: 1152.0
+  inflow_time_constant_s: 0.1
+  # Hub 2.5 m above the CG. FRD body axes, so up is NEGATIVE z.
+  position_cg_to_hub_body_m: [0.0, 0.0, -2.5]
+  spin_about_shaft: 1
+  shaft_tilt_forward_rad: 0.0523598775598299
+  maximum_thrust_coefficient_solidity: 0.11
+  maximum_advance_ratio: 0.35
+
+tail_rotor:
+  radius_m: 1.2
+  chord_m: 0.169646003293849
+  blade_count: 4
+  lift_curve_slope: 5.73
+  profile_drag_coefficient: 0.012
+  induced_power_factor: 1.2
+  tip_loss_factor: 0.95
+  polar_inertia_kg_m2: 2.88
+  inflow_time_constant_s: 0.05
+  position_cg_to_hub_body_m: [-6.7, 0.0, -1.0]
+  spin_about_shaft: 1
+  # The main rotor turns with its angular velocity along +z_body, which yaws the
+  # airframe nose-LEFT. The tail rotor must therefore push to PORT to yaw the
+  # nose right. HelicopterModel::validate() checks this pairing numerically.
+  thrust_towards_starboard: false
+  maximum_thrust_coefficient_solidity: 0.14
+  maximum_advance_ratio: 0.4
+
+airframe:
+  flat_plate_area_m2: 1.3
+  cg_to_fuselage_reference_body_m: [0.0, 0.0, 0.0]
+  horizontal_tail_area_m2: 1.1
+  horizontal_tail_lift_slope: 3.8
+  horizontal_tail_incidence_rad: -0.0523598775598299
+  cg_to_horizontal_tail_body_m: [-6.2, 0.0, -0.3]
+  horizontal_tail_downwash_factor: 0.4
+  vertical_tail_area_m2: 1.0
+  vertical_tail_side_slope: 3.2
+  vertical_tail_incidence_rad: 0.0
+  cg_to_vertical_tail_body_m: [-6.5, 0.0, -0.8]
+  surface_stall_angle_rad: 0.2617993877991494
+
+drivetrain:
+  reference_rotor_speed_rad_s: 32.5
+  tail_gear_ratio: 5.0
+  governor_proportional_n_m_s: 2500.0
+  governor_time_constant_s: 0.3
+  # Two PW207D1 at maximum continuous power through a 0.95 transmission, at the
+  # reference rotor speed. The design package explicitly limits the drive to
+  # 700 kW input, so that limit binds first and is the one used here.
+  maximum_engine_torque_n_m: 20461.5
+  minimum_engine_torque_n_m: 0.0
+  transmission_efficiency: 0.95
+  accessory_torque_n_m: 615.4
+  minimum_rotor_speed_rad_s: 29.0
+  maximum_rotor_speed_rad_s: 36.0
+
+actuators:
+  collective:
+    minimum_rad: 0.0
+    maximum_rad: 0.3490658503988659
+    rate_limit_rad_s: 0.35
+    time_constant_s: 0.08
+  longitudinal_cyclic:
+    minimum_rad: -0.1745329251994329
+    maximum_rad: 0.1745329251994329
+    rate_limit_rad_s: 0.5
+    time_constant_s: 0.06
+  lateral_cyclic:
+    minimum_rad: -0.1396263401595464
+    maximum_rad: 0.1396263401595464
+    rate_limit_rad_s: 0.5
+    time_constant_s: 0.06
+  pedal:
+    minimum_rad: -0.3490658503988659
+    maximum_rad: 0.3490658503988659
+    rate_limit_rad_s: 0.8
+    time_constant_s: 0.05
+
+tail_rotor_blockage_factor: 0.92
+pedal_to_tail_collective: 1.0
