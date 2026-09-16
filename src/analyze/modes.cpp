@@ -122,9 +122,14 @@ struct Signature {
   bool oscillatory;
   // Offsets of the StateRoles members that define this label.
   std::array<int StateRoles::*, 2> roles;
+  // A rotorcraft label is only a candidate for a model that declares a rotor
+  // speed. Without this gate the hovering cubic — whose signature states are
+  // the phugoid's — would compete for the phugoid's mode on a fixed-wing
+  // model, and the five classical labels would stop meaning what they meant.
+  bool rotorcraft_only = false;
 };
 
-const std::array<Signature, 5> kSignatures = {{
+const std::array<Signature, 10> kSignatures = {{
     // Short period: a rapid pitching oscillation at nearly constant speed.
     // alpha and q take part; u barely moves.
     {ModeLabel::ShortPeriod, true, {&StateRoles::angle_of_attack, &StateRoles::pitch_rate}},
@@ -136,6 +141,27 @@ const std::array<Signature, 5> kSignatures = {{
     {ModeLabel::RollSubsidence, false, {&StateRoles::roll_rate, &StateRoles::roll_rate}},
     // Spiral: a slow bank-angle divergence or convergence.
     {ModeLabel::Spiral, false, {&StateRoles::bank_angle, &StateRoles::bank_angle}},
+
+    // ---- rotorcraft, all gated on a declared rotor-speed role -----------
+    //
+    // The hovering cubic's signature states are the phugoid's: in hover the
+    // same speed-and-attitude exchange happens, but the rotor's thrust-vector
+    // tilt makes it unstable instead of lightly damped. Same participation,
+    // different aircraft, and the gate is what keeps them apart.
+    {ModeLabel::HoveringCubic,
+     true,
+     {&StateRoles::axial_speed, &StateRoles::pitch_attitude},
+     true},
+    {ModeLabel::LateralHoveringOscillation,
+     true,
+     {&StateRoles::sideslip, &StateRoles::bank_angle},
+     true},
+    {ModeLabel::HeaveSubsidence,
+     false,
+     {&StateRoles::heave_velocity, &StateRoles::heave_velocity},
+     true},
+    {ModeLabel::YawSubsidence, false, {&StateRoles::yaw_rate, &StateRoles::yaw_rate}, true},
+    {ModeLabel::RotorSpeedMode, false, {&StateRoles::rotor_speed, &StateRoles::rotor_speed}, true},
 }};
 
 double signature_score(const Mode& mode, const StateRoles& roles, const Signature& signature) {
@@ -168,6 +194,16 @@ std::string to_string(ModeLabel label) {
       return "roll subsidence";
     case ModeLabel::Spiral:
       return "spiral";
+    case ModeLabel::HoveringCubic:
+      return "hovering cubic";
+    case ModeLabel::LateralHoveringOscillation:
+      return "lateral hovering oscillation";
+    case ModeLabel::HeaveSubsidence:
+      return "heave subsidence";
+    case ModeLabel::YawSubsidence:
+      return "yaw subsidence";
+    case ModeLabel::RotorSpeedMode:
+      return "rotor speed";
     case ModeLabel::Unclassified:
       break;
   }
@@ -180,22 +216,43 @@ StateRoles StateRoles::from_names(const std::vector<std::string>& state_names) {
     const std::string name = lower(state_names[i]);
     const int index = static_cast<int>(i);
 
-    if (name == "u" || name == "v_t" || name == "vt" || name == "speed" || name == "airspeed") {
+    // Short forms first, then the fully-qualified names a VehicleModel
+    // declares. Both are listed explicitly rather than matched by prefix,
+    // because a prefix rule is how a state called "roll_command" quietly
+    // acquires the bank-angle role.
+    if (name == "u" || name == "v_t" || name == "vt" || name == "speed" || name == "airspeed"
+        || name == "velocity_u_m_s") {
       roles.axial_speed = index;
-    } else if (name == "w" || name == "alpha" || name == "aoa") {
+    } else if (name == "w" || name == "alpha" || name == "aoa" || name == "velocity_w_m_s") {
       roles.angle_of_attack = index;
-    } else if (name == "q" || name == "pitch_rate") {
+    } else if (name == "q" || name == "pitch_rate" || name == "pitch_rate_rad_s") {
       roles.pitch_rate = index;
-    } else if (name == "theta" || name == "pitch" || name == "pitch_attitude") {
+    } else if (name == "theta" || name == "pitch" || name == "pitch_attitude"
+               || name == "pitch_rad") {
       roles.pitch_attitude = index;
-    } else if (name == "v" || name == "beta" || name == "sideslip") {
+    } else if (name == "v" || name == "beta" || name == "sideslip" || name == "velocity_v_m_s") {
       roles.sideslip = index;
-    } else if (name == "p" || name == "roll_rate") {
+    } else if (name == "p" || name == "roll_rate" || name == "roll_rate_rad_s") {
       roles.roll_rate = index;
-    } else if (name == "r" || name == "yaw_rate") {
+    } else if (name == "r" || name == "yaw_rate" || name == "yaw_rate_rad_s") {
       roles.yaw_rate = index;
-    } else if (name == "phi" || name == "bank" || name == "roll" || name == "bank_angle") {
+    } else if (name == "phi" || name == "bank" || name == "roll" || name == "bank_angle"
+               || name == "roll_rad") {
       roles.bank_angle = index;
+    }
+
+    // ROTORCRAFT ROLES ARE MATCHED ON THE HELICOPTER MODEL'S OWN STATE NAMES,
+    // not on short forms. A fixed-wing model whose author happened to call a
+    // state "omega" must not acquire a rotor-speed role by accident, because
+    // that role is the gate on five labels it should never be given.
+    if (name == "main_rotor_speed_rad_s" || name == "rotor_speed_rad_s") {
+      roles.rotor_speed = index;
+    } else if (name == "velocity_w_m_s" || name == "heave_velocity" || name == "w_m_s"
+               || name == "w") {
+      // In hover the vertical velocity IS the heave coordinate; in forward
+      // flight the same state plays the angle-of-attack role. Both roles point
+      // at it, and the rotor-speed gate is what decides which labels compete.
+      roles.heave_velocity = index;
     }
   }
   return roles;
@@ -207,6 +264,10 @@ bool StateRoles::has_longitudinal() const noexcept {
 
 bool StateRoles::has_lateral() const noexcept {
   return sideslip >= 0 && yaw_rate >= 0;
+}
+
+bool StateRoles::has_rotorcraft() const noexcept {
+  return rotor_speed >= 0;
 }
 
 const Mode* ModalDecomposition::find(ModeLabel label) const {
@@ -343,6 +404,9 @@ ModalDecomposition analyze_modes(const Eigen::MatrixXd& a,
   for (std::size_t m = 0; m < result.modes.size(); ++m) {
     for (std::size_t s = 0; s < kSignatures.size(); ++s) {
       if (kSignatures[s].oscillatory != result.modes[m].is_oscillatory) {
+        continue;
+      }
+      if (kSignatures[s].rotorcraft_only && !roles.has_rotorcraft()) {
         continue;
       }
       const double score = signature_score(result.modes[m], roles, kSignatures[s]);

@@ -65,11 +65,36 @@ namespace galata::analyze {
 
 enum class ModeLabel {
   Unclassified,
+  // The classical fixed-wing five.
   ShortPeriod,
   Phugoid,
   DutchRoll,
   RollSubsidence,
   Spiral,
+  // ---- rotorcraft -------------------------------------------------------
+  //
+  // These are only ever candidates for a model that declares a ROTOR SPEED
+  // role. A fixed-wing model has none, so every rotorcraft signature scores
+  // zero on it and is never a candidate — which is what keeps the five labels
+  // above returning exactly what they returned before these existed. A test
+  // asserts that on the NT-33A.
+  //
+  // The longitudinal hovering oscillation: the pitch-attitude and
+  // forward-speed exchange that in hover is typically UNSTABLE, unlike the
+  // fixed-wing phugoid it is descended from. It is called a cubic because in
+  // the classical hover approximation the longitudinal characteristic
+  // polynomial factors into this oscillation and a real heave root.
+  HoveringCubic,
+  // Its lateral counterpart: the roll-attitude and sideways-speed exchange,
+  // also typically unstable in hover.
+  LateralHoveringOscillation,
+  // The heave root: a nearly pure vertical-velocity convergence, set by the
+  // rotor's thrust response to inflow.
+  HeaveSubsidence,
+  // The yaw convergence, set by the tail rotor's response to yaw rate.
+  YawSubsidence,
+  // The rotor-speed and governor mode. Slow, and the one a droop study reads.
+  RotorSpeedMode,
 };
 
 [[nodiscard]] std::string to_string(ModeLabel label);
@@ -90,6 +115,14 @@ struct StateRoles {
   int yaw_rate = -1;         // r
   int bank_angle = -1;       // phi
 
+  // ---- rotorcraft roles, absent (-1) on a fixed-wing model --------------
+  //
+  // Declaring a rotor speed is what makes the rotorcraft labels candidates at
+  // all, so a model without one cannot be given one. That is the whole
+  // mechanism keeping the classical five returning what they returned before.
+  int heave_velocity = -1;  // w in hover, where it is heave rather than alpha
+  int rotor_speed = -1;     // Omega
+
   // Fills the roles by matching common names, case-insensitively:
   //   u, v, w, p, q, r, alpha, beta, theta, phi, V, speed, ...
   // Convenience only. A model with unusual names should set the fields
@@ -98,6 +131,9 @@ struct StateRoles {
 
   [[nodiscard]] bool has_longitudinal() const noexcept;
   [[nodiscard]] bool has_lateral() const noexcept;
+  // True when a rotor-speed role was declared. The gate on every rotorcraft
+  // label.
+  [[nodiscard]] bool has_rotorcraft() const noexcept;
 };
 
 struct Mode {

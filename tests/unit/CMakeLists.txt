@@ -35,6 +35,7 @@ add_executable(galata_unit_tests
   test_table.cpp
   test_rotor.cpp
   test_helicopter.cpp
+  test_helicopter_analysis.cpp
   test_matrix_exponential.cpp
   test_discrete_system.cpp
   test_discrete_control.cpp

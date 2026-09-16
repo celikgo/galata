@@ -440,6 +440,8 @@ TrimProblem helicopter_trim_problem(const model::VehicleModel& model) {
   }
 
   TrimProblem problem;
+  // The inflow unknowns declare equal bounds, which means unbounded: an inflow
+  // ratio has no mechanical travel to be outside of.
   // Attitude scales in radians; control scales in radians too, but the cyclics
   // move over a much smaller range than collective and pedal, so each gets its
   // own.
@@ -451,10 +453,9 @@ TrimProblem helicopter_trim_problem(const model::VehicleModel& model) {
       {"lateral_cyclic_rad", 0.0, -0.14, 0.14, 0.02},
       {"pedal_rad", 0.05, -0.35, 0.35, 0.05},
   };
-  // Forces scaled by g so a residual of 1 is one gravity of acceleration;
-  // moments scaled to their own angular-acceleration units. Both are already
-  // accelerations coming out of the kernel, so the scales are 1 and the
-  // comparison is like for like.
+
+  // Forces and moments are already accelerations coming out of the kernel, so
+  // the scales are 1 and the comparison is like for like.
   problem.residuals = {
       {TrimResidualKind::BodyForceX, "force_x", nullptr, 1.0},
       {TrimResidualKind::BodyForceY, "force_y", nullptr, 1.0},
@@ -463,6 +464,29 @@ TrimProblem helicopter_trim_problem(const model::VehicleModel& model) {
       {TrimResidualKind::BodyMomentY, "moment_y", nullptr, 1.0},
       {TrimResidualKind::BodyMomentZ, "moment_z", nullptr, 1.0},
   };
+
+  // THE INFLOW STATES ARE TRIM UNKNOWNS, and leaving them out is a mistake this
+  // project made once and caught with a measurement rather than by reasoning.
+  //
+  // A rotor with a declared dynamic-inflow lag carries its inflow as a STATE,
+  // and that state has its own equilibrium: the value at which the momentum
+  // balance is satisfied. Solving the six force-and-moment equations alone
+  // leaves the inflow wherever the initial guess put it, so the point is an
+  // equilibrium of the airframe and NOT of the rotor. The residual is invisible
+  // in the forces — the trim converges to 1e-17 — and appears only when
+  // something asks for the inflow's own rate. `linearize_vehicle` asks, which
+  // is how this was found: it refused the point with `tail_inflow_ratio` named
+  // and a residual of 0.66.
+  //
+  // So each inflow state that exists becomes an unknown, paired with its own
+  // rate as a residual, and the system stays square.
+  for (const char* inflow : {"main_inflow_ratio", "tail_inflow_ratio"}) {
+    if (!has(inflow)) {
+      continue;  // a rotor with no declared lag carries no inflow state
+    }
+    problem.unknowns.push_back({inflow, 0.05, 0.0, 0.0, 0.01});
+    problem.residuals.push_back({TrimResidualKind::AuxiliaryRate, inflow, nullptr, 1.0});
+  }
   return problem;
 }
 

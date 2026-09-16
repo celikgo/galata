@@ -79,6 +79,28 @@
 //   neither is here. A thrust computed above the declared C_T/sigma ceiling is
 //   OPTIMISTIC — the real rotor would have stalled and produced less.
 //
+// * NOT DIFFERENTIABLE AT EXACTLY ZERO AIRSPEED, and this is a property of the
+//   physics rather than of this implementation. The advance ratio is
+//   mu = |V_inplane| / (Omega R), and |V| has no derivative at V = 0: approach
+//   it from either side and the one-sided slope is +/-1. Every term carrying an
+//   odd power of mu — the flap-back 2 mu (4/3 theta_0 - lambda) most of all —
+//   inherits that kink.
+//
+//   The consequence is specific and worth stating, because it surprises people.
+//   A finite-difference Jacobian at exactly zero airspeed returns
+//   (|+h| - |-h|)/2h = 0 for d(mu)/dV, so the LINEARISATION sees no flap-back
+//   response to a speed perturbation while the nonlinear model has one
+//   proportional to |V|. The linearisation is therefore first-order accurate in
+//   hover and second-order accurate everywhere else. Measured, not asserted:
+//   `HelicopterLinearisation.NonlinearAndLinearAgreeToSecondOrderInForwardFlight`
+//   observes order 2.004 at 5 m/s and above, and
+//   `...IsOnlyFirstOrderInExactHover` observes 1.003 at V = 0 and exists to make
+//   the degradation visible rather than to hide it.
+//
+//   This is not a defect to be fixed by smoothing mu. A smoothed advance ratio
+//   would make the Jacobian look better and the MODEL worse, and the hover
+//   linearisation would then be a good approximation to the wrong aircraft.
+//
 // * NOT A VORTEX-RING MODEL. The momentum-theory inflow solution is invalid in
 //   the vortex-ring state, roughly -2 < lambda_c/lambda_h < 0, which is a
 //   descent at between about one half and one and a half times the hover

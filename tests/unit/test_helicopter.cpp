@@ -157,13 +157,30 @@ TEST(Helicopter, RefusesAnEngineThatCouldMotorTheRotor) {
 // HOVER TRIM — six declared unknowns, six residuals.
 // ---------------------------------------------------------------------------
 
-TEST(HelicopterTrim, SolvesHoverForSixDeclaredUnknowns) {
+TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   const auto heli = souxmar();
   const auto environment = Environment::sea_level_still_air();
   const auto problem = helicopter_trim_problem(heli);
 
-  ASSERT_EQ(problem.unknowns.size(), 6u);
-  ASSERT_EQ(problem.residuals.size(), 6u);
+  // SIX PILOT UNKNOWNS PLUS THE TWO INFLOW STATES. The six are roll, pitch,
+  // collective, both cyclics and pedal, against the six force-and-moment
+  // residuals. The two inflow states are there because a rotor with a declared
+  // dynamic-inflow lag carries its inflow as a STATE with its own equilibrium,
+  // and solving the six alone leaves it wherever the guess put it — an
+  // equilibrium of the airframe and not of the rotor. That omission was
+  // invisible in the forces, which trimmed to 1e-17, and was caught only when
+  // linearize_vehicle asked for the inflow's own rate and refused the point
+  // with `tail_inflow_ratio` named.
+  ASSERT_EQ(problem.unknowns.size(), 8u);
+  ASSERT_EQ(problem.residuals.size(), 8u);
+  const auto has_unknown = [&](const std::string& name) {
+    return std::any_of(problem.unknowns.begin(), problem.unknowns.end(),
+                       [&](const auto& u) { return u.name == name; });
+  };
+  EXPECT_TRUE(has_unknown("collective_rad"));
+  EXPECT_TRUE(has_unknown("pedal_rad"));
+  EXPECT_TRUE(has_unknown("main_inflow_ratio"));
+  EXPECT_TRUE(has_unknown("tail_inflow_ratio"));
 
   const auto result = solve_trim(heli, problem, hover_condition(heli, environment));
 
@@ -171,8 +188,8 @@ TEST(HelicopterTrim, SolvesHoverForSixDeclaredUnknowns) {
   // The residual is body accelerations, so this is metres per second squared
   // and radians per second squared: 1e-8 is a very tight equilibrium.
   EXPECT_LT(result.residual_norm, 1.0e-8);
-  EXPECT_EQ(result.jacobian_rank, 6);
-  EXPECT_EQ(result.unknown_count, 6);
+  EXPECT_EQ(result.jacobian_rank, 8);
+  EXPECT_EQ(result.unknown_count, 8);
   // A well-conditioned problem. Above about 1e6 the solved controls would carry
   // fewer significant figures than the report prints.
   EXPECT_LT(result.jacobian_condition_number, 1.0e4);
