@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Closed-loop rate damping (SAS) around the declared hover trim.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 100.0
+
+  - id: sas
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      controller_period_s: 0.01
+      step_s: 0.002
+      steps: 1000
+      sample_stride: 10
+      delay_periods: 0
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+
+  - id: csv
+    capability: report.helicopter_csv
+    input: {trajectory: {from: sas}, path: sas.csv}
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 sampled stability augmentation study
+      sections: [{from: hover}, {from: sas}]
+      path: sas.md

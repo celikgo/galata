@@ -21,17 +21,24 @@
 #include "galata/model/helicopter.hpp"
 #include "galata/numerics/integration_method.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/sim/sampled_loop.hpp"
+#include "galata/sim/sensor.hpp"
+#include "galata/synth/control.hpp"
+#include "galata/synth/discrete_control.hpp"
 #include "galata/trim/problem.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <locale>
 #include <map>
 #include <memory>
 #include <numbers>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -86,6 +93,7 @@ struct HelicopterTrajectoryArtifact {
   std::vector<double> times_s;
   std::vector<Eigen::VectorXd> states;  // extended
   std::vector<Eigen::VectorXd> outputs;
+  std::vector<Eigen::VectorXd> applied_controls;
   std::vector<std::string> state_names;
   std::vector<std::string> output_names;
   numerics::TerminationReason reason = numerics::TerminationReason::Completed;
@@ -97,6 +105,20 @@ struct HelicopterTrajectoryArtifact {
   std::vector<std::string> failure_events;
   model::EnvelopeStatus worst_envelope;
   int envelope_departures = 0;
+  bool closed_loop = false;
+  std::vector<std::string> controller_measurement_names;
+  std::vector<std::string> controller_state_names;
+  std::vector<double> controller_times_s;
+  std::vector<Eigen::VectorXd> controller_measurements;
+  std::vector<Eigen::VectorXd> controller_references;
+  std::vector<Eigen::VectorXd> controller_errors;
+  std::vector<Eigen::VectorXd> controller_requested;
+  std::vector<Eigen::VectorXd> controller_saturated;
+  std::vector<Eigen::VectorXd> controller_applied;
+  std::vector<Eigen::VectorXd> controller_states;
+  std::vector<bool> controller_measurement_available;
+  std::vector<bool> controller_measurement_stale;
+  std::vector<std::string> sensor_provenance;
 };
 
 struct FailureEvent {
@@ -256,6 +278,504 @@ std::string apply_failure_event(const FailureEvent& event,
   heli.failures.jammed_actuator_rad[static_cast<std::size_t>(event.actuator_index)] = jam_position;
   return "t=" + fixed(event.time_s, 6) + " s: actuator_jam " + event.actuator_name + " at "
          + fixed(jam_position, 6) + " rad";
+}
+
+void require_map_keys(const ValuePtr& value,
+                      const std::vector<std::string>& allowed,
+                      const std::string& description) {
+  if (!value || value->kind() != Value::Kind::Map) {
+    throw std::runtime_error(description + " must be a map");
+  }
+  for (const auto& [key, entry] : value->as_map()) {
+    (void)entry;
+    if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) {
+      throw std::runtime_error(description + " has unknown key '" + key + "'");
+    }
+  }
+}
+
+Eigen::VectorXd value_vector(const ValuePtr& value,
+                             Eigen::Index width,
+                             const std::string& description,
+                             const Eigen::VectorXd& fallback = {}) {
+  if (!value) {
+    if (fallback.size() == width) {
+      return fallback;
+    }
+    return Eigen::VectorXd::Zero(width);
+  }
+  if (value->kind() != Value::Kind::List
+      || value->as_list().size() != static_cast<std::size_t>(width)) {
+    throw std::runtime_error(description + " must be a list of " + std::to_string(width)
+                             + " numbers");
+  }
+  Eigen::VectorXd result(width);
+  for (Eigen::Index i = 0; i < width; ++i) {
+    const ValuePtr& entry = value->as_list()[static_cast<std::size_t>(i)];
+    if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())) {
+      throw std::runtime_error(description + " must contain only finite numbers");
+    }
+    result(i) = entry->as_number();
+  }
+  return result;
+}
+
+std::map<std::string, double> helicopter_named_values(const model::HelicopterModel& heli,
+                                                      const Eigen::VectorXd& state,
+                                                      const Eigen::VectorXd& controls,
+                                                      const model::Environment& environment) {
+  if (state.size() != heli.extended_state_size()) {
+    throw std::invalid_argument("sim.helicopter.closed_loop: state width does not match model");
+  }
+  const core::State rigid = model::VehicleModel::rigid_body_part(state);
+  const Eigen::VectorXd auxiliary = heli.auxiliary_part(state);
+  const auto state_names = heli.state_names();
+  const auto output_names = heli.output_names();
+  const Eigen::VectorXd outputs = heli.outputs(rigid, auxiliary, controls, environment);
+  const core::EulerAngles euler = core::euler_from_quaternion(rigid.attitude_body_to_ned);
+  const std::vector<std::string> euler_names = {"position_north_m",
+                                                "position_east_m",
+                                                "position_down_m",
+                                                "velocity_u_m_s",
+                                                "velocity_v_m_s",
+                                                "velocity_w_m_s",
+                                                "roll_rad",
+                                                "pitch_rad",
+                                                "yaw_rad",
+                                                "roll_rate_rad_s",
+                                                "pitch_rate_rad_s",
+                                                "yaw_rate_rad_s"};
+  Eigen::VectorXd euler_state(12 + heli.auxiliary_state_count());
+  euler_state.segment<3>(0) = rigid.position_ned_m;
+  euler_state.segment<3>(3) = rigid.velocity_body_m_s;
+  euler_state(6) = euler.roll_rad;
+  euler_state(7) = euler.pitch_rad;
+  euler_state(8) = euler.yaw_rad;
+  euler_state.segment<3>(9) = rigid.angular_rate_body_rad_s;
+  euler_state.tail(heli.auxiliary_state_count()) = auxiliary;
+
+  std::map<std::string, double> named;
+  for (std::size_t i = 0; i < state_names.size(); ++i) {
+    named.emplace(state_names[i], state(static_cast<Eigen::Index>(i)));
+  }
+  for (std::size_t i = 0; i < euler_names.size(); ++i) {
+    named[euler_names[i]] = euler_state(static_cast<Eigen::Index>(i));
+  }
+  for (int i = 0; i < heli.auxiliary_state_count(); ++i) {
+    named[heli.state_names()[static_cast<std::size_t>(core::kStateSize + i)]] = auxiliary(i);
+  }
+  for (std::size_t i = 0; i < output_names.size(); ++i) {
+    named[output_names[i]] = outputs(static_cast<Eigen::Index>(i));
+  }
+  return named;
+}
+
+Eigen::VectorXd named_vector(const std::map<std::string, double>& values,
+                             const std::vector<std::string>& names,
+                             const std::string& description) {
+  Eigen::VectorXd result(static_cast<Eigen::Index>(names.size()));
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    const auto found = values.find(names[i]);
+    if (found == values.end()) {
+      throw std::runtime_error(description + " names '" + names[i]
+                               + "', but the helicopter has no named value with that name");
+    }
+    result(static_cast<Eigen::Index>(i)) = found->second;
+  }
+  return result;
+}
+
+struct PidLoopRuntime {
+  std::string measurement;
+  std::string control;
+  int control_index = -1;
+  double kp = 0.0;
+  double ki = 0.0;
+  double kd = 0.0;
+  double derivative_filter_s = 0.0;
+  double integrator_limit = std::numeric_limits<double>::infinity();
+  double anti_windup_gain = 0.0;
+  double reference = 0.0;
+  double integrator = 0.0;
+  double filtered_derivative = 0.0;
+  double previous_error = 0.0;
+  double last_requested = 0.0;
+  double last_saturated = 0.0;
+  bool has_previous_error = false;
+};
+
+struct ClosedLoopControllerRuntime {
+  enum class Kind { StateFeedback, Pid };
+
+  Kind kind = Kind::StateFeedback;
+  std::string missing_measurement = "refuse";
+  std::vector<std::string> measurement_names;
+  std::vector<std::string> controller_state_names;
+  std::vector<double> references;
+  Eigen::MatrixXd gain;
+  Eigen::VectorXd trim_controls;
+  double period_s = 0.0;
+  std::vector<PidLoopRuntime> pid_loops;
+  Eigen::VectorXd last_effective_measurement;
+  bool have_last_effective_measurement = false;
+
+  [[nodiscard]] sim::SampledTick update(int tick,
+                                        double time_s,
+                                        const std::map<std::string, double>& truth,
+                                        const sim::SensorReading& reading) {
+    (void)tick;
+    (void)named_vector(truth, measurement_names, "sim.helicopter.closed_loop controller");
+    Eigen::VectorXd measurement = reading.values;
+    if (!reading.available) {
+      if (missing_measurement == "refuse") {
+        throw std::runtime_error(
+            "sim.helicopter.closed_loop: controller measurement is unavailable at t="
+            + fixed(time_s, 6) + " s; choose missing_measurement: hold_last or trim_fallback "
+              "to make that policy explicit");
+      }
+      if (missing_measurement == "hold_last" && have_last_effective_measurement) {
+        measurement = last_effective_measurement;
+      } else if (missing_measurement == "trim_fallback") {
+        measurement = Eigen::Map<const Eigen::VectorXd>(
+            references.data(), static_cast<Eigen::Index>(references.size()));
+      } else if (missing_measurement == "hold_last") {
+        measurement = Eigen::Map<const Eigen::VectorXd>(
+            references.data(), static_cast<Eigen::Index>(references.size()));
+      } else {
+        throw std::runtime_error("sim.helicopter.closed_loop: unknown missing_measurement policy '"
+                                 + missing_measurement + "'");
+      }
+    }
+    if (measurement.size() != static_cast<Eigen::Index>(measurement_names.size())
+        || !measurement.allFinite()) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop: effective controller measurement is not finite");
+    }
+    last_effective_measurement = measurement;
+    have_last_effective_measurement = true;
+
+    sim::SampledTick record;
+    record.measurement = measurement;
+    record.measurement_available = reading.available;
+    record.measurement_stale = reading.stale;
+    record.requested_controls = trim_controls;
+    record.controller_state =
+        Eigen::VectorXd::Zero(static_cast<Eigen::Index>(controller_state_names.size()));
+    Eigen::VectorXd errors(static_cast<Eigen::Index>(references.size()));
+    for (std::size_t i = 0; i < references.size(); ++i) {
+      errors(static_cast<Eigen::Index>(i)) =
+          references[i] - measurement(static_cast<Eigen::Index>(i));
+    }
+    if (kind == Kind::StateFeedback) {
+      record.requested_controls = trim_controls + gain * errors;
+    } else {
+      for (std::size_t i = 0; i < pid_loops.size(); ++i) {
+        PidLoopRuntime& loop = pid_loops[i];
+        const double error = errors(static_cast<Eigen::Index>(i));
+        const double derivative =
+            loop.has_previous_error ? (error - loop.previous_error) / period_s : 0.0;
+        const double alpha = loop.derivative_filter_s / (loop.derivative_filter_s + period_s);
+        loop.filtered_derivative = alpha * loop.filtered_derivative + (1.0 - alpha) * derivative;
+        loop.integrator +=
+            loop.ki * error * period_s
+            + loop.anti_windup_gain * (loop.last_saturated - loop.last_requested) * period_s;
+        loop.integrator =
+            std::clamp(loop.integrator, -loop.integrator_limit, loop.integrator_limit);
+        loop.previous_error = error;
+        loop.has_previous_error = true;
+      }
+      record.requested_controls = trim_controls;
+      for (std::size_t i = 0; i < pid_loops.size(); ++i) {
+        const PidLoopRuntime& loop = pid_loops[i];
+        const Eigen::Index control_index = static_cast<Eigen::Index>(loop.control_index);
+        const double error = errors(static_cast<Eigen::Index>(i));
+        record.requested_controls(control_index) +=
+            loop.kp * error + loop.integrator + loop.kd * loop.filtered_derivative;
+        record.controller_state(static_cast<Eigen::Index>(2 * i)) = loop.integrator;
+        record.controller_state(static_cast<Eigen::Index>(2 * i + 1)) = loop.filtered_derivative;
+      }
+    }
+    record.references = Eigen::Map<const Eigen::VectorXd>(
+        references.data(), static_cast<Eigen::Index>(references.size()));
+    record.errors = errors;
+    return record;
+  }
+};
+
+ClosedLoopControllerRuntime make_closed_loop_controller(const StageContext& context,
+                                                        const model::HelicopterModel& heli,
+                                                        const HelicopterTrimArtifact& trim,
+                                                        double period_s) {
+  const ValuePtr declared = context.input->get("controller");
+  require_map_keys(declared,
+                   {"type", "missing_measurement", "references", "loops"},
+                   "sim.helicopter.closed_loop controller");
+  const std::string type = declared->string_at("type");
+  const std::string missing = declared->string_at("missing_measurement", "refuse");
+  if (missing != "refuse" && missing != "hold_last" && missing != "trim_fallback") {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop controller.missing_measurement must be 'refuse', "
+        "'hold_last' or 'trim_fallback'");
+  }
+
+  ClosedLoopControllerRuntime controller;
+  controller.missing_measurement = missing;
+  controller.trim_controls = trim.holding_controls;
+  controller.period_s = period_s;
+  const auto trim_values = helicopter_named_values(
+      heli, trim.result.extended_state, trim.holding_controls, trim.environment);
+
+  if (type == "state_feedback") {
+    controller.kind = ClosedLoopControllerRuntime::Kind::StateFeedback;
+    const Artifact& law_artifact = context.upstream_at("law");
+    std::vector<std::string> input_names;
+    if (law_artifact.kind == "control_law") {
+      const auto& law = law_artifact.payload_as<synth::LqrDesign>("control_law");
+      controller.gain = law.riccati.k;
+      controller.measurement_names = law.plant.state_names;
+      input_names = law.plant.input_names;
+    } else if (law_artifact.kind == "sampled_control_law") {
+      const auto& law = law_artifact.payload_as<synth::SampledLqrDesign>("sampled_control_law");
+      if (law.sample_time_s != period_s) {
+        throw std::runtime_error(
+            "sim.helicopter.closed_loop: sampled LQR sample_time_s must exactly match "
+            "controller_period_s");
+      }
+      controller.gain = law.riccati.k;
+      controller.measurement_names = law.discretisation.system.state_names;
+      input_names = law.discretisation.system.input_names;
+    } else {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop: state_feedback requires a control_law from synth.lqr "
+          "or sampled_control_law from synth.sampled_lqr");
+    }
+    if (input_names != heli.control_names()) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop: the feedback law inputs must exactly match the "
+          "helicopter control_names order");
+    }
+    if (controller.gain.rows() != heli.control_count()
+        || controller.gain.cols()
+               != static_cast<Eigen::Index>(controller.measurement_names.size())) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop: feedback gain dimensions do not match its named "
+          "measurement and helicopter control channels");
+    }
+    if (!controller.gain.allFinite()) {
+      throw std::runtime_error("sim.helicopter.closed_loop: feedback gain must be finite");
+    }
+    std::set<std::string> unique_names(controller.measurement_names.begin(),
+                                       controller.measurement_names.end());
+    if (unique_names.size() != controller.measurement_names.size()) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop: feedback law contains duplicate state names");
+    }
+    controller.references.resize(controller.measurement_names.size());
+    for (std::size_t i = 0; i < controller.measurement_names.size(); ++i) {
+      controller.references[i] = trim_values.at(controller.measurement_names[i]);
+    }
+    const ValuePtr references = declared->get("references");
+    if (references) {
+      if (references->kind() != Value::Kind::Map) {
+        throw std::runtime_error(
+            "sim.helicopter.closed_loop controller.references must be a map of named values");
+      }
+      for (const auto& [name, value] : references->as_map()) {
+        const auto found = std::find(
+            controller.measurement_names.begin(), controller.measurement_names.end(), name);
+        if (found == controller.measurement_names.end() || value->kind() != Value::Kind::Number
+            || !std::isfinite(value->as_number())) {
+          throw std::runtime_error(
+              "sim.helicopter.closed_loop controller.references must name finite controller "
+              "measurements");
+        }
+        controller
+            .references[static_cast<std::size_t>(found - controller.measurement_names.begin())] =
+            value->as_number();
+      }
+    }
+  } else if (type == "pid") {
+    controller.kind = ClosedLoopControllerRuntime::Kind::Pid;
+    const ValuePtr loops = declared->get("loops");
+    if (!loops || loops->kind() != Value::Kind::List || loops->as_list().empty()) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop controller.loops must contain at least one PID loop");
+    }
+    const auto control_names = heli.control_names();
+    std::set<std::string> used_measurements;
+    std::set<std::string> used_controls;
+    for (std::size_t i = 0; i < loops->as_list().size(); ++i) {
+      const ValuePtr& entry = loops->as_list()[i];
+      const std::string description =
+          "sim.helicopter.closed_loop controller.loops[" + std::to_string(i) + "]";
+      require_map_keys(entry,
+                       {"measurement",
+                        "control",
+                        "kp",
+                        "ki",
+                        "kd",
+                        "derivative_filter_s",
+                        "integrator_limit",
+                        "anti_windup_gain",
+                        "reference"},
+                       description);
+      PidLoopRuntime loop;
+      loop.measurement = entry->string_at("measurement");
+      loop.control = entry->string_at("control");
+      if (!used_measurements.insert(loop.measurement).second) {
+        throw std::runtime_error(description + " duplicates measurement '" + loop.measurement
+                                 + "'");
+      }
+      if (!used_controls.insert(loop.control).second) {
+        throw std::runtime_error(description + " duplicates control '" + loop.control + "'");
+      }
+      const auto control = std::find(control_names.begin(), control_names.end(), loop.control);
+      if (control == control_names.end()) {
+        throw std::runtime_error(description + " names unknown control '" + loop.control + "'");
+      }
+      loop.control_index = static_cast<int>(control - control_names.begin());
+      loop.kp = entry->number_at("kp");
+      loop.ki = entry->number_at("ki");
+      loop.kd = entry->number_at("kd");
+      loop.derivative_filter_s = entry->number_at("derivative_filter_s");
+      loop.integrator_limit =
+          entry->number_at("integrator_limit", std::numeric_limits<double>::infinity());
+      loop.anti_windup_gain = entry->number_at("anti_windup_gain", 0.0);
+      if (!std::isfinite(loop.kp) || !std::isfinite(loop.ki) || !std::isfinite(loop.kd)
+          || !(loop.derivative_filter_s > 0.0) || !std::isfinite(loop.derivative_filter_s)
+          || loop.integrator_limit < 0.0
+          || (!std::isfinite(loop.integrator_limit)
+              && loop.integrator_limit != std::numeric_limits<double>::infinity())
+          || !std::isfinite(loop.anti_windup_gain) || loop.anti_windup_gain < 0.0) {
+        throw std::runtime_error(description
+                                 + " requires finite gains, a positive derivative_filter_s, "
+                                   "a non-negative integrator_limit and a non-negative finite "
+                                   "anti_windup_gain");
+      }
+      const auto trim_value = trim_values.find(loop.measurement);
+      if (trim_value == trim_values.end()) {
+        throw std::runtime_error(description + " names unknown measurement '" + loop.measurement
+                                 + "'");
+      }
+      loop.reference = entry->number_at("reference", trim_value->second);
+      if (!std::isfinite(loop.reference)) {
+        throw std::runtime_error(description + ".reference must be finite");
+      }
+      loop.last_requested = trim.holding_controls(loop.control_index);
+      loop.last_saturated = loop.last_requested;
+      controller.measurement_names.push_back(loop.measurement);
+      controller.references.push_back(loop.reference);
+      controller.controller_state_names.push_back(loop.control + ".integrator");
+      controller.controller_state_names.push_back(loop.control + ".filtered_derivative");
+      controller.pid_loops.push_back(std::move(loop));
+    }
+  } else {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop controller.type must be 'state_feedback' or 'pid'");
+  }
+  return controller;
+}
+
+std::unique_ptr<sim::DeterministicSensor> make_closed_loop_sensor(
+    const StageContext& context,
+    const std::vector<std::string>& measurement_names,
+    double step_s,
+    std::vector<std::string>& provenance) {
+  const ValuePtr declared = context.input->get("sensor");
+  if (!declared) {
+    provenance.push_back("measurement source: perfect named plant values");
+    return nullptr;
+  }
+  require_map_keys(declared,
+                   {"name",
+                    "channels",
+                    "seed",
+                    "algorithm_version",
+                    "sample_period_s",
+                    "latency_s",
+                    "bias",
+                    "white_noise_stddev",
+                    "quantization_step",
+                    "saturation_min",
+                    "saturation_max",
+                    "dropout_samples",
+                    "dropout_policy"},
+                   "sim.helicopter.closed_loop sensor");
+  const ValuePtr channels = declared->get("channels");
+  if (!channels || channels->kind() != Value::Kind::List
+      || channels->as_list().size() != measurement_names.size()) {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop sensor.channels must match the controller measurement count");
+  }
+  std::vector<std::string> channel_names;
+  channel_names.reserve(measurement_names.size());
+  for (const ValuePtr& channel : channels->as_list()) {
+    if (channel->kind() != Value::Kind::String) {
+      throw std::runtime_error("sim.helicopter.closed_loop sensor.channels must contain strings");
+    }
+    channel_names.push_back(channel->as_string());
+  }
+  if (channel_names != measurement_names) {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop sensor.channels must be the controller measurement names "
+        "in the same order");
+  }
+  const ValuePtr seed = declared->get("seed");
+  if (!seed || seed->kind() != Value::Kind::Number || !std::isfinite(seed->as_number())
+      || seed->as_number() < 0.0 || std::floor(seed->as_number()) != seed->as_number()
+      || seed->as_number() > 9007199254740991.0) {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop sensor.seed must be a non-negative integer exactly "
+        "representable by the study number format");
+  }
+  sim::SensorConfiguration configuration;
+  configuration.name = declared->string_at("name", "helicopter_sensor");
+  configuration.channel_names = channel_names;
+  configuration.seed = static_cast<std::uint64_t>(seed->as_number());
+  configuration.algorithm_version =
+      declared->string_at("algorithm_version", "mt19937_64_box_muller_v1");
+  configuration.sample_period_s = declared->number_at("sample_period_s");
+  configuration.latency_s = declared->number_at("latency_s", 0.0);
+  configuration.bias = value_vector(declared->get("bias"),
+                                    static_cast<Eigen::Index>(channel_names.size()),
+                                    "sim.helicopter.closed_loop sensor.bias");
+  configuration.white_noise_stddev =
+      value_vector(declared->get("white_noise_stddev"),
+                   static_cast<Eigen::Index>(channel_names.size()),
+                   "sim.helicopter.closed_loop sensor.white_noise_stddev");
+  configuration.quantization_step = declared->number_at("quantization_step", 0.0);
+  configuration.saturation_min =
+      declared->number_at("saturation_min", -std::numeric_limits<double>::infinity());
+  configuration.saturation_max =
+      declared->number_at("saturation_max", std::numeric_limits<double>::infinity());
+  configuration.dropout_policy = declared->string_at("dropout_policy", "unavailable");
+  const ValuePtr dropouts = declared->get("dropout_samples");
+  if (dropouts) {
+    if (dropouts->kind() != Value::Kind::List) {
+      throw std::runtime_error(
+          "sim.helicopter.closed_loop sensor.dropout_samples must be a list of integers");
+    }
+    for (const ValuePtr& entry : dropouts->as_list()) {
+      if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())
+          || entry->as_number() < 0.0 || std::floor(entry->as_number()) != entry->as_number()
+          || entry->as_number() > static_cast<double>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error(
+            "sim.helicopter.closed_loop sensor.dropout_samples must contain non-negative "
+            "integers");
+      }
+      configuration.dropout_samples.push_back(static_cast<int>(entry->as_number()));
+    }
+  }
+  auto sensor = std::make_unique<sim::DeterministicSensor>(configuration, step_s);
+  provenance.push_back("sensor name: " + configuration.name);
+  provenance.push_back("sensor algorithm: " + configuration.algorithm_version);
+  provenance.push_back("sensor seed: " + std::to_string(configuration.seed));
+  provenance.push_back("sensor sample_period_s: " + fixed(configuration.sample_period_s, 9));
+  provenance.push_back("sensor latency_s: " + fixed(configuration.latency_s, 9));
+  for (const auto& stream : sensor->stream_ids()) {
+    provenance.push_back("sensor stream: " + stream);
+  }
+  return sensor;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +1180,181 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
 }
 
 // ---------------------------------------------------------------------------
+// sim.helicopter.closed_loop
+// ---------------------------------------------------------------------------
+
+Artifact simulate_helicopter_closed_loop_capability(const StageContext& context) {
+  const Artifact& upstream = context.upstream_at("trim");
+  const auto& subject = upstream.payload_as<HelicopterTrimArtifact>("helicopter_trim");
+  const model::HelicopterModel& heli = *subject.model;
+
+  const double step_s = context.input->number_at("step_s");
+  const int steps = context.input->integer_at("steps", 0);
+  const int stride = context.input->integer_at("sample_stride", 1);
+  const double period_s = context.input->number_at("controller_period_s");
+  const int delay_periods = context.input->integer_at("delay_periods", 0);
+  if (!(step_s > 0.0) || !std::isfinite(step_s) || steps < 1 || stride < 1 || !(period_s > 0.0)
+      || !std::isfinite(period_s) || delay_periods < 0) {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop: step_s, controller_period_s and positive steps/stride "
+        "are required; delay_periods must be non-negative");
+  }
+  const std::string method = context.input->string_at("method", "rk4");
+  if (method != "rk4") {
+    throw std::runtime_error(
+        "sim.helicopter.closed_loop: only fixed-step rk4 is supported because controller and "
+        "sensor callbacks are defined on that deterministic lattice");
+  }
+
+  auto controller = std::make_shared<ClosedLoopControllerRuntime>(
+      make_closed_loop_controller(context, heli, subject, period_s));
+  std::vector<std::string> sensor_provenance;
+  auto sensor = std::shared_ptr<sim::DeterministicSensor>(
+      make_closed_loop_sensor(context, controller->measurement_names, step_s, sensor_provenance));
+  const std::vector<FailureEvent> failure_events =
+      parse_failure_events(context, heli, step_s, steps);
+
+  model::HelicopterModel simulation_model = *subject.model;
+  std::size_t next_event = 0;
+  std::map<std::string, double> latest_truth;
+  sim::SensorReading latest_reading;
+  Eigen::VectorXd last_applied = subject.holding_controls;
+  std::vector<std::string> applied_failure_events;
+  const auto update_measurement = [&](int step, double time_s, Eigen::VectorXd& state) {
+    while (next_event < failure_events.size() && failure_events[next_event].step == step) {
+      applied_failure_events.push_back(
+          apply_failure_event(failure_events[next_event], simulation_model, state));
+      ++next_event;
+    }
+    latest_truth =
+        helicopter_named_values(simulation_model, state, last_applied, subject.environment);
+    const Eigen::VectorXd truth = named_vector(
+        latest_truth, controller->measurement_names, "sim.helicopter.closed_loop sensor");
+    if (sensor) {
+      latest_reading = sensor->sample_if_due(step, time_s, truth);
+    } else {
+      latest_reading.available = true;
+      latest_reading.stale = false;
+      latest_reading.sample_index = step;
+      latest_reading.time_s = time_s;
+      latest_reading.values = truth;
+    }
+  };
+
+  sim::SampledLoopOptions options;
+  options.step_s = step_s;
+  options.controller_period_s = period_s;
+  options.steps = steps;
+  options.sample_stride = stride;
+  options.delay_periods = delay_periods;
+  options.initial_state = subject.result.extended_state;
+  options.trim_controls = subject.holding_controls;
+  options.derivative = [&](double, const Eigen::VectorXd& state, const Eigen::VectorXd& controls) {
+    return Eigen::VectorXd(simulation_model.derivative(state, controls, subject.environment));
+  };
+  options.projection = &model::VehicleModel::project;
+  options.state_bounds = simulation_model.state_bounds();
+  options.on_boundary = [&](int step, double time_s, Eigen::VectorXd& state) {
+    update_measurement(step, time_s, state);
+  };
+  options.on_tick = [&](int tick, double time_s, const Eigen::VectorXd& state) {
+    (void)state;
+    return controller->update(tick, time_s, latest_truth, latest_reading);
+  };
+  options.saturate = [&](const Eigen::VectorXd& requested) {
+    Eigen::VectorXd saturated = requested;
+    for (int i = 0; i < heli.control_count(); ++i) {
+      const auto& limits = heli.actuators[static_cast<std::size_t>(i)];
+      saturated(i) = std::clamp(saturated(i), limits.minimum_rad, limits.maximum_rad);
+    }
+    if (controller->kind == ClosedLoopControllerRuntime::Kind::Pid) {
+      for (auto& loop : controller->pid_loops) {
+        loop.last_requested = requested(loop.control_index);
+        loop.last_saturated = saturated(loop.control_index);
+      }
+    }
+    return saturated;
+  };
+  options.on_command_applied = [&](const Eigen::VectorXd& applied) { last_applied = applied; };
+
+  const sim::SampledLoopResult result = sim::run_sampled_loop(options);
+  HelicopterTrajectoryArtifact trajectory;
+  trajectory.model = subject.model;
+  trajectory.closed_loop = true;
+  trajectory.times_s = result.integration.trajectory.times_s;
+  trajectory.states = result.integration.trajectory.states;
+  trajectory.state_names = heli.state_names();
+  trajectory.output_names = heli.output_names();
+  trajectory.reason = result.integration.reason;
+  trajectory.termination_detail = result.integration.detail;
+  trajectory.step_s = step_s;
+  trajectory.steps_taken = result.integration.steps_taken;
+  trajectory.failure_events = std::move(applied_failure_events);
+  trajectory.applied_controls = result.held_controls;
+  trajectory.controller_measurement_names = controller->measurement_names;
+  trajectory.controller_state_names = controller->controller_state_names;
+  trajectory.sensor_provenance = std::move(sensor_provenance);
+  for (const auto& tick : result.ticks) {
+    trajectory.controller_times_s.push_back(tick.time_s);
+    trajectory.controller_measurements.push_back(tick.measurement);
+    trajectory.controller_references.push_back(tick.references);
+    trajectory.controller_errors.push_back(tick.errors);
+    trajectory.controller_requested.push_back(tick.requested_controls);
+    trajectory.controller_saturated.push_back(tick.saturated_controls);
+    trajectory.controller_applied.push_back(tick.applied_controls);
+    trajectory.controller_states.push_back(tick.controller_state);
+    trajectory.controller_measurement_available.push_back(tick.measurement_available);
+    trajectory.controller_measurement_stale.push_back(tick.measurement_stale);
+  }
+
+  for (std::size_t i = 0; i < trajectory.states.size(); ++i) {
+    const auto& state = trajectory.states[i];
+    const core::State rigid = model::VehicleModel::rigid_body_part(state);
+    const Eigen::VectorXd auxiliary = simulation_model.auxiliary_part(state);
+    const Eigen::VectorXd& output_controls =
+        trajectory.applied_controls.size() == trajectory.states.size()
+            ? trajectory.applied_controls[i]
+            : last_applied;
+    trajectory.outputs.push_back(
+        simulation_model.outputs(rigid, auxiliary, output_controls, subject.environment));
+    const auto envelope =
+        simulation_model.envelope(rigid, auxiliary, output_controls, subject.environment);
+    if (envelope.outside) {
+      ++trajectory.envelope_departures;
+      if (envelope.worst_departure > trajectory.worst_envelope.worst_departure) {
+        trajectory.worst_envelope = envelope;
+      }
+    }
+  }
+
+  Artifact artifact;
+  artifact.kind = "helicopter_trajectory";
+  std::ostringstream summary;
+  summary << trajectory.states.size() << " samples over "
+          << fixed(static_cast<double>(result.integration.steps_taken) * step_s, 3)
+          << " s at fixed-step rk4; " << result.ticks.size() << " controller ticks every "
+          << fixed(period_s, 6) << " s, delay " << delay_periods << " period(s), "
+          << (controller->kind == ClosedLoopControllerRuntime::Kind::Pid ? "PID" : "state feedback")
+          << "; " << (sensor ? "deterministic named sensor" : "perfect named measurement");
+  if (!result.integration.completed()) {
+    summary << "; REFUSED: " << numerics::to_string(result.integration.reason) << " — "
+            << result.integration.detail;
+  } else {
+    summary << "; completed";
+  }
+  if (!trajectory.failure_events.empty()) {
+    summary << "; applied " << trajectory.failure_events.size() << " scheduled failure event(s)";
+  }
+  if (trajectory.envelope_departures > 0) {
+    summary << "; OUTSIDE THE DECLARED ENVELOPE at " << trajectory.envelope_departures
+            << " samples: " << trajectory.worst_envelope.reason;
+  }
+  artifact.summary = summary.str();
+  artifact.payload = std::move(trajectory);
+  return artifact;
+}
+
+// ---------------------------------------------------------------------------
 // report.helicopter_csv
 // ---------------------------------------------------------------------------
 
@@ -677,6 +1372,13 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   for (const auto& name : run.output_names) {
     out << ",output_" << name;
   }
+  const bool has_held_controls =
+      run.closed_loop && run.applied_controls.size() == run.times_s.size();
+  if (has_held_controls) {
+    for (const auto& name : run.model->control_names()) {
+      out << ",applied_" << name;
+    }
+  }
   out << "\n";
   out << std::setprecision(17);
   for (std::size_t i = 0; i < run.times_s.size(); ++i) {
@@ -686,6 +1388,11 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
     }
     for (Eigen::Index j = 0; j < run.outputs[i].size(); ++j) {
       out << "," << run.outputs[i](j);
+    }
+    if (has_held_controls) {
+      for (Eigen::Index j = 0; j < run.applied_controls[i].size(); ++j) {
+        out << "," << run.applied_controls[i](j);
+      }
     }
     out << "\n";
   }
@@ -702,6 +1409,53 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
     context.write_output(event_path, events.str());
   }
 
+  std::string controller_path;
+  if (run.closed_loop) {
+    controller_path = path + ".controller.csv";
+    std::ostringstream controller;
+    controller.imbue(std::locale::classic());
+    controller << "time_s";
+    for (const auto& name : run.controller_measurement_names) {
+      controller << ",measurement_" << name;
+    }
+    for (const auto& name : run.controller_measurement_names) {
+      controller << ",reference_" << name;
+    }
+    for (const auto& name : run.controller_measurement_names) {
+      controller << ",error_" << name;
+    }
+    for (const auto& name : run.model->control_names()) {
+      controller << ",requested_" << name << ",saturated_" << name << ",applied_" << name;
+    }
+    for (const auto& name : run.controller_state_names) {
+      controller << ",controller_state_" << name;
+    }
+    controller << ",measurement_available,measurement_stale\n";
+    controller << std::setprecision(17);
+    for (std::size_t i = 0; i < run.controller_times_s.size(); ++i) {
+      controller << run.controller_times_s[i];
+      for (Eigen::Index j = 0; j < run.controller_measurements[i].size(); ++j) {
+        controller << "," << run.controller_measurements[i](j);
+      }
+      for (Eigen::Index j = 0; j < run.controller_references[i].size(); ++j) {
+        controller << "," << run.controller_references[i](j);
+      }
+      for (Eigen::Index j = 0; j < run.controller_errors[i].size(); ++j) {
+        controller << "," << run.controller_errors[i](j);
+      }
+      for (Eigen::Index j = 0; j < run.controller_requested[i].size(); ++j) {
+        controller << "," << run.controller_requested[i](j) << "," << run.controller_saturated[i](j)
+                   << "," << run.controller_applied[i](j);
+      }
+      for (Eigen::Index j = 0; j < run.controller_states[i].size(); ++j) {
+        controller << "," << run.controller_states[i](j);
+      }
+      controller << "," << (run.controller_measurement_available[i] ? 1 : 0) << ","
+                 << (run.controller_measurement_stale[i] ? 1 : 0) << "\n";
+    }
+    context.write_output(controller_path, controller.str());
+  }
+
   Artifact artifact;
   artifact.kind = "report";
   std::ostringstream summary;
@@ -712,6 +1466,9 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   }
   if (!event_path.empty()) {
     summary << "; applied failure events in " << event_path;
+  }
+  if (!controller_path.empty()) {
+    summary << "; controller evidence in " << controller_path;
   }
   artifact.summary = summary.str();
   artifact.payload = std::string(path);
@@ -881,6 +1638,20 @@ void write_trajectory_section(std::ostream& out, const HelicopterTrajectoryArtif
       << fixed(static_cast<double>(run.steps_taken) * run.step_s, 3) << " s at a step of "
       << scientific(run.step_s, 3) << " s.\n\n";
 
+  if (run.closed_loop) {
+    out << "Closed-loop execution: " << run.controller_times_s.size()
+        << " controller ticks with deterministic sample/hold ordering. Controller measurement "
+           "channels are "
+        << (run.controller_measurement_names.empty() ? "none" : "named below") << ".\n\n";
+    if (!run.sensor_provenance.empty()) {
+      out << "Measurement provenance:\n\n";
+      for (const auto& item : run.sensor_provenance) {
+        out << "- " << item << "\n";
+      }
+      out << "\n";
+    }
+  }
+
   // THE TERMINATION REASON IS IN THE REPORT, NOT ONLY IN THE CLI LINE. A reader
   // who has the document and not the terminal must still be able to tell a
   // completed run from a refused one.
@@ -995,6 +1766,26 @@ void register_helicopter_capabilities(Registry& registry) {
        "newton_iterations",
        "step_control",
        "step_size_rad",
+       "failure_events"}});
+
+  registry.add(Capability{
+      "sim.helicopter.closed_loop",
+      "Execute a nonlinear helicopter VehicleModel with deterministic sampled measurements, "
+      "controller updates, zero-order hold, whole-period delay, actuator saturation and "
+      "scheduled failures",
+      "helicopter_trajectory",
+      Capability::State::ImplementedUnvalidated,
+      simulate_helicopter_closed_loop_capability,
+      {"trim",
+       "law",
+       "controller",
+       "sensor",
+       "step_s",
+       "steps",
+       "sample_stride",
+       "controller_period_s",
+       "delay_periods",
+       "method",
        "failure_events"}});
 
   registry.add(Capability{

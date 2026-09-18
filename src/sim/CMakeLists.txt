@@ -7,6 +7,7 @@ galata_find_eigen()
 add_library(galata_sim
   rigid_body.cpp
   schedule.cpp
+  sensor.cpp
 )
 add_library(galata::sim ALIAS galata_sim)
 
@@ -27,6 +28,7 @@ add_library(galata_simulation
   nonlinear.cpp
   linear.cpp
   discrete.cpp
+  sampled_loop.cpp
 )
 add_library(galata::simulation ALIAS galata_simulation)
 target_link_libraries(galata_simulation

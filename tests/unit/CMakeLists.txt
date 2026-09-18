@@ -67,6 +67,7 @@ add_executable(galata_unit_tests
   test_quadrotor_model.cpp
   test_hover_trim.cpp
   test_extended_linearize.cpp
+  test_sampled_sensor.cpp
 )
 
 target_link_libraries(galata_unit_tests

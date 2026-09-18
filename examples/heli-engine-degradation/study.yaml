@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Scheduled engine degradation followed by loss. The event log is emitted next
+# to the trajectory CSV so the torque history has an explicit cause and time.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: degraded
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 1500
+      sample_stride: 10
+      failure_events:
+        - {time_s: 0.5, component: engine, fraction: 0.5}
+        - {time_s: 1.0, component: engine, fraction: 0.0}
+  - id: csv
+    capability: report.helicopter_csv
+    input: {trajectory: {from: degraded}, path: engine-degradation.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 scheduled engine degradation and loss
+      sections: [{from: hover}, {from: degraded}]
+      path: engine-degradation.md

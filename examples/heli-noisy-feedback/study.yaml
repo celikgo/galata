@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deterministic noisy sampled feedback. The sensor algorithm, seed, streams,
+# latency, quantisation and dropout policy are all carried into the report.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: noisy
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      controller_period_s: 0.02
+      step_s: 0.002
+      steps: 1000
+      sample_stride: 10
+      delay_periods: 1
+      controller:
+        type: pid
+        missing_measurement: hold_last
+        loops:
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+      sensor:
+        name: sas_rates
+        channels: [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s]
+        seed: 20260919
+        algorithm_version: mt19937_64_box_muller_v1
+        sample_period_s: 0.02
+        latency_s: 0.02
+        bias: [0.0001, -0.0001, 0.0002]
+        white_noise_stddev: [0.001, 0.001, 0.001]
+        quantization_step: 0.0001
+        dropout_samples: [5, 15]
+        dropout_policy: unavailable
+  - id: csv
+    capability: report.helicopter_csv
+    input: {trajectory: {from: noisy}, path: noisy-feedback.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 deterministic noisy sampled feedback
+      sections: [{from: hover}, {from: noisy}]
+      path: noisy-feedback.md

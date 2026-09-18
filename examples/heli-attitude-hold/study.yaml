@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Full-state feedback designed on the helicopter linearisation and executed
+# against the nonlinear VehicleModel at a declared sampled rate.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: linear
+    capability: linearize.vehicle
+    input: {trim: {from: hover}, drop_position_and_heading: true}
+  - id: law
+    capability: synth.lqr
+    input:
+      system: {from: linear}
+      break_at: plant_input
+      q:
+        [
+          [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01]
+        ]
+      r: [[0.1, 0, 0, 0], [0, 0.1, 0, 0], [0, 0, 0.1, 0], [0, 0, 0, 0.1]]
+  - id: closed
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      law: {from: law}
+      controller_period_s: 0.01
+      step_s: 0.002
+      steps: 1000
+      sample_stride: 10
+      delay_periods: 0
+      controller: {type: state_feedback, missing_measurement: refuse}
+  - id: csv
+    capability: report.helicopter_csv
+    input: {trajectory: {from: closed}, path: attitude-hold.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 nonlinear sampled attitude-hold study
+      sections: [{from: hover}, {from: law}, {from: closed}]
+      path: attitude-hold.md

@@ -26,6 +26,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -40,6 +41,35 @@ galata::pipeline::RunResult run_heli_example(const std::string& example) {
   return galata::pipeline::run_pipeline(pipeline,
                                         galata::pipeline::builtin_registry(),
                                         directory.string(),
+                                        output.string(),
+                                        nullptr,
+                                        galata::pipeline::RunOptions{.overwrite = true});
+}
+
+std::string read_text(const std::filesystem::path& path) {
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream) {
+    throw std::runtime_error("cannot open " + path.string());
+  }
+  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+galata::pipeline::RunResult run_heli_document(const std::string& test_name, std::string document) {
+  const std::filesystem::path output =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / test_name;
+  std::filesystem::create_directories(output);
+  const std::string relative_model = "../../models/souxmar-heli/souxmar-heli.yaml";
+  const std::string absolute_model =
+      (std::filesystem::path(GALATA_MODELS_DIR) / "souxmar-heli/souxmar-heli.yaml").string();
+  std::size_t at = 0;
+  while ((at = document.find(relative_model, at)) != std::string::npos) {
+    document.replace(at, relative_model.size(), absolute_model);
+    at += absolute_model.size();
+  }
+  const auto pipeline = galata::pipeline::parse_pipeline(document);
+  return galata::pipeline::run_pipeline(pipeline,
+                                        galata::pipeline::builtin_registry(),
+                                        output.string(),
                                         output.string(),
                                         nullptr,
                                         galata::pipeline::RunOptions{.overwrite = true});
@@ -91,6 +121,120 @@ TEST(ExampleHeliTailRotorFailure, HealthyAndFailedRunsAreBothRecorded) {
   const std::string contents((std::istreambuf_iterator<char>(stream)),
                              std::istreambuf_iterator<char>());
   EXPECT_NE(contents.find("t=1.000000 s: tail_rotor fraction=0.000000"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Closed-loop and sensor evidence
+// ---------------------------------------------------------------------------
+
+TEST(ExampleHeliClosedLoop, AllRequestedWorkflowsProduceControllerEvidence) {
+  struct Case {
+    const char* example;
+    const char* stage;
+    const char* csv;
+  };
+
+  const std::vector<Case> cases = {
+      {"heli-sas-design", "sas", "sas.csv.controller.csv"},
+      {"heli-attitude-hold", "closed", "attitude-hold.csv.controller.csv"},
+      {"heli-altitude-hold", "closed", "altitude-hold.csv.controller.csv"},
+      {"heli-noisy-feedback", "noisy", "noisy-feedback.csv.controller.csv"},
+      {"heli-actuator-jam", "jammed", "actuator-jam.csv.controller.csv"},
+  };
+  for (const auto& item : cases) {
+    const auto result = run_heli_example(item.example);
+    const std::string summary = stage_named(result, item.stage).summary;
+    EXPECT_NE(summary.find("completed"), std::string::npos) << item.example << ": " << summary;
+    EXPECT_EQ(summary.find("REFUSED"), std::string::npos) << item.example << ": " << summary;
+    const auto path =
+        std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / item.example / item.csv;
+    ASSERT_TRUE(std::filesystem::exists(path)) << path;
+    const std::string controller = read_text(path);
+    EXPECT_NE(controller.find("measurement_available"), std::string::npos) << path;
+    EXPECT_NE(controller.find("requested_"), std::string::npos) << path;
+  }
+}
+
+TEST(ExampleHeliClosedLoop, SensorRunIsBitStableAndRecordsItsProvenance) {
+  const auto first = run_heli_example("heli-noisy-feedback");
+  EXPECT_NE(stage_named(first, "noisy").summary.find("deterministic named sensor"),
+            std::string::npos);
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-noisy-feedback";
+  const std::string before = read_text(directory / "noisy-feedback.csv.controller.csv");
+  const std::string report = read_text(directory / "noisy-feedback.md");
+  EXPECT_NE(report.find("sensor seed: 20260919"), std::string::npos);
+  EXPECT_NE(report.find("sensor algorithm: mt19937_64_box_muller_v1"), std::string::npos);
+
+  const auto second = run_heli_example("heli-noisy-feedback");
+  EXPECT_NE(stage_named(second, "noisy").summary.find("completed"), std::string::npos);
+  EXPECT_EQ(before, read_text(directory / "noisy-feedback.csv.controller.csv"));
+}
+
+TEST(ExampleHeliFailures, EngineLossAndActuatorJamHaveStableSidecars) {
+  const auto engine = run_heli_example("heli-engine-degradation");
+  const std::string engine_summary = stage_named(engine, "degraded").summary;
+  EXPECT_NE(engine_summary.find("applied 2 scheduled failure event"), std::string::npos)
+      << engine_summary;
+  const auto engine_events = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                             / "heli-engine-degradation/engine-degradation.csv.events.txt";
+  ASSERT_TRUE(std::filesystem::exists(engine_events)) << engine_events;
+  const std::string engine_log = read_text(engine_events);
+  const auto degraded = engine_log.find("engine fraction=0.500000");
+  const auto lost = engine_log.find("engine fraction=0.000000");
+  EXPECT_NE(degraded, std::string::npos);
+  EXPECT_NE(lost, std::string::npos);
+  EXPECT_LT(degraded, lost);
+
+  const auto jam = run_heli_example("heli-actuator-jam");
+  EXPECT_NE(stage_named(jam, "jammed").summary.find("applied 1 scheduled failure event"),
+            std::string::npos);
+  const auto jam_events = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                          / "heli-actuator-jam/actuator-jam.csv.events.txt";
+  ASSERT_TRUE(std::filesystem::exists(jam_events)) << jam_events;
+  EXPECT_NE(read_text(jam_events).find("actuator_jam lateral_cyclic_command_rad"),
+            std::string::npos);
+}
+
+std::string failure_validation_study(const std::string& event) {
+  return "version: 1\n"
+         "stages:\n"
+         "  - id: aircraft\n"
+         "    capability: model.helicopter\n"
+         "    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}\n"
+         "  - id: hover\n"
+         "    capability: trim.helicopter\n"
+         "    input: {helicopter: {from: aircraft}, airspeed_m_s: 0, altitude_m: 100}\n"
+         "  - id: failed\n"
+         "    capability: sim.helicopter\n"
+         "    input:\n"
+         "      trim: {from: hover}\n"
+         "      step_s: 0.002\n"
+         "      steps: 500\n"
+         "      failure_events:\n"
+         "        - "
+         + event + "\n";
+}
+
+TEST(ExampleHeliFailures, InvalidFailureInputsAreRefusedByName) {
+  const std::vector<std::pair<std::string, std::string>> invalid = {
+      {"{time_s: 0.5, component: engine, fraction: 1.5}", "fraction"},
+      {"{time_s: 0.501, component: engine, fraction: 0.5}", "between integration steps"},
+      {"{time_s: 0.5, component: engine, fraction: 0.5, unexpected: 1}", "unknown key"},
+      {"{time_s: 0.5, component: actuator_jam, actuator: lateral_cyclic_command_rad, position_rad: "
+       "4.0}",
+       "outside the actuator's declared travel"},
+  };
+  for (std::size_t i = 0; i < invalid.size(); ++i) {
+    try {
+      (void)run_heli_document("heli-invalid-failure-" + std::to_string(i),
+                              failure_validation_study(invalid[i].first));
+      FAIL() << "invalid failure event was accepted: " << invalid[i].first;
+    } catch (const std::exception& error) {
+      EXPECT_NE(std::string(error.what()).find(invalid[i].second), std::string::npos)
+          << error.what();
+    }
+  }
 }
 
 TEST(ExampleHeliHoverTrim, ProducesTheTrimItsReadmeClaims) {

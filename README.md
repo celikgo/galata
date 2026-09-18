@@ -210,6 +210,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
 | `sim.helicopter` | Integrate the nonlinear helicopter from a trim under a declared control step, with a declared integration method and per-state magnitude bounds that refuse a divergence instead of reporting it as a completed run | `helicopter_trajectory` | implemented, unvalidated |
+| `sim.helicopter.closed_loop` | Execute a nonlinear helicopter VehicleModel with deterministic sampled measurements, controller updates, zero-order hold, whole-period delay, actuator saturation and scheduled failures | `helicopter_trajectory` | implemented, unvalidated |
 | `sim.linear` | Integrate a continuous linear model with fixed-step RK4 under a constant input or a declared input history with a stated hold and extrapolation | `linear_trajectory` | implemented, unvalidated |
 | `sim.model` | Run a compiled continuous model with fixed-step RK4 and write CSV plus scoped evidence | `model_trajectory` | implemented, unvalidated |
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
