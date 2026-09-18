@@ -70,9 +70,8 @@ promoted to complete by proximity or by a passing unrelated test.
 Fill this section only from executable evidence at the final integrated head:
 
 - Baseline commit: `08e1d76`.
-- Final implementation commit: recorded immediately after this verification pass;
-  the handoff-record update is committed separately so the implementation hash is
-  unambiguous.
+- Final implementation commit: `a72fe30`; the handoff-record update is committed
+  separately so this implementation hash remains unambiguous.
 - Baseline CTest result: 849-case inventory recorded; focused helicopter, sampled-multirotor and example gates passed before this increment.
 - Final CTest result: `855/855` tests passed, `0` failed; full-suite real time was `696.41 s` on this macOS arm64 host.
 - Final repository gates: `cmake --build --preset dev -j 4`, the six new sampled-loop/helicopter acceptance tests, `scripts/gen-status-table.sh build/dev/src/cli/galata --check`, `scripts/check-doc-links.sh`, and `git diff --check` passed. The generated capability table, six examples, unit tests, and integration tests are part of this increment.
