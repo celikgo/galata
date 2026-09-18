@@ -20,22 +20,26 @@ capability is closed.
 
 ## What the run contains
 
-A trimmed hover, held with the controls fixed for four seconds. This is the
-**control case**: it must stay put, and a trimmed aircraft that drifted here would
-invalidate any failure comparison made against it.
+A trimmed hover, held with the controls fixed for four seconds, is the **healthy
+control case**. The same trim is then simulated with a complete tail-rotor loss
+at `t = 1.0 s`. The event is on the 2 ms fixed-step lattice and is recorded in
+`failed-hover.csv.events.txt`.
 
 The failure itself is applied through `HelicopterFailures::tail_rotor_effectiveness`,
 which is a multiplier rather than a special case in the physics, so a failed run
-takes exactly the same code path as a healthy one. Two unit tests exercise it
-directly:
+takes exactly the same code path as a healthy one. Two unit tests exercise the
+underlying model directly:
 
 - `Helicopter.TailRotorFailureRemovesTheAntiTorqueAndLeavesAYawMoment` — with the
   tail rotor gone, a yaw moment of over 1 kN·m remains where the trimmed aircraft
   had none, and it acts in the sense the main rotor's torque does.
 - `Helicopter.EngineFailureRemovesTheSuppliedTorqueSoTheRotorDecays`.
 
-The failure is not yet reachable from a study file: no capability input exposes
-it. That is a gap, and it is listed as one rather than worked around here.
+Failure-event ordering is deterministic: events are sorted by fixed-step time and
+events at the same time retain declaration order. Engine degradation uses the same
+`fraction` field. An `actuator_jam` event freezes the current actuator position
+unless an in-travel `position_rad` is explicitly declared; a time not on the
+integration lattice is refused rather than moved silently.
 
 ## What this is not
 

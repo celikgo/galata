@@ -56,9 +56,26 @@ stages:
       trajectory: {from: healthy}
       path: healthy-hover.csv
 
+  # Complete tail-rotor loss at exactly 1 s, on the fixed integration lattice.
+  - id: failed
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 2000
+      sample_stride: 20
+      failure_events:
+        - {time_s: 1.0, component: tail_rotor, fraction: 0.0}
+
+  - id: failed_csv
+    capability: report.helicopter_csv
+    input:
+      trajectory: {from: failed}
+      path: failed-hover.csv
+
   - id: report
     capability: report.markdown
     input:
       title: Souxmar F1 hover hold, as the control case for a tail-rotor failure
-      sections: [{from: hover}, {from: healthy}]
+      sections: [{from: hover}, {from: healthy}, {from: failed}]
       path: tail-rotor-failure.md

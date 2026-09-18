@@ -12,6 +12,7 @@
 
 #include "galata/model/vehicle.hpp"
 
+#include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
 
 #include <algorithm>
@@ -47,10 +48,25 @@ void require_finite(double value, const char* what) {
 Environment Environment::sea_level_still_air() noexcept {
   Environment environment;
   environment.gravity_ned_m_s2 = Eigen::Vector3d(0.0, 0.0, kStandardGravityM_S2);
+  environment.atmospheric_altitude_m = 0.0;
+  environment.delta_isa_k = 0.0;
   environment.density_kg_m3 = kSeaLevelDensityKg_M3;
   environment.speed_of_sound_m_s = kSeaLevelSpeedOfSoundM_S;
   environment.pressure_pa = kSeaLevelPressurePa;
   environment.temperature_k = kSeaLevelTemperatureK;
+  return environment;
+}
+
+Environment Environment::at_geometric_altitude(double altitude_m, double delta_isa_k) {
+  const core::AtmosphereState atmosphere = core::isa(altitude_m, delta_isa_k);
+  Environment environment;
+  environment.gravity_ned_m_s2 = Eigen::Vector3d(0.0, 0.0, core::ussa1976::kStandardGravity);
+  environment.atmospheric_altitude_m = altitude_m;
+  environment.delta_isa_k = delta_isa_k;
+  environment.density_kg_m3 = atmosphere.density_kg_m3;
+  environment.speed_of_sound_m_s = atmosphere.speed_of_sound_m_s;
+  environment.pressure_pa = atmosphere.pressure_pa;
+  environment.temperature_k = atmosphere.temperature_k;
   return environment;
 }
 
@@ -59,6 +75,8 @@ void Environment::validate() const {
       || !wind_rate_ned_m_s2.allFinite()) {
     throw std::invalid_argument("Environment: gravity, wind and wind rate must be finite");
   }
+  require_finite(atmospheric_altitude_m, "atmospheric_altitude_m");
+  require_finite(delta_isa_k, "delta_isa_k");
   require_finite(density_kg_m3, "density_kg_m3");
   require_finite(speed_of_sound_m_s, "speed_of_sound_m_s");
   require_finite(pressure_pa, "pressure_pa");
@@ -83,7 +101,8 @@ Eigen::VectorXd VehicleModel::outputs(const core::State& state,
 
 core::State VehicleModel::rigid_body_part(const Eigen::VectorXd& extended_state) {
   if (extended_state.size() < core::kStateSize) {
-    throw std::invalid_argument("VehicleModel: extended state is shorter than the rigid-body state");
+    throw std::invalid_argument(
+        "VehicleModel: extended state is shorter than the rigid-body state");
   }
   return core::State::from_vector(core::StateVector(extended_state.head<core::kStateSize>()));
 }
@@ -116,12 +135,14 @@ Eigen::VectorXd VehicleModel::join(const core::State& state,
 
 void VehicleModel::project(Eigen::VectorXd& extended_state) {
   if (extended_state.size() < core::kStateSize) {
-    throw std::invalid_argument("VehicleModel::project: state is shorter than the rigid-body state");
+    throw std::invalid_argument(
+        "VehicleModel::project: state is shorter than the rigid-body state");
   }
   const Eigen::Vector4d wxyz = extended_state.segment<4>(core::kQuaternionW);
   const double norm = wxyz.norm();
   if (!(norm > 0.0) || !std::isfinite(norm)) {
-    throw std::runtime_error("VehicleModel::project: attitude quaternion has zero or non-finite norm");
+    throw std::runtime_error(
+        "VehicleModel::project: attitude quaternion has zero or non-finite norm");
   }
   extended_state.segment<4>(core::kQuaternionW) = wxyz / norm;
 }
@@ -175,8 +196,7 @@ Eigen::VectorXd VehicleModel::derivative(const Eigen::VectorXd& extended_state,
   // between a gust the aircraft flies through and a step the integrator eats as
   // a ground-velocity error.
   if (!environment.wind_rate_ned_m_s2.isZero()) {
-    const Eigen::Matrix3d body_from_ned =
-        core::dcm_body_from_ned(state.attitude_body_to_ned);
+    const Eigen::Matrix3d body_from_ned = core::dcm_body_from_ned(state.attitude_body_to_ned);
     rate.segment<3>(core::kVelocityU) -= body_from_ned * environment.wind_rate_ned_m_s2;
   }
 

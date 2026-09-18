@@ -76,18 +76,31 @@ namespace galata::model {
 // wind increment as a ground-velocity error, silently and permanently". A field
 // that owns its own derivative removes that class of error from the caller.
 struct Environment {
-  Eigen::Vector3d gravity_ned_m_s2 = Eigen::Vector3d::Zero();     // m/s^2
-  Eigen::Vector3d wind_ned_m_s = Eigen::Vector3d::Zero();         // m/s
-  Eigen::Vector3d wind_rate_ned_m_s2 = Eigen::Vector3d::Zero();   // m/s^2, dw/dt
-  double density_kg_m3 = 0.0;                                     // kg/m^3
-  double speed_of_sound_m_s = 0.0;                                // m/s
-  double pressure_pa = 0.0;                                       // Pa
-  double temperature_k = 0.0;                                     // K
+  Eigen::Vector3d gravity_ned_m_s2 = Eigen::Vector3d::Zero();    // m/s^2
+  Eigen::Vector3d wind_ned_m_s = Eigen::Vector3d::Zero();        // m/s
+  Eigen::Vector3d wind_rate_ned_m_s2 = Eigen::Vector3d::Zero();  // m/s^2, dw/dt
+  // Geometric altitude used to evaluate the atmospheric properties below.
+  // This is an atmospheric altitude, not the vehicle's height above the NED
+  // origin. The helicopter pipeline freezes this environment at trim and
+  // records the policy in its report; it does not silently re-evaluate the
+  // atmosphere as the vehicle moves.
+  double atmospheric_altitude_m = 0.0;  // m, geometric altitude
+  double delta_isa_k = 0.0;             // K
+  double density_kg_m3 = 0.0;           // kg/m^3
+  double speed_of_sound_m_s = 0.0;      // m/s
+  double pressure_pa = 0.0;             // Pa
+  double temperature_k = 0.0;           // K
 
   // Standard sea-level air with standard gravity and still air. Every field
   // populated, because a zero density silently zeroes every aerodynamic force
   // and the trajectory that results is smooth, plausible and wrong.
   [[nodiscard]] static Environment sea_level_still_air() noexcept;
+
+  // ISA atmosphere at the declared geometric altitude, with standard gravity
+  // and still air. Throws the same diagnostic as core::isa() for an altitude
+  // outside its envelope or an invalid temperature offset.
+  [[nodiscard]] static Environment at_geometric_altitude(double altitude_m,
+                                                         double delta_isa_k = 0.0);
 
   // Throws std::invalid_argument on a non-finite field, a non-positive density,
   // speed of sound, pressure or temperature.
@@ -136,6 +149,7 @@ class VehicleModel {
   [[nodiscard]] int control_count() const {
     return static_cast<int>(control_names().size());
   }
+
   [[nodiscard]] int extended_state_size() const {
     return core::kStateSize + auxiliary_state_count();
   }

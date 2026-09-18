@@ -22,9 +22,10 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
@@ -36,13 +37,16 @@ galata::pipeline::RunResult run_heli_example(const std::string& example) {
   std::filesystem::create_directories(output);
   const galata::pipeline::Pipeline pipeline =
       galata::pipeline::load_pipeline((directory / "study.yaml").string());
-  return galata::pipeline::run_pipeline(pipeline, galata::pipeline::builtin_registry(),
-                                        directory.string(), output.string(), nullptr,
+  return galata::pipeline::run_pipeline(pipeline,
+                                        galata::pipeline::builtin_registry(),
+                                        directory.string(),
+                                        output.string(),
+                                        nullptr,
                                         galata::pipeline::RunOptions{.overwrite = true});
 }
 
 const galata::pipeline::Artifact& stage_named(const galata::pipeline::RunResult& result,
-                                             const std::string& id) {
+                                              const std::string& id) {
   const galata::pipeline::Artifact* found = result.find(id);
   if (found == nullptr) {
     throw std::runtime_error("no stage named '" + id + "' in this run");
@@ -70,6 +74,23 @@ TEST(ExampleHeliHoverTrim, RunsEndToEnd) {
     EXPECT_FALSE(stage.artifact.produced_by_capability.empty());
     EXPECT_NE(stage.artifact.produced_by_build.find("galata "), std::string::npos);
   }
+}
+
+TEST(ExampleHeliTailRotorFailure, HealthyAndFailedRunsAreBothRecorded) {
+  const auto result = run_heli_example("heli-tail-rotor-failure");
+  ASSERT_EQ(result.stages.size(), 7U);
+  EXPECT_NE(stage_named(result, "healthy").summary.find("completed"), std::string::npos);
+  const std::string failed = stage_named(result, "failed").summary;
+  EXPECT_NE(failed.find("applied 1 scheduled failure event"), std::string::npos) << failed;
+  EXPECT_NE(failed.find("tail_rotor fraction=0.000000"), std::string::npos) << failed;
+
+  const std::filesystem::path events = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                                       / "heli-tail-rotor-failure" / "failed-hover.csv.events.txt";
+  ASSERT_TRUE(std::filesystem::exists(events)) << events;
+  std::ifstream stream(events);
+  const std::string contents((std::istreambuf_iterator<char>(stream)),
+                             std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("t=1.000000 s: tail_rotor fraction=0.000000"), std::string::npos);
 }
 
 TEST(ExampleHeliHoverTrim, ProducesTheTrimItsReadmeClaims) {
@@ -129,11 +150,15 @@ TEST(ExampleHeliForwardFlightTrim, ProducesTheTableItsReadmeQuotes) {
   const auto cruise = run_heli_example("heli-forward-flight-trim");
 
   const std::string cruise_summary = stage_named(cruise, "cruise").summary;
-  // The README's table: collective 12.18, cyclic +5.02, pedal 3.49, pitch -0.68.
-  EXPECT_NE(cruise_summary.find("collective 12.1"), std::string::npos) << cruise_summary;
-  EXPECT_NE(cruise_summary.find("cyclic 5.0"), std::string::npos) << cruise_summary;
-  EXPECT_NE(cruise_summary.find("pedal 3.4"), std::string::npos) << cruise_summary;
-  EXPECT_NE(cruise_summary.find("pitch -0.6"), std::string::npos) << cruise_summary;
+  // The README's altitude-aware table: collective 12.45, cyclic +5.13, pedal
+  // 3.63, pitch -0.58. The atmosphere is evaluated at the declared 500 m.
+  EXPECT_NE(cruise_summary.find("collective 12.45"), std::string::npos) << cruise_summary;
+  EXPECT_NE(cruise_summary.find("cyclic 5.13"), std::string::npos) << cruise_summary;
+  EXPECT_NE(cruise_summary.find("pedal 3.63"), std::string::npos) << cruise_summary;
+  EXPECT_NE(cruise_summary.find("pitch -0.58"), std::string::npos) << cruise_summary;
+  EXPECT_NE(cruise_summary.find("atmosphere altitude 500.0 m, density 1.1673 kg/m^3"),
+            std::string::npos)
+      << cruise_summary;
 
   // EVERY DIRECTION IN THE README'S TABLE, asserted as a comparison rather than
   // as a pair of numbers, because the direction is the physics and the numbers

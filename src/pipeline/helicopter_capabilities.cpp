@@ -16,6 +16,7 @@
 // hover computation. Neither is a published reference, so neither earns
 // `Implemented`. models/souxmar-heli/PROVENANCE.md says the same in more detail.
 
+#include "galata/core/atmosphere.hpp"
 #include "galata/linearize/vehicle.hpp"
 #include "galata/model/helicopter.hpp"
 #include "galata/numerics/integration_method.hpp"
@@ -26,13 +27,15 @@
 #include <cmath>
 #include <iomanip>
 #include <locale>
+#include <map>
 #include <memory>
 #include <numbers>
+#include <optional>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <ostream>
 #include <vector>
 
 namespace galata::pipeline {
@@ -81,7 +84,7 @@ struct HelicopterTrimArtifact {
 struct HelicopterTrajectoryArtifact {
   std::shared_ptr<const model::HelicopterModel> model;
   std::vector<double> times_s;
-  std::vector<Eigen::VectorXd> states;      // extended
+  std::vector<Eigen::VectorXd> states;  // extended
   std::vector<Eigen::VectorXd> outputs;
   std::vector<std::string> state_names;
   std::vector<std::string> output_names;
@@ -89,9 +92,171 @@ struct HelicopterTrajectoryArtifact {
   std::string termination_detail;
   double step_s = 0.0;
   int steps_taken = 0;
+  // Deterministic records of scheduled failures. The manifest also retains
+  // the source declarations; this list is the trajectory's applied event log.
+  std::vector<std::string> failure_events;
   model::EnvelopeStatus worst_envelope;
   int envelope_departures = 0;
 };
+
+struct FailureEvent {
+  int step = 0;
+  double time_s = 0.0;
+  std::string component;
+  double fraction = 0.0;
+  int actuator_index = -1;
+  std::string actuator_name;
+  std::optional<double> position_rad;
+};
+
+double event_number(const std::map<std::string, ValuePtr>& fields,
+                    const std::string& key,
+                    const std::string& description) {
+  const auto found = fields.find(key);
+  if (found == fields.end()) {
+    throw std::runtime_error("sim.helicopter: failure event " + description + " is missing '" + key
+                             + "'");
+  }
+  if (found->second->kind() != Value::Kind::Number) {
+    throw std::runtime_error("sim.helicopter: failure event " + description + "." + key
+                             + " must be a number");
+  }
+  return found->second->as_number();
+}
+
+std::string event_text(const std::map<std::string, ValuePtr>& fields,
+                       const std::string& key,
+                       const std::string& description) {
+  const auto found = fields.find(key);
+  if (found == fields.end()) {
+    throw std::runtime_error("sim.helicopter: failure event " + description + " is missing '" + key
+                             + "'");
+  }
+  if (found->second->kind() != Value::Kind::String) {
+    throw std::runtime_error("sim.helicopter: failure event " + description + "." + key
+                             + " must be a string");
+  }
+  return found->second->as_string();
+}
+
+std::vector<FailureEvent> parse_failure_events(const StageContext& context,
+                                               const model::HelicopterModel& heli,
+                                               double step_s,
+                                               int steps) {
+  const ValuePtr declared = context.input->get("failure_events");
+  if (declared == nullptr) {
+    return {};
+  }
+  if (declared->kind() != Value::Kind::List) {
+    throw std::runtime_error("sim.helicopter: failure_events must be a list of event maps");
+  }
+
+  std::vector<FailureEvent> events;
+  const double horizon_s = static_cast<double>(steps) * step_s;
+  const auto controls = heli.control_names();
+  for (std::size_t i = 0; i < declared->as_list().size(); ++i) {
+    const ValuePtr& entry = declared->as_list()[i];
+    const std::string description = "#" + std::to_string(i);
+    if (entry->kind() != Value::Kind::Map) {
+      throw std::runtime_error("sim.helicopter: failure event " + description + " must be a map");
+    }
+    const auto& fields = entry->as_map();
+    FailureEvent event;
+    event.time_s = event_number(fields, "time_s", description);
+    event.component = event_text(fields, "component", description);
+    if (!std::isfinite(event.time_s) || event.time_s < 0.0 || event.time_s > horizon_s) {
+      throw std::runtime_error("sim.helicopter: failure event " + description
+                               + " time_s must lie in [0, " + fixed(horizon_s, 6) + "]");
+    }
+    const double lattice_step = event.time_s / step_s;
+    const double nearest = std::round(lattice_step);
+    if (std::fabs(lattice_step - nearest) > 1.0e-12) {
+      throw std::runtime_error("sim.helicopter: failure event " + description
+                               + " is at " + fixed(event.time_s, 9)
+                               + " s, between integration steps. Failure events are applied at "
+                                 "fixed-step boundaries; choose a time on the declared step lattice");
+    }
+    event.step = static_cast<int>(nearest);
+
+    if (event.component == "tail_rotor" || event.component == "engine") {
+      for (const auto& [key, value] : fields) {
+        (void)value;
+        if (key != "time_s" && key != "component" && key != "fraction") {
+          throw std::runtime_error("sim.helicopter: failure event " + description
+                                   + " has unknown key '" + key + "'");
+        }
+      }
+      event.fraction = event_number(fields, "fraction", description);
+      if (!std::isfinite(event.fraction) || event.fraction < 0.0 || event.fraction > 1.0) {
+        throw std::runtime_error("sim.helicopter: failure event " + description
+                                 + ".fraction must be finite and in [0, 1]");
+      }
+    } else if (event.component == "actuator_jam") {
+      for (const auto& [key, value] : fields) {
+        (void)value;
+        if (key != "time_s" && key != "component" && key != "actuator" && key != "position_rad") {
+          throw std::runtime_error("sim.helicopter: failure event " + description
+                                   + " has unknown key '" + key + "'");
+        }
+      }
+      event.actuator_name = event_text(fields, "actuator", description);
+      const auto found = std::find(controls.begin(), controls.end(), event.actuator_name);
+      if (found == controls.end()) {
+        throw std::runtime_error("sim.helicopter: failure event " + description
+                                 + " names actuator '" + event.actuator_name
+                                 + "', but the model has no such control");
+      }
+      event.actuator_index = static_cast<int>(found - controls.begin());
+      const auto position = fields.find("position_rad");
+      if (position != fields.end()) {
+        if (position->second->kind() != Value::Kind::Number) {
+          throw std::runtime_error("sim.helicopter: failure event " + description
+                                   + ".position_rad must be a number");
+        }
+        event.position_rad = position->second->as_number();
+        if (!std::isfinite(*event.position_rad)) {
+          throw std::runtime_error("sim.helicopter: failure event " + description
+                                   + ".position_rad must be finite");
+        }
+      }
+    } else {
+      throw std::runtime_error("sim.helicopter: failure event " + description
+                               + " component must be 'tail_rotor', 'engine' or 'actuator_jam'");
+    }
+    events.push_back(std::move(event));
+  }
+
+  std::stable_sort(
+      events.begin(), events.end(), [](const FailureEvent& left, const FailureEvent& right) {
+        return left.step < right.step;
+      });
+  return events;
+}
+
+std::string apply_failure_event(const FailureEvent& event,
+                                model::HelicopterModel& heli,
+                                Eigen::VectorXd& state) {
+  if (event.component == "tail_rotor") {
+    heli.failures.tail_rotor_effectiveness = event.fraction;
+    return "t=" + fixed(event.time_s, 6) + " s: tail_rotor fraction=" + fixed(event.fraction, 6);
+  }
+  if (event.component == "engine") {
+    heli.failures.engine_available_fraction = event.fraction;
+    return "t=" + fixed(event.time_s, 6) + " s: engine fraction=" + fixed(event.fraction, 6);
+  }
+
+  const auto& limits = heli.actuators[static_cast<std::size_t>(event.actuator_index)];
+  const double jam_position = event.position_rad.value_or(
+      state(core::kStateSize + model::kCollectivePosition + event.actuator_index));
+  if (jam_position < limits.minimum_rad || jam_position > limits.maximum_rad) {
+    throw std::runtime_error(
+        "sim.helicopter: actuator jam position is outside the actuator's declared travel");
+  }
+  state(core::kStateSize + model::kCollectivePosition + event.actuator_index) = jam_position;
+  heli.failures.jammed_actuator_rad[static_cast<std::size_t>(event.actuator_index)] = jam_position;
+  return "t=" + fixed(event.time_s, 6) + " s: actuator_jam " + event.actuator_name + " at "
+         + fixed(jam_position, 6) + " rad";
+}
 
 // ---------------------------------------------------------------------------
 // model.helicopter
@@ -100,8 +265,7 @@ struct HelicopterTrajectoryArtifact {
 Artifact load_helicopter_capability(const StageContext& context) {
   const std::string declared = context.input->string_at("path");
   const std::string bytes = context.read_input(declared);
-  auto model = std::make_shared<model::HelicopterModel>(
-      model::parse_helicopter(bytes, declared));
+  auto model = std::make_shared<model::HelicopterModel>(model::parse_helicopter(bytes, declared));
 
   Artifact artifact;
   artifact.kind = "helicopter";
@@ -125,15 +289,29 @@ Artifact trim_helicopter_capability(const StageContext& context) {
   const auto& subject = upstream.payload_as<HelicopterArtifact>("helicopter");
   const model::HelicopterModel& heli = *subject.model;
 
-  model::Environment environment = model::Environment::sea_level_still_air();
   // Airspeed and altitude are DECLARED, not solved: they are the flight
   // condition the trim is asked about, not an output of it.
   const double airspeed = context.input->number_at("airspeed_m_s", 0.0);
   const double altitude = context.input->number_at("altitude_m", 0.0);
+  const double delta_isa_k = context.input->number_at("delta_isa_k", 0.0);
   if (!(airspeed >= 0.0)) {
     throw std::runtime_error(
         "trim.helicopter: airspeed_m_s must be non-negative. A trim is stated in wind axes, and a "
         "negative airspeed is a heading, not a speed");
+  }
+  if (!std::isfinite(altitude)) {
+    throw std::runtime_error("trim.helicopter: altitude_m must be finite");
+  }
+  if (!std::isfinite(delta_isa_k)) {
+    throw std::runtime_error("trim.helicopter: delta_isa_k must be finite");
+  }
+
+  model::Environment environment;
+  try {
+    environment = model::Environment::at_geometric_altitude(altitude, delta_isa_k);
+  } catch (const std::exception& error) {
+    throw std::runtime_error("trim.helicopter: cannot construct the declared atmosphere at "
+                             + fixed(altitude, 3) + " m: " + error.what());
   }
 
   // A declared steady wind, which the trim sees as a shift of the air-relative
@@ -177,9 +355,8 @@ Artifact trim_helicopter_capability(const StageContext& context) {
     holding(i) = auxiliary(model::kCollectivePosition + i);
   }
 
-  const auto breakdown =
-      heli.breakdown(model::VehicleModel::rigid_body_part(result.extended_state), auxiliary,
-                     holding, environment);
+  const auto breakdown = heli.breakdown(
+      model::VehicleModel::rigid_body_part(result.extended_state), auxiliary, holding, environment);
 
   Artifact artifact;
   artifact.kind = "helicopter_trim";
@@ -203,12 +380,14 @@ Artifact trim_helicopter_capability(const StageContext& context) {
           << scientific(result.residual_norm) << " after " << result.iterations
           << " iterations, Jacobian rank " << result.jacobian_rank << "/" << result.unknown_count
           << ", condition " << scientific(result.jacobian_condition_number);
+  summary << "; atmosphere altitude " << fixed(environment.atmospheric_altitude_m, 1)
+          << " m, density " << fixed(environment.density_kg_m3, 4) << " kg/m^3";
   if (result.envelope.outside) {
     summary << "; ENVELOPE: " << result.envelope.reason;
   }
   artifact.summary = summary.str();
-  artifact.payload = HelicopterTrimArtifact{subject.model, result, environment, std::move(holding),
-                                            breakdown};
+  artifact.payload =
+      HelicopterTrimArtifact{subject.model, result, environment, std::move(holding), breakdown};
   return artifact;
 }
 
@@ -224,8 +403,10 @@ Artifact linearize_vehicle_capability(const StageContext& context) {
   options.equilibrium_tolerance =
       context.input->number_at("equilibrium_tolerance", options.equilibrium_tolerance);
 
-  const auto full = linearize::linearize_vehicle(*subject.model, subject.result.extended_state,
-                                                 subject.holding_controls, subject.environment,
+  const auto full = linearize::linearize_vehicle(*subject.model,
+                                                 subject.result.extended_state,
+                                                 subject.holding_controls,
+                                                 subject.environment,
                                                  options);
   const bool reduce = context.input->bool_at("drop_position_and_heading", true);
   const auto linearisation = reduce ? full.reduced() : full;
@@ -248,8 +429,8 @@ Artifact linearize_vehicle_capability(const StageContext& context) {
                "its true value";
   }
   artifact.summary = summary.str();
-  artifact.payload = linearisation.to_linear_system(
-      "Souxmar helicopter linearised about its declared trim");
+  artifact.payload =
+      linearisation.to_linear_system("Souxmar helicopter linearised about its declared trim");
   return artifact;
 }
 
@@ -281,8 +462,10 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   } else if (method_name == "trapezoidal") {
     method = numerics::IntegrationMethod::TrapezoidalFixed;
   } else {
-    throw std::runtime_error("sim.helicopter: method must be 'rk4', 'implicit_euler' or "
-                             "'trapezoidal'; got '" + method_name + "'");
+    throw std::runtime_error(
+        "sim.helicopter: method must be 'rk4', 'implicit_euler' or "
+        "'trapezoidal'; got '"
+        + method_name + "'");
   }
 
   // A commanded step on one control, from the trim. Declared as a control NAME
@@ -297,8 +480,9 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
     const auto it = std::find(names.begin(), names.end(), name);
     if (it == names.end()) {
       std::ostringstream message;
-      message << "sim.helicopter: step_control '" << name << "' is not a control of this model. It "
-                                                             "has {";
+      message << "sim.helicopter: step_control '" << name
+              << "' is not a control of this model. It "
+                 "has {";
       for (std::size_t i = 0; i < names.size(); ++i) {
         message << (i ? ", " : "") << names[i];
       }
@@ -309,10 +493,6 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
     step_description = name + " stepped by " + fixed(size * kDegreesPerRadian, 3) + " deg";
   }
 
-  const auto derivative = [&](double, const Eigen::VectorXd& x) {
-    return Eigen::VectorXd(heli.derivative(x, commands, subject.environment));
-  };
-
   numerics::IntegrationOptions options;
   options.method = method;
   options.step_s = step_s;
@@ -320,9 +500,105 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   options.sample_stride = stride;
   options.newton_iterations = context.input->integer_at("newton_iterations", 3);
 
-  const auto result =
-      numerics::integrate(derivative, subject.result.extended_state, 0.0, options,
-                          &model::VehicleModel::project, heli.state_bounds());
+  // A run owns a mutable copy of the model when it has scheduled failures.
+  // Healthy runs still use one integration call, preserving their historical
+  // operation ordering and bit pattern. Event times are required to lie on
+  // the fixed-step lattice; an event between steps is refused instead of
+  // silently moving the failure in time.
+  model::HelicopterModel simulation_model = *subject.model;
+  const auto derivative = [&](double, const Eigen::VectorXd& x) {
+    return Eigen::VectorXd(simulation_model.derivative(x, commands, subject.environment));
+  };
+  const std::vector<FailureEvent> failure_events =
+      parse_failure_events(context, heli, step_s, steps);
+
+  numerics::IntegrationResult result;
+  std::vector<std::string> applied_failure_events;
+  if (failure_events.empty()) {
+    result = numerics::integrate(derivative,
+                                 subject.result.extended_state,
+                                 0.0,
+                                 options,
+                                 &model::VehicleModel::project,
+                                 simulation_model.state_bounds());
+  } else {
+    std::vector<double> all_times{0.0};
+    std::vector<Eigen::VectorXd> all_states{subject.result.extended_state};
+    Eigen::VectorXd state = subject.result.extended_state;
+    int current_step = 0;
+    bool completed = true;
+    numerics::TerminationReason reason = numerics::TerminationReason::Completed;
+    std::string detail;
+    int steps_taken = 0;
+    long long newton_iterations = 0;
+
+    const auto integrate_to = [&](int target_step) {
+      numerics::IntegrationOptions segment = options;
+      segment.step_count = target_step - current_step;
+      segment.sample_stride = 1;
+      const auto segment_result = numerics::integrate(derivative,
+                                                      state,
+                                                      static_cast<double>(current_step) * step_s,
+                                                      segment,
+                                                      &model::VehicleModel::project,
+                                                      simulation_model.state_bounds());
+      newton_iterations += segment_result.newton_iterations_performed;
+      for (std::size_t i = 1; i < segment_result.trajectory.states.size(); ++i) {
+        all_times.push_back(segment_result.trajectory.times_s[i]);
+        all_states.push_back(segment_result.trajectory.states[i]);
+      }
+      state = all_states.back();
+      steps_taken = current_step + segment_result.steps_taken;
+      if (!segment_result.completed()) {
+        completed = false;
+        reason = segment_result.reason;
+        detail = segment_result.detail;
+        return false;
+      }
+      current_step = target_step;
+      steps_taken = current_step;
+      return true;
+    };
+
+    std::size_t next_event = 0;
+    while (next_event < failure_events.size() && completed) {
+      const int target_step = failure_events[next_event].step;
+      if (target_step < current_step || !integrate_to(target_step)) {
+        break;
+      }
+      while (next_event < failure_events.size() && failure_events[next_event].step == target_step) {
+        applied_failure_events.push_back(
+            apply_failure_event(failure_events[next_event], simulation_model, state));
+        all_states.back() = state;
+        ++next_event;
+      }
+    }
+    if (completed && current_step < steps) {
+      (void)integrate_to(steps);
+    }
+
+    result.method = method;
+    result.reason = reason;
+    result.detail = detail;
+    result.steps_taken = steps_taken;
+    result.newton_iterations_performed = newton_iterations;
+    result.termination_time_s = all_times.back();
+    result.trajectory.step_s = step_s;
+    result.trajectory.step_count = steps_taken;
+    result.trajectory.sample_stride = stride;
+    const auto has_event_at_step = [&failure_events](int step) {
+      return std::any_of(failure_events.begin(),
+                         failure_events.end(),
+                         [step](const FailureEvent& event) { return event.step == step; });
+    };
+    for (std::size_t i = 0; i < all_states.size(); ++i) {
+      const int step = static_cast<int>(i);
+      if (i == 0 || i + 1 == all_states.size() || step % stride == 0 || has_event_at_step(step)) {
+        result.trajectory.times_s.push_back(all_times[i]);
+        result.trajectory.states.push_back(all_states[i]);
+      }
+    }
+  }
 
   HelicopterTrajectoryArtifact trajectory;
   trajectory.model = subject.model;
@@ -334,13 +610,15 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   trajectory.termination_detail = result.detail;
   trajectory.step_s = step_s;
   trajectory.steps_taken = result.steps_taken;
+  trajectory.failure_events = std::move(applied_failure_events);
 
   for (const auto& state : trajectory.states) {
     const core::State rigid = model::VehicleModel::rigid_body_part(state);
-    const Eigen::VectorXd auxiliary = heli.auxiliary_part(state);
+    const Eigen::VectorXd auxiliary = simulation_model.auxiliary_part(state);
     trajectory.outputs.push_back(
-        heli.outputs(rigid, auxiliary, commands, subject.environment));
-    const auto envelope = heli.envelope(rigid, auxiliary, commands, subject.environment);
+        simulation_model.outputs(rigid, auxiliary, commands, subject.environment));
+    const auto envelope =
+        simulation_model.envelope(rigid, auxiliary, commands, subject.environment);
     if (envelope.outside) {
       ++trajectory.envelope_departures;
       if (envelope.worst_departure > trajectory.worst_envelope.worst_departure) {
@@ -369,6 +647,12 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   if (trajectory.envelope_departures > 0) {
     summary << "; OUTSIDE THE DECLARED ENVELOPE at " << trajectory.envelope_departures << " of "
             << trajectory.states.size() << " samples: " << trajectory.worst_envelope.reason;
+  }
+  if (!trajectory.failure_events.empty()) {
+    summary << "; applied " << trajectory.failure_events.size() << " scheduled failure event(s)";
+    for (const auto& event : trajectory.failure_events) {
+      summary << " [" << event << "]";
+    }
   }
   artifact.summary = summary.str();
   artifact.payload = std::move(trajectory);
@@ -407,6 +691,17 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   }
   context.write_output(path, out.str());
 
+  std::string event_path;
+  if (!run.failure_events.empty()) {
+    event_path = path + ".events.txt";
+    std::ostringstream events;
+    events << "# Applied failure events\n";
+    for (const auto& event : run.failure_events) {
+      events << event << "\n";
+    }
+    context.write_output(event_path, events.str());
+  }
+
   Artifact artifact;
   artifact.kind = "report";
   std::ostringstream summary;
@@ -415,12 +710,13 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   if (run.reason != numerics::TerminationReason::Completed) {
     summary << "; the run it records did NOT complete: " << run.termination_detail;
   }
+  if (!event_path.empty()) {
+    summary << "; applied failure events in " << event_path;
+  }
   artifact.summary = summary.str();
   artifact.payload = std::string(path);
   return artifact;
 }
-
-
 
 // ---------------------------------------------------------------------------
 // analyze.nonlinear_agreement
@@ -438,16 +734,18 @@ Artifact nonlinear_agreement_capability(const StageContext& context) {
   const auto& subject = trim_upstream.payload_as<HelicopterTrimArtifact>("helicopter_trim");
 
   linearize::VehicleLinearisationOptions linear_options;
-  const auto linearisation = linearize::linearize_vehicle(
-      *subject.model, subject.result.extended_state, subject.holding_controls,
-      subject.environment, linear_options);
+  const auto linearisation = linearize::linearize_vehicle(*subject.model,
+                                                          subject.result.extended_state,
+                                                          subject.holding_controls,
+                                                          subject.environment,
+                                                          linear_options);
 
   // The perturbation direction is declared by STATE NAME, so the study says
   // which coordinate it is disturbing rather than indexing a vector whose layout
   // it would have to know.
   const std::string state_name = context.input->string_at("perturb_state");
-  const auto it = std::find(linearisation.state_names.begin(), linearisation.state_names.end(),
-                            state_name);
+  const auto it =
+      std::find(linearisation.state_names.begin(), linearisation.state_names.end(), state_name);
   if (it == linearisation.state_names.end()) {
     std::ostringstream message;
     message << "analyze.nonlinear_agreement: '" << state_name
@@ -526,6 +824,14 @@ void write_trim_section(std::ostream& out, const HelicopterTrimArtifact& trim) {
   out << "**" << heli.description() << "**\n\n";
   out << "Source: " << heli.citation << "\n\n";
 
+  out << "Atmosphere: geometric altitude " << fixed(trim.environment.atmospheric_altitude_m, 3)
+      << " m, ISA temperature offset " << fixed(trim.environment.delta_isa_k, 3) << " K, density "
+      << fixed(trim.environment.density_kg_m3, 6) << " kg/m^3, pressure "
+      << fixed(trim.environment.pressure_pa, 1) << " Pa, temperature "
+      << fixed(trim.environment.temperature_k, 3)
+      << " K. The atmosphere is frozen at this trim condition during downstream simulation; "
+         "`altitude_m` in the trajectory remains height above the NED origin.\n\n";
+
   out << "| Quantity | Value | Unit |\n|---|---|---|\n";
   for (std::size_t i = 0; i < trim.result.unknown_names.size(); ++i) {
     const std::string& name = trim.result.unknown_names[i];
@@ -546,20 +852,21 @@ void write_trim_section(std::ostream& out, const HelicopterTrimArtifact& trim) {
 
   out << "Main-rotor C_T/sigma " << fixed(trim.breakdown.main.thrust_coefficient_solidity, 5)
       << ", induced velocity " << fixed(trim.breakdown.main.induced_velocity_m_s, 4)
-      << " m/s, advance ratio " << fixed(trim.breakdown.main.advance_ratio, 5)
-      << ". Rotor speed " << fixed(trim.breakdown.rotor_speed_rad_s, 4)
-      << " rad/s, engine torque " << fixed(trim.breakdown.engine_torque_n_m, 1) << " N m.\n\n";
+      << " m/s, advance ratio " << fixed(trim.breakdown.main.advance_ratio, 5) << ". Rotor speed "
+      << fixed(trim.breakdown.rotor_speed_rad_s, 4) << " rad/s, engine torque "
+      << fixed(trim.breakdown.engine_torque_n_m, 1) << " N m.\n\n";
 
   // THE ANTI-TORQUE BALANCE, stated as a number rather than asserted in prose.
-  out << "Yaw-moment residual at the trim: " << scientific(trim.breakdown.anti_torque_residual_n_m, 3)
+  out << "Yaw-moment residual at the trim: "
+      << scientific(trim.breakdown.anti_torque_residual_n_m, 3)
       << " N m. That residual vanishing IS the anti-torque balance: the tail rotor's thrust at its "
       << "moment arm against the main rotor's shaft torque.\n\n";
 
   out << "Solved in " << trim.result.iterations << " iterations to a residual norm of "
       << scientific(trim.result.residual_norm, 3) << " against a budget of "
       << scientific(trim.result.residual_tolerance, 3) << ". Jacobian rank "
-      << trim.result.jacobian_rank << " of " << trim.result.unknown_count
-      << ", condition number " << scientific(trim.result.jacobian_condition_number, 3) << ".\n\n";
+      << trim.result.jacobian_rank << " of " << trim.result.unknown_count << ", condition number "
+      << scientific(trim.result.jacobian_condition_number, 3) << ".\n\n";
 
   if (trim.result.envelope.outside) {
     out << "**Outside the declared envelope.** " << trim.result.envelope.reason << "\n\n";
@@ -587,6 +894,13 @@ void write_trajectory_section(std::ostream& out, const HelicopterTrajectoryArtif
   if (run.envelope_departures > 0) {
     out << "**Outside the declared envelope at " << run.envelope_departures << " of "
         << run.times_s.size() << " samples.** Worst: " << run.worst_envelope.reason << "\n\n";
+  }
+  if (!run.failure_events.empty()) {
+    out << "Applied failure events, in deterministic declaration order at each time:\n\n";
+    for (const auto& event : run.failure_events) {
+      out << "- " << event << "\n";
+    }
+    out << "\n";
   }
 
   if (!run.times_s.empty()) {
@@ -625,9 +939,7 @@ bool write_helicopter_section(std::ostream& out, const Artifact& artifact) {
   return false;
 }
 
-namespace {
-
-}  // namespace
+namespace {}  // namespace
 
 void register_helicopter_capabilities(Registry& registry) {
   registry.add(Capability{
@@ -649,7 +961,12 @@ void register_helicopter_capabilities(Registry& registry) {
       "helicopter_trim",
       Capability::State::ImplementedUnvalidated,
       trim_helicopter_capability,
-      {"helicopter", "airspeed_m_s", "altitude_m", "wind_ned_m_s", "iterations",
+      {"helicopter",
+       "airspeed_m_s",
+       "altitude_m",
+       "delta_isa_k",
+       "wind_ned_m_s",
+       "iterations",
        "residual_tolerance"}});
 
   registry.add(Capability{
@@ -670,8 +987,15 @@ void register_helicopter_capabilities(Registry& registry) {
       "helicopter_trajectory",
       Capability::State::ImplementedUnvalidated,
       simulate_helicopter_capability,
-      {"trim", "step_s", "steps", "sample_stride", "method", "newton_iterations", "step_control",
-       "step_size_rad"}});
+      {"trim",
+       "step_s",
+       "steps",
+       "sample_stride",
+       "method",
+       "newton_iterations",
+       "step_control",
+       "step_size_rad",
+       "failure_events"}});
 
   registry.add(Capability{
       "analyze.nonlinear_agreement",

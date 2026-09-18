@@ -90,40 +90,45 @@ int HelicopterModel::auxiliary_state_count() const {
 }
 
 std::vector<std::string> HelicopterModel::state_names() const {
-  return {"position_north_m",
-          "position_east_m",
-          "position_down_m",
-          "velocity_u_m_s",
-          "velocity_v_m_s",
-          "velocity_w_m_s",
-          "quaternion_w",
-          "quaternion_x",
-          "quaternion_y",
-          "quaternion_z",
-          "roll_rate_rad_s",
-          "pitch_rate_rad_s",
-          "yaw_rate_rad_s",
-          "main_rotor_speed_rad_s",
-          "main_inflow_ratio",
-          "tail_inflow_ratio",
-          "collective_rad",
-          "longitudinal_cyclic_rad",
-          "lateral_cyclic_rad",
-          "pedal_rad",
+  return {"position_north_m",   "position_east_m",
+          "position_down_m",    "velocity_u_m_s",
+          "velocity_v_m_s",     "velocity_w_m_s",
+          "quaternion_w",       "quaternion_x",
+          "quaternion_y",       "quaternion_z",
+          "roll_rate_rad_s",    "pitch_rate_rad_s",
+          "yaw_rate_rad_s",     "main_rotor_speed_rad_s",
+          "main_inflow_ratio",  "tail_inflow_ratio",
+          "collective_rad",     "longitudinal_cyclic_rad",
+          "lateral_cyclic_rad", "pedal_rad",
           "engine_torque_n_m"};
 }
 
 std::vector<std::string> HelicopterModel::control_names() const {
-  return {"collective_command_rad", "longitudinal_cyclic_command_rad",
-          "lateral_cyclic_command_rad", "pedal_command_rad"};
+  return {"collective_command_rad",
+          "longitudinal_cyclic_command_rad",
+          "lateral_cyclic_command_rad",
+          "pedal_command_rad"};
 }
 
 std::vector<std::string> HelicopterModel::output_names() const {
-  return {"position_north_m", "position_east_m", "altitude_m",   "velocity_u_m_s",
-          "velocity_v_m_s",   "velocity_w_m_s",  "roll_rad",     "pitch_rad",
-          "yaw_rad",          "roll_rate_rad_s", "pitch_rate_rad_s", "yaw_rate_rad_s",
-          "airspeed_m_s",     "main_rotor_speed_rad_s", "main_thrust_n", "tail_thrust_n",
-          "total_power_w"};
+  return {"position_north_m",
+          "position_east_m",
+          "altitude_m",
+          "velocity_u_m_s",
+          "velocity_v_m_s",
+          "velocity_w_m_s",
+          "roll_rad",
+          "pitch_rad",
+          "yaw_rad",
+          "roll_rate_rad_s",
+          "pitch_rate_rad_s",
+          "yaw_rate_rad_s",
+          "airspeed_m_s",
+          "main_rotor_speed_rad_s",
+          "main_thrust_n",
+          "tail_thrust_n",
+          "total_power_w",
+          "atmospheric_altitude_m"};
 }
 
 sim::MassProperties HelicopterModel::mass_properties(const Eigen::VectorXd& /*auxiliary*/) const {
@@ -155,17 +160,19 @@ Eigen::VectorXd HelicopterModel::initial_auxiliary(const Eigen::VectorXd& contro
   const double tip = main_rotor.radius_m * drivetrain.reference_rotor_speed_rad_s;
   if (tip > 0.0) {
     const double hover_power =
-        weight_n * rotor::hover_induced_velocity_m_s(main_rotor, weight_n, environment.density_kg_m3)
+        weight_n
+        * rotor::hover_induced_velocity_m_s(main_rotor, weight_n, environment.density_kg_m3)
         * main_rotor.induced_power_factor;
-    auxiliary(kEngineTorque) =
-        saturate(hover_power / drivetrain.reference_rotor_speed_rad_s
-                     / std::max(drivetrain.transmission_efficiency, 1.0e-6),
-                 drivetrain.minimum_engine_torque_n_m, drivetrain.maximum_engine_torque_n_m);
+    auxiliary(kEngineTorque) = saturate(hover_power / drivetrain.reference_rotor_speed_rad_s
+                                            / std::max(drivetrain.transmission_efficiency, 1.0e-6),
+                                        drivetrain.minimum_engine_torque_n_m,
+                                        drivetrain.maximum_engine_torque_n_m);
   }
   if (controls.size() == kHelicopterControlCount) {
     for (int i = 0; i < kHelicopterControlCount; ++i) {
       auxiliary(kCollectivePosition + i) =
-          saturate(controls(i), actuators[static_cast<std::size_t>(i)].minimum_rad,
+          saturate(controls(i),
+                   actuators[static_cast<std::size_t>(i)].minimum_rad,
                    actuators[static_cast<std::size_t>(i)].maximum_rad);
     }
   }
@@ -197,8 +204,8 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
   main_controls.collective_rad = auxiliary(kCollectivePosition);
   main_controls.longitudinal_cyclic_rad = auxiliary(kLongitudinalCyclicPosition);
   main_controls.lateral_cyclic_rad = auxiliary(kLateralCyclicPosition);
-  out.main = rotor::solve_rotor(main_rotor, main_state, main_controls, main_hub_velocity, rate,
-                                environment.density_kg_m3);
+  out.main = rotor::solve_rotor(
+      main_rotor, main_state, main_controls, main_hub_velocity, rate, environment.density_kg_m3);
 
   // ---- tail rotor -----------------------------------------------------
   const Eigen::Vector3d tail_hub_velocity =
@@ -208,8 +215,8 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
   tail_state.inflow_ratio = auxiliary(kTailInflowRatio);
   rotor::RotorControls tail_controls;
   tail_controls.collective_rad = pedal_to_tail_collective * auxiliary(kPedalPosition);
-  out.tail = rotor::solve_rotor(tail_rotor, tail_state, tail_controls, tail_hub_velocity, rate,
-                                environment.density_kg_m3);
+  out.tail = rotor::solve_rotor(
+      tail_rotor, tail_state, tail_controls, tail_hub_velocity, rate, environment.density_kg_m3);
 
   // Blockage and the failure multiplier scale the tail's FORCE and the moment
   // that force makes, but not its shaft torque: a blocked or damaged tail rotor
@@ -239,11 +246,11 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
       out.fuselage.force_body_n += Eigen::Vector3d(0.0, 0.0, -lift);
     }
     if (airframe.fuselage_pitching_moment_vs_alpha.has_value()) {
-      out.fuselage.moment_cg_body_n_m += Eigen::Vector3d(
-          0.0,
-          dynamic_pressure * airframe.flat_plate_area_m2 * main_rotor.radius_m
-              * airframe.fuselage_pitching_moment_vs_alpha->at(alpha),
-          0.0);
+      out.fuselage.moment_cg_body_n_m +=
+          Eigen::Vector3d(0.0,
+                          dynamic_pressure * airframe.flat_plate_area_m2 * main_rotor.radius_m
+                              * airframe.fuselage_pitching_moment_vs_alpha->at(alpha),
+                          0.0);
     }
     out.fuselage.moment_cg_body_n_m +=
         airframe.cg_to_fuselage_reference_body_m.cross(out.fuselage.force_body_n);
@@ -258,14 +265,15 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
   if (airframe.horizontal_tail_area_m2 > 0.0 && speed > 1.0e-6) {
     const Eigen::Vector3d tail_velocity =
         velocity + rate.cross(airframe.cg_to_horizontal_tail_body_m)
-        + Eigen::Vector3d(0.0, 0.0,
-                          airframe.horizontal_tail_downwash_factor * out.main.induced_velocity_m_s);
+        + Eigen::Vector3d(
+            0.0, 0.0, airframe.horizontal_tail_downwash_factor * out.main.induced_velocity_m_s);
     const double local_alpha =
         core::angle_of_attack(tail_velocity) + airframe.horizontal_tail_incidence_rad;
     const double local_q = 0.5 * environment.density_kg_m3 * tail_velocity.squaredNorm();
-    const double lift = local_q * airframe.horizontal_tail_area_m2
-                        * surface_coefficient(airframe.horizontal_tail_lift_slope, local_alpha,
-                                              airframe.surface_stall_angle_rad);
+    const double lift =
+        local_q * airframe.horizontal_tail_area_m2
+        * surface_coefficient(
+            airframe.horizontal_tail_lift_slope, local_alpha, airframe.surface_stall_angle_rad);
     out.horizontal_tail.force_body_n = Eigen::Vector3d(0.0, 0.0, -lift);
     out.horizontal_tail.moment_cg_body_n_m =
         airframe.cg_to_horizontal_tail_body_m.cross(out.horizontal_tail.force_body_n);
@@ -278,9 +286,10 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
     const double local_beta =
         core::sideslip_angle(tail_velocity) + airframe.vertical_tail_incidence_rad;
     const double local_q = 0.5 * environment.density_kg_m3 * tail_velocity.squaredNorm();
-    const double side = local_q * airframe.vertical_tail_area_m2
-                        * surface_coefficient(airframe.vertical_tail_side_slope, local_beta,
-                                              airframe.surface_stall_angle_rad);
+    const double side =
+        local_q * airframe.vertical_tail_area_m2
+        * surface_coefficient(
+            airframe.vertical_tail_side_slope, local_beta, airframe.surface_stall_angle_rad);
     out.vertical_tail.force_body_n = Eigen::Vector3d(0.0, -side, 0.0);
     out.vertical_tail.moment_cg_body_n_m =
         airframe.cg_to_vertical_tail_body_m.cross(out.vertical_tail.force_body_n);
@@ -299,22 +308,22 @@ HelicopterModel::Breakdown HelicopterModel::breakdown(const core::State& state,
   // demand. Proportional on the speed error plus a feed-forward of the demand
   // itself, which is what a real turboshaft's fuel control does and what makes
   // the steady droop finite rather than growing with load.
-  const double demanded =
-      out.main.torque_n_m + drivetrain.tail_gear_ratio * out.tail.torque_n_m
-      + drivetrain.accessory_torque_n_m;
+  const double demanded = out.main.torque_n_m + drivetrain.tail_gear_ratio * out.tail.torque_n_m
+                          + drivetrain.accessory_torque_n_m;
   const double error = drivetrain.reference_rotor_speed_rad_s - omega;
   out.governor_requested_torque_n_m =
       failures.engine_available_fraction
       * saturate(demanded / std::max(drivetrain.transmission_efficiency, 1.0e-6)
                      + drivetrain.governor_proportional_n_m_s * error,
-                 drivetrain.minimum_engine_torque_n_m, drivetrain.maximum_engine_torque_n_m);
+                 drivetrain.minimum_engine_torque_n_m,
+                 drivetrain.maximum_engine_torque_n_m);
   // THE TORQUE THE ENGINE IS ACTUALLY DELIVERING is the state, not the request.
   // A failed engine delivers none of it whatever the state says, which is what
   // makes a flameout instantaneous while a governor correction is not.
-  out.engine_torque_n_m =
-      failures.engine_available_fraction
-      * saturate(auxiliary(kEngineTorque), drivetrain.minimum_engine_torque_n_m,
-                 drivetrain.maximum_engine_torque_n_m);
+  out.engine_torque_n_m = failures.engine_available_fraction
+                          * saturate(auxiliary(kEngineTorque),
+                                     drivetrain.minimum_engine_torque_n_m,
+                                     drivetrain.maximum_engine_torque_n_m);
   out.governor_error_rad_s = error;
   out.total_power_w = out.main.power_w + out.tail.power_w;
   out.anti_torque_residual_n_m = out.total.moment_cg_body_n_m.z();
@@ -342,13 +351,12 @@ Eigen::VectorXd HelicopterModel::auxiliary_derivative(const core::State& state,
   // The tail's torque is referred to the main shaft through the gear ratio.
   // This is the equation that makes collective-induced droop appear, and it is
   // why rotor speed is a STATE and not a constant.
-  const double inertia = main_rotor.polar_inertia_kg_m2
-                         + drivetrain.tail_gear_ratio * drivetrain.tail_gear_ratio
-                               * tail_rotor.polar_inertia_kg_m2;
+  const double inertia =
+      main_rotor.polar_inertia_kg_m2
+      + drivetrain.tail_gear_ratio * drivetrain.tail_gear_ratio * tail_rotor.polar_inertia_kg_m2;
   if (inertia > 0.0) {
     const double net = drivetrain.transmission_efficiency * parts.engine_torque_n_m
-                       - parts.main.torque_n_m
-                       - drivetrain.tail_gear_ratio * parts.tail.torque_n_m
+                       - parts.main.torque_n_m - drivetrain.tail_gear_ratio * parts.tail.torque_n_m
                        - drivetrain.accessory_torque_n_m;
     rate(kMainRotorSpeed) = net / inertia;
   }
@@ -384,9 +392,8 @@ Eigen::VectorXd HelicopterModel::auxiliary_derivative(const core::State& state,
       continue;
     }
     const double commanded = saturate(controls(i), limits.minimum_rad, limits.maximum_rad);
-    double demanded_rate = limits.time_constant_s > 0.0
-                               ? (commanded - position) / limits.time_constant_s
-                               : 0.0;
+    double demanded_rate =
+        limits.time_constant_s > 0.0 ? (commanded - position) / limits.time_constant_s : 0.0;
     if (limits.rate_limit_rad_s > 0.0) {
       demanded_rate = saturate(demanded_rate, -limits.rate_limit_rad_s, limits.rate_limit_rad_s);
     }
@@ -476,13 +483,13 @@ Eigen::VectorXd HelicopterModel::outputs(const core::State& state,
                                          const Environment& environment) const {
   const Breakdown parts = breakdown(state, auxiliary, controls, environment);
   const core::EulerAngles euler = core::euler_from_quaternion(state.attitude_body_to_ned);
-  Eigen::VectorXd out(17);
+  Eigen::VectorXd out(18);
   out << state.position_ned_m.x(), state.position_ned_m.y(), -state.position_ned_m.z(),
       state.velocity_body_m_s.x(), state.velocity_body_m_s.y(), state.velocity_body_m_s.z(),
       euler.roll_rad, euler.pitch_rad, euler.yaw_rad, state.angular_rate_body_rad_s.x(),
       state.angular_rate_body_rad_s.y(), state.angular_rate_body_rad_s.z(),
       core::airspeed(state.velocity_body_m_s), auxiliary(kMainRotorSpeed), parts.main.thrust_n,
-      parts.tail.thrust_n, parts.total_power_w;
+      parts.tail.thrust_n, parts.total_power_w, environment.atmospheric_altitude_m;
   return out;
 }
 
@@ -492,14 +499,14 @@ numerics::StateBounds HelicopterModel::state_bounds() const {
   // "This is not a helicopter any more" limits, not envelope limits. A run that
   // reaches any of these has diverged, and saying so beats returning a
   // plausible CSV of a divergence.
-  limits << 1.0e6, 1.0e6, 1.0e6,            // position, m
-      3.0e2, 3.0e2, 3.0e2,                  // body velocity, m/s (600 kt is not a helicopter)
-      2.0, 2.0, 2.0, 2.0,                   // quaternion, renormalised every step
-      2.0e1, 2.0e1, 2.0e1,                  // body rates, rad/s (1100 deg/s)
+  limits << 1.0e6, 1.0e6, 1.0e6,  // position, m
+      3.0e2, 3.0e2, 3.0e2,        // body velocity, m/s (600 kt is not a helicopter)
+      2.0, 2.0, 2.0, 2.0,         // quaternion, renormalised every step
+      2.0e1, 2.0e1, 2.0e1,        // body rates, rad/s (1100 deg/s)
       4.0 * std::max(drivetrain.reference_rotor_speed_rad_s, 1.0),  // rotor speed, rad/s
-      5.0, 5.0,                             // inflow ratios, dimensionless
-      3.14, 3.14, 3.14, 3.14,               // actuator positions, rad
-      4.0 * std::max(drivetrain.maximum_engine_torque_n_m, 1.0);  // engine torque, N m
+      5.0, 5.0,                                                     // inflow ratios, dimensionless
+      3.14, 3.14, 3.14, 3.14,                                       // actuator positions, rad
+      4.0 * std::max(drivetrain.maximum_engine_torque_n_m, 1.0);    // engine torque, N m
   return numerics::StateBounds(names, limits);
 }
 

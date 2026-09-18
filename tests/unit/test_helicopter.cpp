@@ -8,6 +8,7 @@
 // declared trim problem, neither could be written — the only rotary-wing trim
 // refused anything but exactly four rotors, and rotor force had no direction.
 
+#include "galata/core/atmosphere.hpp"
 #include "galata/model/helicopter.hpp"
 #include "galata/trim/problem.hpp"
 
@@ -18,20 +19,20 @@
 #include <stdexcept>
 #include <string>
 
-using galata::core::State;
 using galata::core::identity_attitude;
+using galata::core::State;
 using galata::model::Environment;
 using galata::model::HelicopterModel;
-using galata::model::VehicleModel;
 using galata::model::kCollectiveCommand;
 using galata::model::kCollectivePosition;
 using galata::model::kMainRotorSpeed;
 using galata::model::kPedalCommand;
 using galata::model::kPedalPosition;
 using galata::model::load_helicopter;
-using galata::trim::TrimCondition;
+using galata::model::VehicleModel;
 using galata::trim::helicopter_trim_problem;
 using galata::trim::solve_trim;
+using galata::trim::TrimCondition;
 
 namespace {
 
@@ -67,6 +68,23 @@ TEST(Helicopter, LoadsFromYamlAndValidates) {
   EXPECT_EQ(heli.auxiliary_state_count(), 8);
   EXPECT_EQ(heli.control_count(), 4);
   EXPECT_FALSE(heli.citation.empty());
+}
+
+TEST(HelicopterEnvironment, GeometricAltitudeUsesTheAtmosphereModule) {
+  const auto environment = Environment::at_geometric_altitude(3000.0);
+  const auto atmosphere = galata::core::isa(3000.0);
+
+  EXPECT_DOUBLE_EQ(environment.atmospheric_altitude_m, 3000.0);
+  EXPECT_DOUBLE_EQ(environment.delta_isa_k, 0.0);
+  EXPECT_DOUBLE_EQ(environment.density_kg_m3, atmosphere.density_kg_m3);
+  EXPECT_DOUBLE_EQ(environment.pressure_pa, atmosphere.pressure_pa);
+  EXPECT_DOUBLE_EQ(environment.temperature_k, atmosphere.temperature_k);
+  EXPECT_DOUBLE_EQ(environment.speed_of_sound_m_s, atmosphere.speed_of_sound_m_s);
+  EXPECT_DOUBLE_EQ(environment.gravity_ned_m_s2.z(), galata::core::ussa1976::kStandardGravity);
+}
+
+TEST(HelicopterEnvironment, ImpossibleAtmosphericAltitudeIsRefused) {
+  EXPECT_THROW((void)Environment::at_geometric_altitude(100000.0), std::out_of_range);
 }
 
 TEST(Helicopter, TheControlVocabularyIsCollectiveCyclicAndPedal) {
@@ -180,8 +198,9 @@ TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   ASSERT_EQ(problem.unknowns.size(), 9u);
   ASSERT_EQ(problem.residuals.size(), 9u);
   const auto has_unknown = [&](const std::string& name) {
-    return std::any_of(problem.unknowns.begin(), problem.unknowns.end(),
-                       [&](const auto& u) { return u.name == name; });
+    return std::any_of(problem.unknowns.begin(), problem.unknowns.end(), [&](const auto& u) {
+      return u.name == name;
+    });
   };
   EXPECT_TRUE(has_unknown("collective_rad"));
   EXPECT_TRUE(has_unknown("pedal_rad"));
@@ -205,6 +224,32 @@ TEST(HelicopterTrim, SolvesHoverForItsDeclaredUnknowns) {
   EXPECT_LT(result.jacobian_condition_number, 1.0e4);
   EXPECT_TRUE(result.unconstrained_unknowns.empty());
   EXPECT_TRUE(result.out_of_bounds_unknowns.empty());
+}
+
+TEST(HelicopterTrim, AltitudeChangesAirDensityAndTheTrimPower) {
+  const auto heli = souxmar();
+  const auto sea_level = Environment::at_geometric_altitude(0.0);
+  const auto high_altitude = Environment::at_geometric_altitude(3000.0);
+
+  const auto sea_trim =
+      solve_trim(heli, helicopter_trim_problem(heli), hover_condition(heli, sea_level));
+  const auto high_trim =
+      solve_trim(heli, helicopter_trim_problem(heli), hover_condition(heli, high_altitude));
+  ASSERT_TRUE(sea_trim.converged);
+  ASSERT_TRUE(high_trim.converged);
+
+  const auto sea_parts = heli.breakdown(VehicleModel::rigid_body_part(sea_trim.extended_state),
+                                        heli.auxiliary_part(sea_trim.extended_state),
+                                        sea_trim.controls,
+                                        sea_level);
+  const auto high_parts = heli.breakdown(VehicleModel::rigid_body_part(high_trim.extended_state),
+                                         heli.auxiliary_part(high_trim.extended_state),
+                                         high_trim.controls,
+                                         high_altitude);
+
+  EXPECT_LT(high_altitude.density_kg_m3, sea_level.density_kg_m3);
+  EXPECT_NE(high_parts.main.power_w, sea_parts.main.power_w);
+  EXPECT_NE(high_trim.unknown_values(2), sea_trim.unknown_values(2));
 }
 
 TEST(HelicopterTrim, TheHoverTrimIsPhysicallySensible) {
@@ -245,7 +290,8 @@ TEST(HelicopterTrim, TheAntiTorqueBalancesInHover) {
   ASSERT_TRUE(result.converged);
 
   const auto parts = heli.breakdown(VehicleModel::rigid_body_part(result.extended_state),
-                                    heli.auxiliary_part(result.extended_state), result.controls,
+                                    heli.auxiliary_part(result.extended_state),
+                                    result.controls,
                                     environment);
 
   // The yaw moment about the CG vanishes: that IS the anti-torque balance, and
@@ -259,8 +305,7 @@ TEST(HelicopterTrim, TheAntiTorqueBalancesInHover) {
   EXPECT_NEAR(tail_moment, parts.main.torque_n_m, 0.05 * parts.main.torque_n_m);
 
   // Main thrust carries the weight, to within the tilt of the thrust vector.
-  EXPECT_NEAR(parts.main.thrust_n, heli.mass.mass_kg * 9.80665,
-              0.03 * heli.mass.mass_kg * 9.80665);
+  EXPECT_NEAR(parts.main.thrust_n, heli.mass.mass_kg * 9.80665, 0.03 * heli.mass.mass_kg * 9.80665);
 }
 
 TEST(HelicopterTrim, TheRotorSpeedIsStationaryAtTheTrim) {
@@ -273,8 +318,8 @@ TEST(HelicopterTrim, TheRotorSpeedIsStationaryAtTheTrim) {
   // The governor holds rotor speed, so the rate is near zero even though it is
   // NOT one of the six residuals. This is the check that the drivetrain's
   // torque balance is consistent with the trim the six equations found.
-  const double rate = galata::trim::rotor_speed_residual(heli, result, environment,
-                                                         "main_rotor_speed_rad_s");
+  const double rate =
+      galata::trim::rotor_speed_residual(heli, result, environment, "main_rotor_speed_rad_s");
   EXPECT_LT(std::fabs(rate), 1.0e-6) << "rotor speed drifts at the trim point";
 }
 
@@ -289,8 +334,8 @@ TEST(HelicopterTrim, ForwardFlightTrimsAndNeedsForwardCyclic) {
     const auto result = solve_trim(heli, helicopter_trim_problem(heli), condition);
     ASSERT_TRUE(result.converged) << "at " << speed << " m/s";
 
-    const auto it = std::find(result.unknown_names.begin(), result.unknown_names.end(),
-                              "longitudinal_cyclic_rad");
+    const auto it = std::find(
+        result.unknown_names.begin(), result.unknown_names.end(), "longitudinal_cyclic_rad");
     const double cyclic = result.unknown_values(it - result.unknown_names.begin());
     if (speed > 0.0) {
       // Forward flight needs progressively more forward cyclic to overcome
@@ -418,8 +463,8 @@ TEST(HelicopterTrim, TheRefusalCarriesTheFiveNumbersThatDiagnoseIt) {
     FAIL() << "expected a refusal";
   } catch (const std::runtime_error& error) {
     const std::string what = error.what();
-    for (const char* expected : {"Residual norm", "budget", "iterations", "Jacobian rank",
-                                 "condition number"}) {
+    for (const char* expected :
+         {"Residual norm", "budget", "iterations", "Jacobian rank", "condition number"}) {
       EXPECT_NE(what.find(expected), std::string::npos)
           << "the refusal must carry '" << expected << "': " << what;
     }
@@ -441,7 +486,8 @@ TEST(Helicopter, TailRotorFailureRemovesTheAntiTorqueAndLeavesAYawMoment) {
   failed.failures.tail_rotor_effectiveness = 0.0;
   const auto parts = failed.breakdown(VehicleModel::rigid_body_part(trimmed.extended_state),
                                       failed.auxiliary_part(trimmed.extended_state),
-                                      trimmed.controls, environment);
+                                      trimmed.controls,
+                                      environment);
 
   // With the tail rotor gone the main rotor's torque is unopposed, so a large
   // yaw moment remains where the trimmed aircraft had none.
@@ -478,8 +524,7 @@ TEST(Helicopter, AJammedActuatorDoesNotMove) {
 
   State state;
   state.attitude_body_to_ned = identity_attitude();
-  const Eigen::VectorXd rate =
-      heli.auxiliary_derivative(state, auxiliary, controls, environment);
+  const Eigen::VectorXd rate = heli.auxiliary_derivative(state, auxiliary, controls, environment);
   EXPECT_EQ(rate(kPedalPosition), 0.0) << "a jammed actuator's rate is zero, not merely slow";
 }
 
@@ -497,7 +542,8 @@ TEST(HelicopterTrim, RepeatedTrimsAreBitIdentical) {
   ASSERT_TRUE(a.converged);
   ASSERT_TRUE(b.converged);
   for (Eigen::Index i = 0; i < a.unknown_values.size(); ++i) {
-    EXPECT_EQ(a.unknown_values(i), b.unknown_values(i)) << "unknown " << a.unknown_names[static_cast<std::size_t>(i)];
+    EXPECT_EQ(a.unknown_values(i), b.unknown_values(i))
+        << "unknown " << a.unknown_names[static_cast<std::size_t>(i)];
   }
   EXPECT_EQ(a.residual_norm, b.residual_norm);
   EXPECT_EQ(a.jacobian_condition_number, b.jacobian_condition_number);

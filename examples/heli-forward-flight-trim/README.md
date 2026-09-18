@@ -25,11 +25,11 @@ column-relative Richardson estimate is **2e-10** here and **3.3e-1** in the hove
 
 | | hover | 40 m/s |
 |---|---|---|
-| collective | 15.16 deg | 12.18 deg |
-| longitudinal cyclic | −1.38 deg | +5.02 deg |
-| pedal | 10.22 deg | 3.49 deg |
-| pitch attitude | +1.65 deg | −0.68 deg |
-| rotor power | 465.7 kW | 277.7 kW |
+| collective | 15.16 deg | 12.45 deg |
+| longitudinal cyclic | −1.38 deg | +5.13 deg |
+| pedal | 10.22 deg | 3.63 deg |
+| pitch attitude | +1.65 deg | −0.58 deg |
+| rotor power | 465.7 kW | 275.4 kW |
 
 Every one of those moves in the direction it should. Collective falls because
 translational lift is doing part of the work; forward cyclic rises to overcome
@@ -46,7 +46,7 @@ and `C_T/sigma` is inside the design package's own 0.11 screen. Above either,
 **optimistic**, because neither retreating-blade stall nor compressibility is
 modelled.
 
-Altitude is declared but the atmosphere is **not** yet altitude-dependent in this
-capability: `trim.helicopter` builds a sea-level environment regardless. That is a
-known limitation, not a modelling choice, and it is listed in the remaining-gaps
-table of the rotorcraft work.
+The atmosphere is evaluated at the declared 500 m geometric altitude using the
+existing U.S. Standard Atmosphere implementation. Downstream simulation freezes
+that trim environment; the trajectory's `altitude_m` remains height above the
+NED origin, so the two quantities are not conflated.

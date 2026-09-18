@@ -98,6 +98,23 @@ reopening the original path. `StageContext::resolve_output_path` supplies the
 published artifact's filename. Direct file writes bypass the run's containment
 and provenance contract and are not an extension mechanism.
 
+## Helicopter failure events
+
+`sim.helicopter` accepts an optional `failure_events` list. Each entry has a
+`time_s` on the declared fixed-step lattice and a `component`:
+
+- `tail_rotor` or `engine`, with `fraction` in `[0, 1]`;
+- `actuator_jam`, with an actuator control name and an optional in-travel
+  `position_rad`. If the position is omitted, the actuator freezes at its
+  position at the event boundary.
+
+Events at one time retain their declaration order. An event between integration
+steps is refused rather than rounded. The applied event records are included in
+the trajectory summary and in a `<trajectory>.events.txt` sidecar; the original
+declarations are also part of the immutable run manifest. A declared actuator
+position is applied at the event boundary, while an omitted position preserves
+state continuity.
+
 The library's `RunOptions` exposes the same overwrite policy. Embedding programs
 can explicitly disable manifest writing when they own a different record format;
 the command-line runner always writes a manifest on success.
