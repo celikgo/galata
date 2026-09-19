@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Deterministic noisy sampled feedback. The sensor algorithm, seed, streams,
-# latency, quantisation and dropout policy are all carried into the report.
+# latency, quantisation and dropout policy are all carried into a disturbed
+# open/closed-loop response comparison.
 
 version: 1
 
@@ -9,25 +10,34 @@ stages:
   - id: aircraft
     capability: model.helicopter
     input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
-  - id: hover
+  - id: cruise
     capability: trim.helicopter
-    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+  - id: open
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.002
+      steps: 5000
+      sample_stride: 10
+      initial_state_perturbation: {roll_rate_rad_s: 0.03, pitch_rate_rad_s: -0.02, yaw_rate_rad_s: 0.015}
   - id: noisy
     capability: sim.helicopter.closed_loop
     input:
-      trim: {from: hover}
+      trim: {from: cruise}
       controller_period_s: 0.02
       step_s: 0.002
-      steps: 1000
+      steps: 5000
       sample_stride: 10
       delay_periods: 1
+      initial_state_perturbation: {roll_rate_rad_s: 0.03, pitch_rate_rad_s: -0.02, yaw_rate_rad_s: 0.015}
       controller:
         type: pid
         missing_measurement: hold_last
         loops:
-          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
-          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
-          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.20, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.20, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.10, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
       sensor:
         name: sas_rates
         channels: [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s]
@@ -40,6 +50,20 @@ stages:
         quantization_step: 0.0001
         dropout_samples: [5, 15]
         dropout_policy: unavailable
+  - id: response
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: noisy}
+      signals: [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s]
+      requirements:
+        tracking_error: 0.05
+        settling_time_s: 8.0
+        overshoot: 2.0
+        control_effort_rad: 0.35
+        saturation_duration_s: 3.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 0
   - id: csv
     capability: report.helicopter_csv
     input: {trajectory: {from: noisy}, path: noisy-feedback.csv}
@@ -47,5 +71,5 @@ stages:
     capability: report.markdown
     input:
       title: Souxmar F1 deterministic noisy sampled feedback
-      sections: [{from: hover}, {from: noisy}]
+      sections: [{from: cruise}, {from: open}, {from: noisy}, {from: response}]
       path: noisy-feedback.md

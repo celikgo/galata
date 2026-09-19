@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover_100m
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: hover_500m
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 500.0}
+  - id: cruise_20m_s
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 20.0, altitude_m: 500.0}
+  - id: cruise_40m_s
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+  - id: cruise_60m_s
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 60.0, altitude_m: 500.0}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 flight-condition and altitude trim sweep
+      sections: [{from: hover_100m}, {from: hover_500m}, {from: cruise_20m_s}, {from: cruise_40m_s}, {from: cruise_60m_s}]
+      path: parameter-sweep.md

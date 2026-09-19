@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Public reference-change case. The altitude set point is changed after trim,
+# then returned; the response analyser reads the recorded controller reference
+# stream rather than pretending this is a constant-reference run.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: open
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 7000
+      sample_stride: 10
+  - id: closed
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      controller_period_s: 0.02
+      step_s: 0.002
+      steps: 7000
+      sample_stride: 10
+      delay_periods: 1
+      reference_schedule:
+        hold: linear
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [100.0]}
+          - {time_s: 2.0, values: [102.0]}
+          - {time_s: 6.0, values: [102.0]}
+          - {time_s: 8.0, values: [100.0]}
+          - {time_s: 14.0, values: [100.0]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: altitude_m, control: collective_command_rad, kp: 0.025, ki: 0.004, kd: 0.04, derivative_filter_s: 0.10, integrator_limit: 0.08, anti_windup_gain: 0.8}
+  - id: response
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: closed}
+      signals: [altitude_m]
+      requirements:
+        tracking_error: 1.5
+        settling_time_s: 10.0
+        overshoot: 1.50
+        control_effort_rad: 0.35
+        saturation_duration_s: 2.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 0
+  - id: csv_open
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open}, path: open.csv}
+  - id: csv_closed
+    capability: report.helicopter_csv
+    input: {trajectory: {from: closed}, path: closed.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 altitude reference tracking and sampled feedback
+      sections: [{from: hover}, {from: open}, {from: closed}, {from: response}]
+      path: reference-tracking.md

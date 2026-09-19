@@ -9,6 +9,7 @@
 // silently becoming wrong.
 
 #include "galata/analyze/modes.hpp"
+#include "galata/core/quaternion.hpp"
 #include "galata/core/state.hpp"
 #include "galata/model/linear_system.hpp"
 #include "galata/pipeline/artifacts.hpp"
@@ -19,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +54,48 @@ std::string read_text(const std::filesystem::path& path) {
     throw std::runtime_error("cannot open " + path.string());
   }
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+struct CsvTable {
+  std::vector<std::string> columns;
+  std::vector<std::vector<double>> rows;
+};
+
+CsvTable read_csv(const std::filesystem::path& path) {
+  std::ifstream stream(path);
+  if (!stream) {
+    throw std::runtime_error("cannot open " + path.string());
+  }
+  CsvTable table;
+  std::string line;
+  if (!std::getline(stream, line)) {
+    throw std::runtime_error("CSV has no header: " + path.string());
+  }
+  for (std::istringstream split(line); std::getline(split, line, ',');) {
+    table.columns.push_back(line);
+  }
+  while (std::getline(stream, line)) {
+    if (line.empty()) {
+      continue;
+    }
+    std::vector<double> row;
+    for (std::istringstream split(line); std::getline(split, line, ',');) {
+      row.push_back(std::stod(line));
+    }
+    if (row.size() != table.columns.size()) {
+      throw std::runtime_error("CSV row width mismatch in " + path.string());
+    }
+    table.rows.push_back(std::move(row));
+  }
+  return table;
+}
+
+std::size_t csv_column(const CsvTable& table, const std::string& name) {
+  const auto found = std::find(table.columns.begin(), table.columns.end(), name);
+  if (found == table.columns.end()) {
+    throw std::runtime_error("CSV has no column '" + name + "'");
+  }
+  return static_cast<std::size_t>(found - table.columns.begin());
 }
 
 galata::pipeline::RunResult run_heli_document(const std::string& test_name, std::string document) {
@@ -159,6 +203,8 @@ TEST(ExampleHeliClosedLoop, SensorRunIsBitStableAndRecordsItsProvenance) {
   const auto first = run_heli_example("heli-noisy-feedback");
   EXPECT_NE(stage_named(first, "noisy").summary.find("deterministic named sensor"),
             std::string::npos);
+  EXPECT_NE(stage_named(first, "response").summary.find("engineering criteria PASS"),
+            std::string::npos);
   const auto directory =
       std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-noisy-feedback";
   const std::string before = read_text(directory / "noisy-feedback.csv.controller.csv");
@@ -169,6 +215,292 @@ TEST(ExampleHeliClosedLoop, SensorRunIsBitStableAndRecordsItsProvenance) {
   const auto second = run_heli_example("heli-noisy-feedback");
   EXPECT_NE(stage_named(second, "noisy").summary.find("completed"), std::string::npos);
   EXPECT_EQ(before, read_text(directory / "noisy-feedback.csv.controller.csv"));
+}
+
+TEST(ExampleHeliControlPerformance, DisturbedAttitudeRecoveryHasMeasuredCriteria) {
+  const auto result = run_heli_example("heli-performance-acceptance");
+  const std::string response = stage_named(result, "attitude_response").summary;
+  EXPECT_NE(response.find("matched open/closed-loop"), std::string::npos) << response;
+  EXPECT_NE(response.find("roll_rad peak"), std::string::npos) << response;
+  EXPECT_NE(response.find("settling"), std::string::npos) << response;
+  EXPECT_NE(response.find("engineering criteria PASS"), std::string::npos) << response;
+
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-performance-acceptance";
+  const auto closed = read_csv(directory / "closed.csv");
+  const std::size_t qw = csv_column(closed, "quaternion_w");
+  const std::size_t qx = csv_column(closed, "quaternion_x");
+  const std::size_t qy = csv_column(closed, "quaternion_y");
+  const std::size_t qz = csv_column(closed, "quaternion_z");
+  for (const auto& row : closed.rows) {
+    const double norm =
+        std::sqrt(row[qw] * row[qw] + row[qx] * row[qx] + row[qy] * row[qy] + row[qz] * row[qz]);
+    EXPECT_NEAR(norm, 1.0, 1.0e-12);
+  }
+  const std::string controller = read_text(directory / "closed.csv.controller.csv");
+  EXPECT_NE(controller.find("requested_lateral_cyclic_command_rad"), std::string::npos);
+  EXPECT_NE(controller.find("saturated_lateral_cyclic_command_rad"), std::string::npos);
+  EXPECT_NE(controller.find("applied_lateral_cyclic_command_rad"), std::string::npos);
+}
+
+TEST(ExampleHeliControlPerformance, IncorrectFeedbackSignIsADeclaredNegativeControl) {
+  const std::string document =
+      "version: 1\n"
+      "stages:\n"
+      "  - id: aircraft\n"
+      "    capability: model.helicopter\n"
+      "    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}\n"
+      "  - id: hover\n"
+      "    capability: trim.helicopter\n"
+      "    input: {helicopter: {from: aircraft}, airspeed_m_s: 0, altitude_m: 100}\n"
+      "  - id: open\n"
+      "    capability: sim.helicopter\n"
+      "    input: {trim: {from: hover}, step_s: 0.002, steps: 3000, sample_stride: 10, "
+      "attitude_perturbation_body_rad: [0.04, 0, 0]}\n"
+      "  - id: closed\n"
+      "    capability: sim.helicopter.closed_loop\n"
+      "    input:\n"
+      "      trim: {from: hover}\n"
+      "      step_s: 0.002\n"
+      "      steps: 3000\n"
+      "      sample_stride: 10\n"
+      "      controller_period_s: 0.01\n"
+      "      attitude_perturbation_body_rad: [0.04, 0, 0]\n"
+      "      controller:\n"
+      "        type: pid\n"
+      "        missing_measurement: refuse\n"
+      "        loops:\n"
+      "          - {measurement: roll_rad, control: lateral_cyclic_command_rad, kp: 1.0, ki: 0, "
+      "kd: 0, derivative_filter_s: 0.05}\n"
+      "  - id: response\n"
+      "    capability: analyze.helicopter_response\n"
+      "    input:\n"
+      "      open_loop: {from: open}\n"
+      "      closed_loop: {from: closed}\n"
+      "      signals: [roll_rad]\n"
+      "      requirements: {tracking_error: 0.05, settling_time_s: 2.0}\n";
+  const auto result = run_heli_document("heli-negative-feedback", document);
+  const std::string response = stage_named(result, "response").summary;
+  EXPECT_NE(response.find("engineering criteria FAIL"), std::string::npos) << response;
+}
+
+TEST(ExampleHeliGusts, WindStepIsGroundVelocityContinuousAndTurbulenceIsReproducible) {
+  const auto first = run_heli_example("heli-gust-response");
+  const std::string response = stage_named(first, "gust_response").summary;
+  EXPECT_NE(response.find("matched open/closed-loop"), std::string::npos);
+  EXPECT_NE(response.find("engineering criteria PASS"), std::string::npos) << response;
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-gust-response";
+  const auto step = read_csv(directory / "open-step.csv");
+  const std::size_t time = csv_column(step, "time_s");
+  const std::size_t u = csv_column(step, "velocity_u_m_s");
+  const std::size_t v = csv_column(step, "velocity_v_m_s");
+  const std::size_t w = csv_column(step, "velocity_w_m_s");
+  const std::size_t qw = csv_column(step, "quaternion_w");
+  const std::size_t qx = csv_column(step, "quaternion_x");
+  const std::size_t qy = csv_column(step, "quaternion_y");
+  const std::size_t qz = csv_column(step, "quaternion_z");
+  const std::size_t wn = csv_column(step, "wind_north_m_s");
+  const std::size_t we = csv_column(step, "wind_east_m_s");
+  const std::size_t wd = csv_column(step, "wind_down_m_s");
+  const auto ground_velocity = [&](const std::vector<double>& row) {
+    const double qw_value = row[qw];
+    const double qx_value = row[qx];
+    const double qy_value = row[qy];
+    const double qz_value = row[qz];
+    const Eigen::Matrix3d rotation = galata::core::dcm_ned_from_body(
+        galata::core::Quaternion(qw_value, qx_value, qy_value, qz_value));
+    return rotation * Eigen::Vector3d(row[u], row[v], row[w])
+           + Eigen::Vector3d(row[wn], row[we], row[wd]);
+  };
+  std::size_t before = 0;
+  std::size_t after = 0;
+  for (std::size_t i = 0; i < step.rows.size(); ++i) {
+    if (step.rows[i][time] < 2.0) {
+      before = i;
+    }
+    if (std::fabs(step.rows[i][time] - 2.0) < 1.0e-12) {
+      after = i;
+    }
+  }
+  ASSERT_GT(after, before);
+  EXPECT_LT((ground_velocity(step.rows[after]) - ground_velocity(step.rows[before])).norm(), 0.03);
+  const auto gust = read_csv(directory / "open-gust.csv");
+  const auto refined = read_csv(directory / "open-gust-refined.csv");
+  ASSERT_EQ(gust.rows.size(), refined.rows.size());
+  const std::size_t gust_roll = csv_column(gust, "output_roll_rate_rad_s");
+  const std::size_t refined_roll = csv_column(refined, "output_roll_rate_rad_s");
+  const std::size_t gust_pitch = csv_column(gust, "output_pitch_rate_rad_s");
+  const std::size_t refined_pitch = csv_column(refined, "output_pitch_rate_rad_s");
+  double maximum_refinement_difference = 0.0;
+  for (std::size_t i = 0; i < gust.rows.size(); ++i) {
+    maximum_refinement_difference =
+        std::max(maximum_refinement_difference,
+                 std::max(std::fabs(gust.rows[i][gust_roll] - refined.rows[i][refined_roll]),
+                          std::fabs(gust.rows[i][gust_pitch] - refined.rows[i][refined_pitch])));
+  }
+  EXPECT_LT(maximum_refinement_difference, 2.0e-3);
+
+  const auto turbulence = read_csv(directory / "open-turbulence.csv");
+  const std::size_t wind_north = csv_column(turbulence, "wind_north_m_s");
+  const std::size_t wind_east = csv_column(turbulence, "wind_east_m_s");
+  const std::size_t wind_down = csv_column(turbulence, "wind_down_m_s");
+  const std::array<double, 3> declared_stddev = {1.0, 0.5, 0.5};
+  const double rho = std::exp(-0.004 / 1.0);
+  for (std::size_t channel = 0; channel < 3; ++channel) {
+    const std::size_t column = channel == 0 ? wind_north : channel == 1 ? wind_east : wind_down;
+    double mean = 0.0;
+    for (const auto& row : turbulence.rows) {
+      mean += row[column];
+    }
+    mean /= static_cast<double>(turbulence.rows.size());
+    double variance = 0.0;
+    double expected_variance = 0.0;
+    for (std::size_t i = 0; i < turbulence.rows.size(); ++i) {
+      const double deviation = turbulence.rows[i][column] - mean;
+      variance += deviation * deviation;
+      const double sample_number = static_cast<double>(i * 5U);
+      expected_variance += declared_stddev[channel] * declared_stddev[channel]
+                           * (1.0 - std::pow(rho, 2.0 * sample_number));
+    }
+    variance /= static_cast<double>(turbulence.rows.size());
+    expected_variance /= static_cast<double>(turbulence.rows.size());
+    EXPECT_LT(std::fabs(mean), 0.50) << "wind channel " << channel;
+    EXPECT_NEAR(variance, expected_variance, 0.50 * expected_variance + 0.01)
+        << "wind channel " << channel;
+  }
+  const std::string turbulence_before = read_text(directory / "open-turbulence.csv");
+  const auto second = run_heli_example("heli-gust-response");
+  EXPECT_NE(stage_named(second, "open_turbulence").summary.find("completed"), std::string::npos);
+  EXPECT_EQ(turbulence_before, read_text(directory / "open-turbulence.csv"));
+  EXPECT_NE(read_text(directory / "gust-response.md").find("gaussian_ou_v1"), std::string::npos);
+}
+
+TEST(ExampleHeliEnsemble, SerialAndParallelPreserveDeclarationOrderAndMembers) {
+  const auto result = run_heli_example("heli-mass-cg-ensemble");
+  EXPECT_NE(stage_named(result, "ensemble").summary.find("4 completed"), std::string::npos);
+  EXPECT_NE(stage_named(result, "ensemble_serial").summary.find("4 completed"), std::string::npos);
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-mass-cg-ensemble";
+  const std::string parallel = read_text(directory / "ensemble.json");
+  const std::string serial = read_text(directory / "ensemble-serial.json");
+  for (const char* id : {"light-forward", "nominal", "heavy-forward", "aft-cg"}) {
+    EXPECT_NE(parallel.find(id), std::string::npos);
+    EXPECT_NE(serial.find(id), std::string::npos);
+  }
+  EXPECT_NE(parallel.find("declaration_order"), std::string::npos);
+  EXPECT_NE(serial.find("declaration_order"), std::string::npos);
+  EXPECT_NE(read_text(directory / "parallel/member-1.json").find("\"seed\": 102"),
+            std::string::npos);
+  EXPECT_NE(read_text(directory / "serial/member-1.json").find("\"seed\": 102"), std::string::npos);
+}
+
+TEST(ExampleHeliReferenceTracking, ScheduledAltitudeChangeIsMeasuredAgainstTheRecordedReference) {
+  const auto result = run_heli_example("heli-reference-tracking");
+  const std::string response = stage_named(result, "response").summary;
+  EXPECT_NE(response.find("altitude_m peak"), std::string::npos) << response;
+  EXPECT_NE(response.find("engineering criteria PASS"), std::string::npos) << response;
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-reference-tracking";
+  const auto controller = read_csv(directory / "closed.csv.controller.csv");
+  const std::size_t time = csv_column(controller, "time_s");
+  const std::size_t reference = csv_column(controller, "reference_altitude_m");
+  bool saw_step = false;
+  bool saw_release = false;
+  for (const auto& row : controller.rows) {
+    if (row[time] >= 2.0 && row[time] < 2.1 && row[reference] > 101.9) {
+      saw_step = true;
+    }
+    if (row[time] >= 8.0 && row[reference] < 100.1) {
+      saw_release = true;
+    }
+  }
+  EXPECT_TRUE(saw_step);
+  EXPECT_TRUE(saw_release);
+}
+
+TEST(ExampleHeliTiming, ControllerSamplePeriodAndDelayAreSeparatedFromSolverStep) {
+  const auto result = run_heli_example("heli-controller-timing-study");
+  const std::string fast = stage_named(result, "sample_10ms_delay_0").summary;
+  const std::string slow = stage_named(result, "sample_20ms_delay_1").summary;
+  EXPECT_NE(fast.find("600 controller ticks every 0.010000 s, delay 0 period(s)"),
+            std::string::npos)
+      << fast;
+  EXPECT_NE(slow.find("300 controller ticks every 0.020000 s, delay 1 period(s)"),
+            std::string::npos)
+      << slow;
+}
+
+TEST(ExampleHeliSweeps, FlightConditionAndAltitudeMembersRunInDeclarationOrder) {
+  const auto result = run_heli_example("heli-parameter-sweeps");
+  ASSERT_EQ(result.stages.size(), 7U);
+  EXPECT_EQ(result.stages[1].stage_id, "hover_100m");
+  EXPECT_EQ(result.stages[2].stage_id, "hover_500m");
+  EXPECT_EQ(result.stages[3].stage_id, "cruise_20m_s");
+  EXPECT_EQ(result.stages[4].stage_id, "cruise_40m_s");
+  EXPECT_EQ(result.stages[5].stage_id, "cruise_60m_s");
+  EXPECT_NE(stage_named(result, "report").summary.find("wrote parameter-sweep.md"),
+            std::string::npos);
+}
+
+TEST(ExampleHeliGusts, UnsupportedZeroAirspeedTurbulenceIsRefusedExplicitly) {
+  const std::string document =
+      "version: 1\n"
+      "stages:\n"
+      "  - id: aircraft\n"
+      "    capability: model.helicopter\n"
+      "    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}\n"
+      "  - id: hover\n"
+      "    capability: trim.helicopter\n"
+      "    input: {helicopter: {from: aircraft}, airspeed_m_s: 0, altitude_m: 100}\n"
+      "  - id: run\n"
+      "    capability: sim.helicopter\n"
+      "    input:\n"
+      "      trim: {from: hover}\n"
+      "      step_s: 0.002\n"
+      "      steps: 10\n"
+      "      turbulence: {model: gaussian_ou_v1, seed: 1, mean_ned_m_s: [0, 0, 0], "
+      "stddev_ned_m_s: [1, 1, 1], correlation_time_s: 1}\n";
+  try {
+    (void)run_heli_document("heli-invalid-zero-speed-turbulence", document);
+    FAIL() << "zero-speed gaussian_ou_v1 turbulence was accepted";
+  } catch (const std::exception& error) {
+    EXPECT_NE(std::string(error.what()).find("zero airspeed"), std::string::npos) << error.what();
+  }
+}
+
+TEST(ExampleHeliSaturation, PositionRateLagAndAntiWindupEvidenceAreRecorded) {
+  const auto result = run_heli_example("heli-saturation-recovery");
+  const std::string response = stage_named(result, "response").summary;
+  EXPECT_NE(response.find("engineering criteria PASS"), std::string::npos) << response;
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-saturation-recovery";
+  const auto trace = read_csv(directory / "saturation.csv");
+  const auto controller = read_csv(directory / "saturation.csv.controller.csv");
+  const std::size_t requested = csv_column(controller, "requested_lateral_cyclic_command_rad");
+  const std::size_t saturated = csv_column(controller, "saturated_lateral_cyclic_command_rad");
+  const std::size_t applied = csv_column(controller, "applied_lateral_cyclic_command_rad");
+  const std::size_t integrator =
+      csv_column(controller, "controller_state_lateral_cyclic_command_rad.integrator");
+  bool saw_position_saturation = false;
+  bool saw_command_delay = false;
+  for (const auto& row : controller.rows) {
+    saw_position_saturation =
+        saw_position_saturation || std::fabs(row[requested] - row[saturated]) > 1.0e-6;
+    saw_command_delay = saw_command_delay || std::fabs(row[saturated] - row[applied]) > 1.0e-6;
+    EXPECT_LE(std::fabs(row[integrator]), 0.1000000001);
+  }
+  EXPECT_TRUE(saw_position_saturation);
+  EXPECT_TRUE(saw_command_delay);
+  const std::size_t actual_position = csv_column(trace, "lateral_cyclic_rad");
+  const std::size_t time = csv_column(trace, "time_s");
+  double maximum_lag = 0.0;
+  for (const auto& row : trace.rows) {
+    if (row[time] > 1.0 && row[time] < 1.3) {
+      maximum_lag = std::max(maximum_lag, std::fabs(row[actual_position]));
+    }
+  }
+  EXPECT_GT(maximum_lag, 0.01);
 }
 
 TEST(ExampleHeliFailures, EngineLossAndActuatorJamHaveStableSidecars) {
@@ -194,6 +526,102 @@ TEST(ExampleHeliFailures, EngineLossAndActuatorJamHaveStableSidecars) {
   ASSERT_TRUE(std::filesystem::exists(jam_events)) << jam_events;
   EXPECT_NE(read_text(jam_events).find("actuator_jam lateral_cyclic_command_rad"),
             std::string::npos);
+}
+
+TEST(ExampleHeliFailures, FailureTrajectoriesChangeAtTheDeclaredBoundary) {
+  const auto tail = run_heli_example("heli-tail-rotor-failure");
+  EXPECT_NE(stage_named(tail, "healthy").summary.find("completed"), std::string::npos);
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-tail-rotor-failure";
+  const auto healthy = read_csv(directory / "healthy-hover.csv");
+  const auto failed = read_csv(directory / "failed-hover.csv");
+  const std::size_t time = csv_column(failed, "time_s");
+  const std::size_t yaw_rate = csv_column(failed, "output_yaw_rate_rad_s");
+  const std::size_t tail_thrust = csv_column(failed, "output_tail_thrust_n");
+  ASSERT_EQ(healthy.rows.size(), failed.rows.size());
+  for (std::size_t i = 0; i < failed.rows.size(); ++i) {
+    ASSERT_DOUBLE_EQ(healthy.rows[i][time], failed.rows[i][time]);
+    if (failed.rows[i][time] < 1.0) {
+      EXPECT_NEAR(healthy.rows[i][yaw_rate], failed.rows[i][yaw_rate], 1.0e-8);
+      EXPECT_NEAR(healthy.rows[i][tail_thrust], failed.rows[i][tail_thrust], 1.0e-8);
+    }
+  }
+  std::size_t event = failed.rows.size();
+  for (std::size_t i = 0; i < failed.rows.size(); ++i) {
+    if (std::fabs(failed.rows[i][time] - 1.0) < 1.0e-12) {
+      event = i;
+      break;
+    }
+  }
+  ASSERT_LT(event, failed.rows.size());
+  EXPECT_LT(failed.rows[event][tail_thrust], 1.0e-9);
+  EXPECT_GT(std::fabs(failed.rows.back()[yaw_rate]), 0.1);
+
+  const auto engine = run_heli_example("heli-engine-degradation");
+  EXPECT_NE(stage_named(engine, "degraded").summary.find("completed"), std::string::npos);
+  const auto engine_csv = read_csv(std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                                   / "heli-engine-degradation/engine-degradation.csv");
+  const std::size_t engine_time = csv_column(engine_csv, "time_s");
+  const std::size_t engine_torque = csv_column(engine_csv, "engine_torque_n_m");
+  double pre_loss = 0.0;
+  double post_loss = 0.0;
+  for (const auto& row : engine_csv.rows) {
+    if (row[engine_time] < 0.5) {
+      pre_loss = row[engine_torque];
+    }
+    if (row[engine_time] > 1.2) {
+      post_loss = row[engine_torque];
+      break;
+    }
+  }
+  EXPECT_GT(pre_loss, 0.0);
+  EXPECT_LT(post_loss, 0.5 * pre_loss);
+}
+
+std::string simultaneous_failure_study() {
+  return "version: 1\n"
+         "stages:\n"
+         "  - id: aircraft\n"
+         "    capability: model.helicopter\n"
+         "    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}\n"
+         "  - id: hover\n"
+         "    capability: trim.helicopter\n"
+         "    input: {helicopter: {from: aircraft}, airspeed_m_s: 0, altitude_m: 100}\n"
+         "  - id: failed\n"
+         "    capability: sim.helicopter\n"
+         "    input:\n"
+         "      trim: {from: hover}\n"
+         "      step_s: 0.002\n"
+         "      steps: 500\n"
+         "      sample_stride: 10\n"
+         "      failure_events:\n"
+         "        - {time_s: 0.5, component: engine, fraction: 0.5}\n"
+         "        - {time_s: 0.5, component: tail_rotor, fraction: 0.0}\n"
+         "  - id: csv\n"
+         "    capability: report.helicopter_csv\n"
+         "    input: {trajectory: {from: failed}, path: simultaneous.csv}\n";
+}
+
+TEST(ExampleHeliFailures, SimultaneousEventsAreStableAndLogsMatchTheAppliedChanges) {
+  (void)run_heli_document("heli-simultaneous-failures", simultaneous_failure_study());
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-simultaneous-failures";
+  const std::string events = read_text(directory / "simultaneous.csv.events.txt");
+  const auto engine = events.find("engine fraction=0.500000");
+  const auto tail = events.find("tail_rotor fraction=0.000000");
+  ASSERT_NE(engine, std::string::npos);
+  ASSERT_NE(tail, std::string::npos);
+  EXPECT_LT(engine, tail);
+  const auto trace = read_csv(directory / "simultaneous.csv");
+  const std::size_t event_time = csv_column(trace, "time_s");
+  const std::size_t tail_thrust = csv_column(trace, "output_tail_thrust_n");
+  for (const auto& row : trace.rows) {
+    if (std::fabs(row[event_time] - 0.5) < 1.0e-12) {
+      EXPECT_LT(row[tail_thrust], 1.0e-9);
+      return;
+    }
+  }
+  FAIL() << "simultaneous event boundary was not retained in the trajectory CSV";
 }
 
 std::string failure_validation_study(const std::string& event) {

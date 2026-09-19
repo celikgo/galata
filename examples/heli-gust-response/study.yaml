@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# H1 evidence: the same forward-flight condition is run open-loop and under
+# sampled rate damping for a smooth gust, an explicitly discontinuous wind
+# step, and seeded Gaussian OU turbulence. The disturbance declarations are
+# public study inputs, not test-harness callbacks.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: cruise
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+
+  - id: open_gust
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      wind_schedule:
+        hold: linear
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 2.0, values: [5.0, 1.0, -0.5]}
+          - {time_s: 4.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 8.0, values: [0.0, 0.0, 0.0]}
+  - id: closed_gust
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: cruise}
+      controller_period_s: 0.02
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      delay_periods: 1
+      wind_schedule:
+        hold: linear
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 2.0, values: [5.0, 1.0, -0.5]}
+          - {time_s: 4.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 8.0, values: [0.0, 0.0, 0.0]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+  - id: open_gust_refined
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.002
+      steps: 4000
+      sample_stride: 10
+      wind_schedule:
+        hold: linear
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 2.0, values: [5.0, 1.0, -0.5]}
+          - {time_s: 4.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 8.0, values: [0.0, 0.0, 0.0]}
+  - id: gust_response
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open_gust}
+      closed_loop: {from: closed_gust}
+      signals: [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s]
+      requirements:
+        tracking_error: 0.25
+        settling_time_s: 6.0
+        overshoot: 2.0
+        control_effort_rad: 0.35
+        saturation_duration_s: 1.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 0
+
+  - id: open_step
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      wind_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 2.0, values: [6.0, 0.0, 0.0]}
+          - {time_s: 4.0, values: [0.0, 0.0, 0.0]}
+  - id: closed_step
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: cruise}
+      controller_period_s: 0.02
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      delay_periods: 1
+      wind_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0, 0.0, 0.0]}
+          - {time_s: 2.0, values: [6.0, 0.0, 0.0]}
+          - {time_s: 4.0, values: [0.0, 0.0, 0.0]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+
+  - id: open_turbulence
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      turbulence:
+        model: gaussian_ou_v1
+        seed: 20260919
+        mean_ned_m_s: [0.0, 0.0, 0.0]
+        stddev_ned_m_s: [1.0, 0.5, 0.5]
+        correlation_time_s: 1.0
+  - id: closed_turbulence
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: cruise}
+      controller_period_s: 0.02
+      step_s: 0.004
+      steps: 2000
+      sample_stride: 5
+      delay_periods: 1
+      turbulence:
+        model: gaussian_ou_v1
+        seed: 20260919
+        mean_ned_m_s: [0.0, 0.0, 0.0]
+        stddev_ned_m_s: [1.0, 0.5, 0.5]
+        correlation_time_s: 1.0
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rate_rad_s, control: lateral_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: pitch_rate_rad_s, control: longitudinal_cyclic_command_rad, kp: -0.15, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+  - id: csv_step
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open_step}, path: open-step.csv}
+  - id: csv_turbulence
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open_turbulence}, path: open-turbulence.csv}
+  - id: csv_gust
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open_gust}, path: open-gust.csv}
+  - id: csv_gust_refined
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open_gust_refined}, path: open-gust-refined.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 deterministic gust and turbulence study
+      sections: [{from: cruise}, {from: open_gust}, {from: closed_gust}, {from: gust_response}, {from: open_step}, {from: closed_step}, {from: open_turbulence}, {from: closed_turbulence}]
+      path: gust-response.md

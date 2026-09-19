@@ -175,6 +175,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `analyze.diskmargin` | Disk margin of one loop — robustness to simultaneous gain and phase variation — with estimated gain and phase ranges and a candidate boundary perturbation | `disk_margin` | implemented and validated |
 | `analyze.freqresp` | Frequency response of one loop of a linear model, evaluated by Hessenberg solves with the grid refined around the system's own lightly damped modes | `frequency_response` | implemented and validated |
 | `analyze.gramians` | Reachability and observability of a linear model for a declared input and output set — the subspace ranks, the directions that fall outside them by state name, and finite-horizon Gramians over a declared horizon | `gramians` | implemented, unvalidated |
+| `analyze.helicopter_response` | Compare matched open- and closed-loop helicopter trajectories with declared tracking, settling, actuator, saturation, rotor-speed and envelope budgets | `helicopter_response` | implemented, unvalidated |
 | `analyze.hinfnorm` | Bound a stable continuous-time H-infinity norm using Hamiltonian level tests | `hinfinity_norm` | implemented, unvalidated |
 | `analyze.margins` | Gain, phase and delay margins of one loop, with every crossover reported and the frequency at which each occurs | `stability_margins` | implemented and validated |
 | `analyze.modes` | Eigenvalues, modal metrics and participation factors, with the classical aircraft modes classified by participation | `modal_table` | implemented and validated |
@@ -216,6 +217,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
 | `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |
 | `sim.sampled` | Execute a state-feedback law against the nonlinear plant — a continuous design at a declared rate, or a discrete design only at its own period — with zero-order hold, whole-period delay and per-rotor saturation | `sampled_trajectory` | implemented, unvalidated |
+| `study.helicopter_ensemble` | Execute independent helicopter parameter members with seeded disturbances, per-member manifests, deterministic declaration order and optional parallel execution | `helicopter_ensemble` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
 | `synth.dare` | Solve a discrete-time algebraic Riccati equation, cross term included, refusing a residual over budget or a closed loop not strictly inside the unit circle | `dare_solution` | implemented, unvalidated |
 | `synth.lqr` | Design continuous full-state feedback and retain the weights and numerical evidence | `control_law` | implemented, unvalidated |

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Independent, declaration-ordered seeded sensitivity ensemble. The mass and CG
+# values are design assumptions, not measured aircraft uncertainty.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: cruise
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+  - id: ensemble
+    capability: study.helicopter_ensemble
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 500
+      sample_stride: 10
+      parallel: true
+      aggregate_path: ensemble.json
+      manifest_prefix: parallel/member
+      turbulence:
+        model: gaussian_ou_v1
+        seed: 0
+        mean_ned_m_s: [0.0, 0.0, 0.0]
+        stddev_ned_m_s: [0.5, 0.2, 0.2]
+        correlation_time_s: 0.5
+      criteria_max_envelope_departures: 0
+      members:
+        - {id: light-forward, seed: 101, mass_scale: 0.95, cg_offset_body_m: [0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.01}}
+        - {id: nominal, seed: 102, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.00}}
+        - {id: heavy-forward, seed: 103, mass_scale: 1.05, cg_offset_body_m: [-0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: -0.01}}
+        - {id: aft-cg, seed: 104, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.25], initial_state_perturbation: {pitch_rate_rad_s: 0.01}}
+  - id: ensemble_serial
+    capability: study.helicopter_ensemble
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 500
+      sample_stride: 10
+      parallel: false
+      aggregate_path: ensemble-serial.json
+      manifest_prefix: serial/member
+      turbulence:
+        model: gaussian_ou_v1
+        seed: 0
+        mean_ned_m_s: [0.0, 0.0, 0.0]
+        stddev_ned_m_s: [0.5, 0.2, 0.2]
+        correlation_time_s: 0.5
+      criteria_max_envelope_departures: 0
+      members:
+        - {id: light-forward, seed: 101, mass_scale: 0.95, cg_offset_body_m: [0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.01}}
+        - {id: nominal, seed: 102, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.00}}
+        - {id: heavy-forward, seed: 103, mass_scale: 1.05, cg_offset_body_m: [-0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: -0.01}}
+        - {id: aft-cg, seed: 104, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.25], initial_state_perturbation: {pitch_rate_rad_s: 0.01}}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 seeded mass and CG sensitivity ensemble
+      sections: [{from: cruise}, {from: ensemble}, {from: ensemble_serial}]
+      path: ensemble.md

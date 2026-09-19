@@ -5,8 +5,9 @@
 //
 // Reference: the physics is in galata/model/helicopter.hpp and
 // galata/model/rotor/rotor.hpp; the trim formulation is in
-// galata/trim/problem.hpp. This file adds no numerics — it resolves study input,
-// calls those, and turns the result into an artefact with a summary line.
+// galata/trim/problem.hpp. This file resolves study input, adds deterministic
+// study scheduling and evidence calculations, and turns the result into an
+// artefact with a summary line. It does not claim higher-fidelity physics.
 //
 // EVERY CAPABILITY HERE IS `ImplementedUnvalidated`, and that is not modesty.
 // docs/VERIFICATION.md records agreement against a published reference and no
@@ -15,21 +16,34 @@
 // the equations plus a cross-check against the design package's own independent
 // hover computation. Neither is a published reference, so neither earns
 // `Implemented`. models/souxmar-heli/PROVENANCE.md says the same in more detail.
+//
+// The optional gaussian_ou_v1 wind is a reproducible disturbance signal, not a
+// claim about an atmospheric spectrum. Its recursion follows Uhlenbeck and
+// Ornstein, "On the Theory of the Brownian Motion", Physical Review 36 (1930),
+// 823-841. What this is NOT: a Dryden/von Karman turbulence model or a measured
+// aircraft environment. It is supported only for positive airspeed and its
+// statistics are accepted as a declared study budget, not as aircraft data.
 
 #include "galata/core/atmosphere.hpp"
+#include "galata/core/quaternion.hpp"
+#include "galata/linearize/extended.hpp"
 #include "galata/linearize/vehicle.hpp"
 #include "galata/model/helicopter.hpp"
 #include "galata/numerics/integration_method.hpp"
 #include "galata/pipeline/registry.hpp"
 #include "galata/sim/sampled_loop.hpp"
+#include "galata/sim/schedule.hpp"
 #include "galata/sim/sensor.hpp"
 #include "galata/synth/control.hpp"
 #include "galata/synth/discrete_control.hpp"
 #include "galata/trim/problem.hpp"
 
+#include "input_schedule_parse.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <future>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -38,6 +52,7 @@
 #include <numbers>
 #include <optional>
 #include <ostream>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -119,6 +134,50 @@ struct HelicopterTrajectoryArtifact {
   std::vector<bool> controller_measurement_available;
   std::vector<bool> controller_measurement_stale;
   std::vector<std::string> sensor_provenance;
+  std::vector<Eigen::Vector3d> wind_samples_ned_m_s;
+  std::vector<std::string> initial_condition_provenance;
+  std::string disturbance_provenance;
+  std::string parameter_provenance;
+};
+
+struct HelicopterEnsembleMember {
+  std::string id;
+  std::uint64_t seed = 0;
+  double mass_scale = 1.0;
+  Eigen::Vector3d cg_offset_body_m = Eigen::Vector3d::Zero();
+  bool completed = false;
+  bool criteria_passed = false;
+  int envelope_departures = 0;
+  std::string termination;
+  std::string manifest_path;
+};
+
+struct HelicopterEnsembleArtifact {
+  std::vector<HelicopterEnsembleMember> members;
+  bool parallel = false;
+  std::string ordering_policy;
+};
+
+struct HelicopterResponseMetric {
+  std::string signal;
+  double reference = 0.0;
+  double peak_error = 0.0;
+  double final_error = 0.0;
+  double settling_time_s = std::numeric_limits<double>::infinity();  // s
+  double uncontrolled_peak_error = 0.0;
+};
+
+struct HelicopterResponseArtifact {
+  std::vector<HelicopterResponseMetric> metrics;
+  std::map<std::string, double> requirements;
+  double maximum_control_deviation = 0.0;      // rad
+  double saturation_duration_s = 0.0;          // s
+  double maximum_rotor_speed_excursion = 0.0;  // rad/s
+  int controlled_envelope_departures = 0;
+  int uncontrolled_envelope_departures = 0;
+  bool matched_initial_condition = false;
+  bool matched_disturbance = false;
+  bool criteria_passed = false;
 };
 
 struct FailureEvent {
@@ -280,6 +339,29 @@ std::string apply_failure_event(const FailureEvent& event,
          + fixed(jam_position, 6) + " rad";
 }
 
+model::HelicopterModel model_at_failure_step(const model::HelicopterModel& final_model,
+                                             const std::vector<FailureEvent>& events,
+                                             int step) {
+  model::HelicopterModel model = final_model;
+  model.failures = model::HelicopterFailures{};
+  for (const auto& event : events) {
+    if (event.step > step) {
+      break;
+    }
+    if (event.component == "tail_rotor") {
+      model.failures.tail_rotor_effectiveness = event.fraction;
+    } else if (event.component == "engine") {
+      model.failures.engine_available_fraction = event.fraction;
+    } else {
+      const auto index = static_cast<std::size_t>(event.actuator_index);
+      const double position = event.position_rad.value_or(
+          final_model.failures.jammed_actuator_rad[index].value_or(0.0));
+      model.failures.jammed_actuator_rad[index] = position;
+    }
+  }
+  return model;
+}
+
 void require_map_keys(const ValuePtr& value,
                       const std::vector<std::string>& allowed,
                       const std::string& description) {
@@ -318,6 +400,255 @@ Eigen::VectorXd value_vector(const ValuePtr& value,
     result(i) = entry->as_number();
   }
   return result;
+}
+
+struct InitialCondition {
+  Eigen::VectorXd state;
+  std::vector<std::string> provenance;
+};
+
+InitialCondition initial_condition_from(const StageContext& context,
+                                        const model::HelicopterModel& heli,
+                                        const Eigen::VectorXd& trim_state) {
+  InitialCondition result{trim_state, {"initial state: declared trim"}};
+  const ValuePtr perturbation = context.input->get("initial_state_perturbation");
+  if (perturbation) {
+    if (perturbation->kind() != Value::Kind::Map) {
+      throw std::runtime_error(
+          "helicopter simulation initial_state_perturbation must be a map of state names to "
+          "SI increments; use attitude_perturbation_body_rad for attitude");
+    }
+    const auto names = heli.state_names();
+    for (const auto& [name, value] : perturbation->as_map()) {
+      if (name.rfind("quaternion_", 0) == 0) {
+        throw std::runtime_error(
+            "helicopter simulation initial_state_perturbation may not edit quaternion_* "
+            "components; declare attitude_perturbation_body_rad as a body-frame rotation vector "
+            "so the quaternion is normalised and the ADR-0002 convention is preserved");
+      }
+      const auto found = std::find(names.begin(), names.end(), name);
+      if (found == names.end() || value->kind() != Value::Kind::Number
+          || !std::isfinite(value->as_number())) {
+        throw std::runtime_error(
+            "helicopter simulation initial_state_perturbation must name "
+            "finite non-quaternion helicopter states");
+      }
+      result.state(static_cast<Eigen::Index>(found - names.begin())) += value->as_number();
+      result.provenance.push_back("initial perturbation " + name
+                                  + " += " + fixed(value->as_number(), 9));
+    }
+  }
+
+  const ValuePtr attitude = context.input->get("attitude_perturbation_body_rad");
+  if (attitude) {
+    const Eigen::VectorXd rotation =
+        value_vector(attitude, 3, "helicopter simulation attitude_perturbation_body_rad");
+    const core::Quaternion nominal(result.state(core::kQuaternionW),
+                                   result.state(core::kQuaternionX),
+                                   result.state(core::kQuaternionY),
+                                   result.state(core::kQuaternionZ));
+    const core::Quaternion perturbed =
+        core::normalised(nominal * core::quaternion_from_rotation_vector(rotation));
+    result.state(core::kQuaternionW) = perturbed.w();
+    result.state(core::kQuaternionX) = perturbed.x();
+    result.state(core::kQuaternionY) = perturbed.y();
+    result.state(core::kQuaternionZ) = perturbed.z();
+    result.provenance.push_back("attitude perturbation: body rotation vector ["
+                                + fixed(rotation(0), 9) + ", " + fixed(rotation(1), 9) + ", "
+                                + fixed(rotation(2), 9) + "] rad; quaternion normalised");
+  }
+  model::VehicleModel::project(result.state);
+  return result;
+}
+
+struct WindEvent {
+  int step = 0;
+  double declared_time_s = 0.0;  // s
+};
+
+std::vector<WindEvent> wind_events(const sim::InputSchedule& schedule, double step_s, int steps) {
+  std::vector<WindEvent> events;
+  for (const double time_s : schedule.discontinuities()) {
+    const double lattice = time_s / step_s;
+    const double nearest = std::round(lattice);
+    if (std::fabs(lattice - nearest) > 1.0e-9 * std::fmax(1.0, std::fabs(lattice))) {
+      throw std::invalid_argument(
+          "wind_schedule changes between integration steps; align a discontinuity to the "
+          "declared step so ground velocity can be rebased at an explicit boundary");
+    }
+    if (nearest < 0.0 || nearest > static_cast<double>(steps)) {
+      throw std::invalid_argument(
+          "wind_schedule discontinuity lies outside the simulation horizon");
+    }
+    events.push_back({static_cast<int>(nearest), time_s});
+  }
+  return events;
+}
+
+void validate_schedule_horizon(const sim::InputSchedule& schedule,
+                               double end_s,
+                               const std::string& name) {
+  if (!schedule.empty()) {
+    const double tolerance = 1.0e-9 * std::fmax(1.0, std::fabs(end_s));
+    const double read_at =
+        std::fabs(schedule.last_time_s() - end_s) <= tolerance ? schedule.last_time_s() : end_s;
+    try {
+      (void)schedule.at(read_at);
+    } catch (const std::exception& error) {
+      throw std::invalid_argument(name + " does not cover the simulation horizon: " + error.what());
+    }
+  }
+}
+
+Eigen::Vector3d wind_at(const sim::InputSchedule& schedule,
+                        double time_s,
+                        const Eigen::Vector3d& fallback) {
+  if (schedule.empty()) {
+    return fallback;
+  }
+  const double read_at = std::clamp(time_s, schedule.first_time_s(), schedule.last_time_s());
+  return Eigen::Vector3d(schedule.at(read_at));
+}
+
+std::string wind_provenance(const sim::InputSchedule& schedule) {
+  if (schedule.empty()) {
+    return "disturbance: constant trim wind";
+  }
+  return std::string("disturbance: declared wind_schedule, hold=")
+         + (schedule.hold() == sim::HoldPolicy::Linear ? "linear" : "zero_order")
+         + ", extrapolation="
+         + (schedule.discontinuities().empty() ? "declared span" : "event-aligned span");
+}
+
+std::string turbulence_provenance(const StageContext& context) {
+  const ValuePtr turbulence = context.input->get("turbulence");
+  if (!turbulence) {
+    return {};
+  }
+  const double seed = turbulence->number_at("seed");
+  return "disturbance: gaussian_ou_v1 seeded turbulence, seed="
+         + std::to_string(static_cast<std::uint64_t>(seed));
+}
+
+std::uint64_t turbulence_splitmix64(std::uint64_t value) {
+  value += 0x9e3779b97f4a7c15ULL;
+  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+  return value ^ (value >> 31);
+}
+
+double turbulence_normal(std::uint64_t seed, int sample, int channel) {
+  std::mt19937_64 generator(
+      turbulence_splitmix64(seed ^ turbulence_splitmix64(static_cast<std::uint64_t>(sample + 1))
+                            ^ static_cast<std::uint64_t>(channel + 1)));
+  const double first = (static_cast<double>(generator() >> 11) + 0.5) / 9007199254740992.0;
+  const double second = (static_cast<double>(generator() >> 11) + 0.5) / 9007199254740992.0;
+  return std::sqrt(-2.0 * std::log(first)) * std::cos(6.2831853071795864769 * second);
+}
+
+sim::InputSchedule wind_schedule_from(const StageContext& context,
+                                      const Eigen::VectorXd& initial_state,
+                                      const model::Environment& trim_environment,
+                                      double step_s,
+                                      int steps) {
+  const ValuePtr turbulence = context.input->get("turbulence");
+  const ValuePtr declared_schedule = context.input->get("wind_schedule");
+  if (turbulence && declared_schedule) {
+    throw std::invalid_argument(
+        "helicopter simulation declares both wind_schedule and turbulence; choose one "
+        "disturbance source so the applied wind is unambiguous");
+  }
+  if (!turbulence) {
+    return schedule_at(context, "wind_schedule", 3);
+  }
+  require_map_keys(turbulence,
+                   {"model", "seed", "mean_ned_m_s", "stddev_ned_m_s", "correlation_time_s"},
+                   "helicopter simulation turbulence");
+  if (turbulence->string_at("model") != "gaussian_ou_v1") {
+    throw std::invalid_argument("helicopter simulation turbulence.model must be 'gaussian_ou_v1'");
+  }
+  const double seed_number = turbulence->number_at("seed");
+  if (!std::isfinite(seed_number) || seed_number < 0.0 || std::floor(seed_number) != seed_number
+      || seed_number > 9007199254740991.0) {
+    throw std::invalid_argument(
+        "helicopter simulation turbulence.seed must be a non-negative exactly representable "
+        "integer");
+  }
+  const Eigen::VectorXd mean = value_vector(
+      turbulence->get("mean_ned_m_s"), 3, "helicopter simulation turbulence.mean_ned_m_s");
+  const Eigen::VectorXd stddev = value_vector(
+      turbulence->get("stddev_ned_m_s"), 3, "helicopter simulation turbulence.stddev_ned_m_s");
+  const double correlation_time_s = turbulence->number_at("correlation_time_s");
+  if (!(correlation_time_s > 0.0) || !std::isfinite(correlation_time_s)
+      || (stddev.array() < 0.0).any()) {
+    throw std::invalid_argument(
+        "helicopter simulation turbulence requires a positive finite correlation_time_s and "
+        "non-negative finite stddev_ned_m_s");
+  }
+  const core::State initial = model::VehicleModel::rigid_body_part(initial_state);
+  if (!(core::airspeed(initial.velocity_body_m_s) > 0.0)) {
+    throw std::invalid_argument(
+        "helicopter simulation turbulence.gaussian_ou_v1 is unsupported at zero airspeed; "
+        "use a declared constant/gust wind or a forward-flight trim");
+  }
+
+  const std::uint64_t seed = static_cast<std::uint64_t>(seed_number);
+  const double rho = std::exp(-step_s / correlation_time_s);
+  const double innovation = std::sqrt(std::max(0.0, 1.0 - rho * rho));
+  Eigen::Vector3d value(mean);
+  std::vector<double> times;
+  std::vector<Eigen::VectorXd> values;
+  times.reserve(static_cast<std::size_t>(steps) + 1U);
+  values.reserve(static_cast<std::size_t>(steps) + 1U);
+  for (int step = 0; step <= steps; ++step) {
+    if (step > 0) {
+      for (int channel = 0; channel < 3; ++channel) {
+        value(channel) = mean(channel) + rho * (value(channel) - mean(channel))
+                         + innovation * stddev(channel) * turbulence_normal(seed, step, channel);
+      }
+    }
+    times.push_back(static_cast<double>(step) * step_s);
+    values.push_back(value);
+  }
+  (void)trim_environment;
+  return sim::InputSchedule(
+      std::move(times), std::move(values), sim::HoldPolicy::ZeroOrder, sim::Extrapolation::Hold);
+}
+
+double mass_scale_from(const StageContext& context) {
+  const double scale = context.input->number_at("mass_scale", 1.0);
+  if (!(scale > 0.0) || !std::isfinite(scale)) {
+    throw std::invalid_argument(
+        "helicopter simulation mass_scale must be a positive finite design parameter");
+  }
+  return scale;
+}
+
+Eigen::Vector3d cg_offset_from(const StageContext& context) {
+  const ValuePtr declared = context.input->get("cg_offset_body_m");
+  if (!declared) {
+    return Eigen::Vector3d::Zero();
+  }
+  const Eigen::VectorXd offset =
+      value_vector(declared, 3, "helicopter simulation cg_offset_body_m");
+  if (offset.norm() > 2.0) {
+    throw std::invalid_argument(
+        "helicopter simulation cg_offset_body_m must lie within the declared 2 m design range");
+  }
+  return Eigen::Vector3d(offset);
+}
+
+void apply_parameter_variation(model::HelicopterModel& simulation_model,
+                               double mass_scale,
+                               const Eigen::Vector3d& cg_offset_body_m) {
+  simulation_model.mass.mass_kg *= mass_scale;
+  if (!cg_offset_body_m.isZero()) {
+    simulation_model.main_rotor.position_cg_to_hub_body_m -= cg_offset_body_m;
+    simulation_model.tail_rotor.position_cg_to_hub_body_m -= cg_offset_body_m;
+    simulation_model.airframe.cg_to_fuselage_reference_body_m -= cg_offset_body_m;
+    simulation_model.airframe.cg_to_horizontal_tail_body_m -= cg_offset_body_m;
+    simulation_model.airframe.cg_to_vertical_tail_body_m -= cg_offset_body_m;
+  }
 }
 
 std::map<std::string, double> helicopter_named_values(const model::HelicopterModel& heli,
@@ -370,6 +701,69 @@ std::map<std::string, double> helicopter_named_values(const model::HelicopterMod
   return named;
 }
 
+std::vector<std::string> string_list(const ValuePtr& value, const std::string& description) {
+  if (!value || value->kind() != Value::Kind::List || value->as_list().empty()) {
+    throw std::invalid_argument(description + " must be a non-empty list of strings");
+  }
+  std::vector<std::string> result;
+  result.reserve(value->as_list().size());
+  for (const auto& item : value->as_list()) {
+    if (item->kind() != Value::Kind::String || item->as_string().empty()) {
+      throw std::invalid_argument(description + " must contain non-empty strings");
+    }
+    result.push_back(item->as_string());
+  }
+  return result;
+}
+
+std::map<std::string, double> finite_number_map(const ValuePtr& value,
+                                                const std::string& description) {
+  std::map<std::string, double> result;
+  if (!value) {
+    return result;
+  }
+  if (value->kind() != Value::Kind::Map) {
+    throw std::invalid_argument(description + " must be a map of finite numbers");
+  }
+  for (const auto& [name, entry] : value->as_map()) {
+    if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())) {
+      throw std::invalid_argument(description + " must contain only finite numbers");
+    }
+    result.emplace(name, entry->as_number());
+  }
+  return result;
+}
+
+double trajectory_signal(const HelicopterTrajectoryArtifact& run,
+                         std::size_t sample,
+                         const std::string& signal) {
+  const auto state = std::find(run.state_names.begin(), run.state_names.end(), signal);
+  if (state != run.state_names.end()) {
+    return run.states[sample](static_cast<Eigen::Index>(state - run.state_names.begin()));
+  }
+  const auto output = std::find(run.output_names.begin(), run.output_names.end(), signal);
+  if (output != run.output_names.end()) {
+    return run.outputs[sample](static_cast<Eigen::Index>(output - run.output_names.begin()));
+  }
+  const Eigen::VectorXd controls = run.applied_controls.size() == run.states.size()
+                                       ? run.applied_controls[sample]
+                                       : Eigen::VectorXd::Zero(run.model->control_count());
+  const model::Environment environment = [&] {
+    model::Environment value = model::Environment::at_geometric_altitude(0.0);
+    if (run.wind_samples_ned_m_s.size() == run.times_s.size()) {
+      value.wind_ned_m_s = run.wind_samples_ned_m_s[sample];
+    }
+    return value;
+  }();
+  const auto named = helicopter_named_values(*run.model, run.states[sample], controls, environment);
+  const auto found = named.find(signal);
+  if (found == named.end()) {
+    throw std::invalid_argument("analyze.helicopter_response names unknown signal '" + signal
+                                + "'");
+  }
+  return found->second;
+}
+
 Eigen::VectorXd named_vector(const std::map<std::string, double>& values,
                              const std::vector<std::string>& names,
                              const std::string& description) {
@@ -416,6 +810,7 @@ struct ClosedLoopControllerRuntime {
   Eigen::VectorXd trim_controls;
   double period_s = 0.0;
   std::vector<PidLoopRuntime> pid_loops;
+  sim::InputSchedule reference_schedule;
   Eigen::VectorXd last_effective_measurement;
   bool have_last_effective_measurement = false;
 
@@ -425,6 +820,13 @@ struct ClosedLoopControllerRuntime {
                                         const sim::SensorReading& reading) {
     (void)tick;
     (void)named_vector(truth, measurement_names, "sim.helicopter.closed_loop controller");
+    if (!reference_schedule.empty()) {
+      const Eigen::VectorXd scheduled = reference_schedule.at(time_s);
+      references.resize(static_cast<std::size_t>(scheduled.size()));
+      for (Eigen::Index i = 0; i < scheduled.size(); ++i) {
+        references[static_cast<std::size_t>(i)] = scheduled(i);
+      }
+    }
     Eigen::VectorXd measurement = reading.values;
     if (!reading.available) {
       if (missing_measurement == "refuse") {
@@ -1013,6 +1415,14 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
     step_description = name + " stepped by " + fixed(size * kDegreesPerRadian, 3) + " deg";
   }
 
+  const InitialCondition initial =
+      initial_condition_from(context, heli, subject.result.extended_state);
+  const sim::InputSchedule wind_schedule =
+      wind_schedule_from(context, initial.state, subject.environment, step_s, steps);
+  validate_schedule_horizon(wind_schedule, static_cast<double>(steps) * step_s, "wind_schedule");
+  const std::vector<WindEvent> wind_schedule_events =
+      wind_schedule.empty() ? std::vector<WindEvent>{} : wind_events(wind_schedule, step_s, steps);
+
   numerics::IntegrationOptions options;
   options.method = method;
   options.step_s = step_s;
@@ -1026,6 +1436,9 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   // the fixed-step lattice; an event between steps is refused instead of
   // silently moving the failure in time.
   model::HelicopterModel simulation_model = *subject.model;
+  const double mass_scale = mass_scale_from(context);
+  const Eigen::Vector3d cg_offset_body_m = cg_offset_from(context);
+  apply_parameter_variation(simulation_model, mass_scale, cg_offset_body_m);
   const auto derivative = [&](double, const Eigen::VectorXd& x) {
     return Eigen::VectorXd(simulation_model.derivative(x, commands, subject.environment));
   };
@@ -1034,17 +1447,17 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
 
   numerics::IntegrationResult result;
   std::vector<std::string> applied_failure_events;
-  if (failure_events.empty()) {
+  if (failure_events.empty() && wind_schedule.empty() && initial.provenance.size() == 1) {
     result = numerics::integrate(derivative,
-                                 subject.result.extended_state,
+                                 initial.state,
                                  0.0,
                                  options,
                                  &model::VehicleModel::project,
                                  simulation_model.state_bounds());
-  } else {
+  } else if (wind_schedule.empty()) {
     std::vector<double> all_times{0.0};
-    std::vector<Eigen::VectorXd> all_states{subject.result.extended_state};
-    Eigen::VectorXd state = subject.result.extended_state;
+    std::vector<Eigen::VectorXd> all_states{initial.state};
+    Eigen::VectorXd state = initial.state;
     int current_step = 0;
     bool completed = true;
     numerics::TerminationReason reason = numerics::TerminationReason::Completed;
@@ -1118,10 +1531,100 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
         result.trajectory.states.push_back(all_states[i]);
       }
     }
+  } else {
+    // A wind history is evaluated by the simulator, not by the model's force
+    // routine. Zero-order changes are events: rebase the air-relative velocity
+    // by -R^T delta-w before the next step so ground velocity is continuous.
+    // Linear histories carry their declared derivative through Environment.
+    Eigen::VectorXd state = initial.state;
+    Eigen::Vector3d current_wind = Eigen::Vector3d(wind_schedule.at(0.0));
+    std::size_t next_failure = 0;
+    std::size_t next_wind = 0;
+    std::vector<double> all_times{0.0};
+    std::vector<Eigen::VectorXd> all_states{state};
+    numerics::TerminationReason reason = numerics::TerminationReason::Completed;
+    std::string detail;
+    int steps_taken = 0;
+    for (int step = 0; step <= steps; ++step) {
+      const double time_s = static_cast<double>(step) * step_s;
+      while (next_wind < wind_schedule_events.size()
+             && wind_schedule_events[next_wind].step == step) {
+        const Eigen::Vector3d next_wind_value =
+            Eigen::Vector3d(wind_schedule.at(wind_schedule_events[next_wind].declared_time_s));
+        const core::State at_event = core::State::from_vector(state.head<core::kStateSize>());
+        if (wind_schedule.hold() == sim::HoldPolicy::ZeroOrder) {
+          state.segment<3>(core::kVelocityU) -=
+              core::dcm_body_from_ned(at_event.attitude_body_to_ned)
+              * (next_wind_value - current_wind);
+        }
+        current_wind = next_wind_value;
+        ++next_wind;
+      }
+      while (next_failure < failure_events.size() && failure_events[next_failure].step == step) {
+        applied_failure_events.push_back(
+            apply_failure_event(failure_events[next_failure], simulation_model, state));
+        ++next_failure;
+      }
+      if (step == steps) {
+        break;
+      }
+      const auto scheduled_derivative = [&](double stage_time, const Eigen::VectorXd& current) {
+        model::Environment environment = subject.environment;
+        environment.wind_ned_m_s = wind_schedule.hold() == sim::HoldPolicy::Linear
+                                       ? wind_at(wind_schedule, stage_time, current_wind)
+                                       : current_wind;
+        if (wind_schedule.hold() == sim::HoldPolicy::Linear) {
+          const double read_at =
+              std::clamp(std::nextafter(stage_time, -std::numeric_limits<double>::infinity()),
+                         wind_schedule.first_time_s(),
+                         wind_schedule.last_time_s());
+          environment.wind_rate_ned_m_s2 = wind_schedule.rate_at(read_at);
+        } else {
+          environment.wind_rate_ned_m_s2.setZero();
+        }
+        return Eigen::VectorXd(simulation_model.derivative(current, commands, environment));
+      };
+      numerics::IntegrationOptions one_step;
+      one_step.method = method;
+      one_step.step_s = step_s;
+      one_step.step_count = 1;
+      one_step.sample_stride = 1;
+      one_step.newton_iterations = options.newton_iterations;
+      const auto integrated = numerics::integrate(scheduled_derivative,
+                                                  state,
+                                                  time_s,
+                                                  one_step,
+                                                  &model::VehicleModel::project,
+                                                  simulation_model.state_bounds());
+      if (!integrated.completed()) {
+        reason = integrated.reason;
+        detail = integrated.detail;
+        steps_taken = step + integrated.steps_taken;
+        break;
+      }
+      state = integrated.trajectory.states.back();
+      all_times.push_back(time_s + step_s);
+      all_states.push_back(state);
+      steps_taken = step + 1;
+    }
+    result.method = method;
+    result.reason = reason;
+    result.detail = detail;
+    result.steps_taken = steps_taken;
+    result.termination_time_s = all_times.back();
+    result.trajectory.step_s = step_s;
+    result.trajectory.step_count = steps_taken;
+    result.trajectory.sample_stride = stride;
+    for (std::size_t i = 0; i < all_states.size(); ++i) {
+      if (i == 0 || i + 1 == all_states.size() || (static_cast<int>(i) % stride == 0)) {
+        result.trajectory.times_s.push_back(all_times[i]);
+        result.trajectory.states.push_back(all_states[i]);
+      }
+    }
   }
 
   HelicopterTrajectoryArtifact trajectory;
-  trajectory.model = subject.model;
+  trajectory.model = std::make_shared<const model::HelicopterModel>(simulation_model);
   trajectory.times_s = result.trajectory.times_s;
   trajectory.states = result.trajectory.states;
   trajectory.state_names = heli.state_names();
@@ -1131,14 +1634,35 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   trajectory.step_s = step_s;
   trajectory.steps_taken = result.steps_taken;
   trajectory.failure_events = std::move(applied_failure_events);
+  trajectory.initial_condition_provenance = initial.provenance;
+  trajectory.disturbance_provenance = context.input->get("turbulence")
+                                          ? turbulence_provenance(context)
+                                          : wind_provenance(wind_schedule);
+  trajectory.parameter_provenance =
+      "mass_scale=" + fixed(mass_scale, 9) + ", cg_offset_body_m=[" + fixed(cg_offset_body_m(0), 9)
+      + ", " + fixed(cg_offset_body_m(1), 9) + ", " + fixed(cg_offset_body_m(2), 9) + "]";
+  for (const double time_s : trajectory.times_s) {
+    trajectory.wind_samples_ned_m_s.push_back(
+        wind_at(wind_schedule, time_s, subject.environment.wind_ned_m_s));
+  }
 
-  for (const auto& state : trajectory.states) {
+  for (std::size_t i = 0; i < trajectory.states.size(); ++i) {
+    const auto& state = trajectory.states[i];
+    const int step = static_cast<int>(std::llround(trajectory.times_s[i] / step_s));
+    const model::HelicopterModel output_model =
+        model_at_failure_step(simulation_model, failure_events, step);
     const core::State rigid = model::VehicleModel::rigid_body_part(state);
-    const Eigen::VectorXd auxiliary = simulation_model.auxiliary_part(state);
-    trajectory.outputs.push_back(
-        simulation_model.outputs(rigid, auxiliary, commands, subject.environment));
-    const auto envelope =
-        simulation_model.envelope(rigid, auxiliary, commands, subject.environment);
+    const Eigen::VectorXd auxiliary = output_model.auxiliary_part(state);
+    trajectory.outputs.push_back(output_model.outputs(rigid, auxiliary, commands, [&] {
+      model::Environment environment = subject.environment;
+      environment.wind_ned_m_s = trajectory.wind_samples_ned_m_s[i];
+      return environment;
+    }()));
+    const auto envelope = output_model.envelope(rigid, auxiliary, commands, [&] {
+      model::Environment environment = subject.environment;
+      environment.wind_ned_m_s = trajectory.wind_samples_ned_m_s[i];
+      return environment;
+    }());
     if (envelope.outside) {
       ++trajectory.envelope_departures;
       if (envelope.worst_departure > trajectory.worst_envelope.worst_departure) {
@@ -1208,6 +1732,23 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
 
   auto controller = std::make_shared<ClosedLoopControllerRuntime>(
       make_closed_loop_controller(context, heli, subject, period_s));
+  const InitialCondition initial =
+      initial_condition_from(context, heli, subject.result.extended_state);
+  const sim::InputSchedule wind_schedule =
+      wind_schedule_from(context, initial.state, subject.environment, step_s, steps);
+  validate_schedule_horizon(wind_schedule, static_cast<double>(steps) * step_s, "wind_schedule");
+  const std::vector<WindEvent> wind_schedule_events =
+      wind_schedule.empty() ? std::vector<WindEvent>{} : wind_events(wind_schedule, step_s, steps);
+  controller->reference_schedule =
+      schedule_at(context, "reference_schedule", static_cast<int>(controller->references.size()));
+  validate_schedule_horizon(
+      controller->reference_schedule, static_cast<double>(steps) * step_s, "reference_schedule");
+  if (!controller->reference_schedule.empty()
+      && controller->reference_schedule.first_time_s() > 0.0) {
+    throw std::invalid_argument(
+        "reference_schedule must declare a value at t = 0 so the initial controller reference "
+        "is unambiguous");
+  }
   std::vector<std::string> sensor_provenance;
   auto sensor = std::shared_ptr<sim::DeterministicSensor>(
       make_closed_loop_sensor(context, controller->measurement_names, step_s, sensor_provenance));
@@ -1215,19 +1756,42 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
       parse_failure_events(context, heli, step_s, steps);
 
   model::HelicopterModel simulation_model = *subject.model;
+  const double mass_scale = mass_scale_from(context);
+  const Eigen::Vector3d cg_offset_body_m = cg_offset_from(context);
+  apply_parameter_variation(simulation_model, mass_scale, cg_offset_body_m);
   std::size_t next_event = 0;
+  std::size_t next_wind_event = 0;
+  Eigen::Vector3d current_wind = wind_schedule.empty() ? subject.environment.wind_ned_m_s
+                                                       : Eigen::Vector3d(wind_schedule.at(0.0));
   std::map<std::string, double> latest_truth;
   sim::SensorReading latest_reading;
   Eigen::VectorXd last_applied = subject.holding_controls;
   std::vector<std::string> applied_failure_events;
   const auto update_measurement = [&](int step, double time_s, Eigen::VectorXd& state) {
+    while (next_wind_event < wind_schedule_events.size()
+           && wind_schedule_events[next_wind_event].step == step) {
+      const Eigen::Vector3d next_wind_value =
+          Eigen::Vector3d(wind_schedule.at(wind_schedule_events[next_wind_event].declared_time_s));
+      const core::State at_event = core::State::from_vector(state.head<core::kStateSize>());
+      if (wind_schedule.hold() == sim::HoldPolicy::ZeroOrder) {
+        state.segment<3>(core::kVelocityU) -= core::dcm_body_from_ned(at_event.attitude_body_to_ned)
+                                              * (next_wind_value - current_wind);
+      }
+      current_wind = next_wind_value;
+      ++next_wind_event;
+    }
     while (next_event < failure_events.size() && failure_events[next_event].step == step) {
       applied_failure_events.push_back(
           apply_failure_event(failure_events[next_event], simulation_model, state));
       ++next_event;
     }
+    model::Environment measurement_environment = subject.environment;
+    measurement_environment.wind_ned_m_s = current_wind;
+    if (!wind_schedule.empty() && wind_schedule.hold() == sim::HoldPolicy::Linear) {
+      measurement_environment.wind_ned_m_s = wind_at(wind_schedule, time_s, current_wind);
+    }
     latest_truth =
-        helicopter_named_values(simulation_model, state, last_applied, subject.environment);
+        helicopter_named_values(simulation_model, state, last_applied, measurement_environment);
     const Eigen::VectorXd truth = named_vector(
         latest_truth, controller->measurement_names, "sim.helicopter.closed_loop sensor");
     if (sensor) {
@@ -1247,11 +1811,26 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
   options.steps = steps;
   options.sample_stride = stride;
   options.delay_periods = delay_periods;
-  options.initial_state = subject.result.extended_state;
+  options.initial_state = initial.state;
   options.trim_controls = subject.holding_controls;
-  options.derivative = [&](double, const Eigen::VectorXd& state, const Eigen::VectorXd& controls) {
-    return Eigen::VectorXd(simulation_model.derivative(state, controls, subject.environment));
-  };
+  options.derivative =
+      [&](double time_s, const Eigen::VectorXd& state, const Eigen::VectorXd& controls) {
+        model::Environment environment = subject.environment;
+        environment.wind_ned_m_s =
+            wind_schedule.empty() || wind_schedule.hold() == sim::HoldPolicy::ZeroOrder
+                ? current_wind
+                : wind_at(wind_schedule, time_s, current_wind);
+        if (!wind_schedule.empty() && wind_schedule.hold() == sim::HoldPolicy::Linear) {
+          const double read_at =
+              std::clamp(std::nextafter(time_s, -std::numeric_limits<double>::infinity()),
+                         wind_schedule.first_time_s(),
+                         wind_schedule.last_time_s());
+          environment.wind_rate_ned_m_s2 = wind_schedule.rate_at(read_at);
+        } else {
+          environment.wind_rate_ned_m_s2.setZero();
+        }
+        return Eigen::VectorXd(simulation_model.derivative(state, controls, environment));
+      };
   options.projection = &model::VehicleModel::project;
   options.state_bounds = simulation_model.state_bounds();
   options.on_boundary = [&](int step, double time_s, Eigen::VectorXd& state) {
@@ -1279,7 +1858,7 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
 
   const sim::SampledLoopResult result = sim::run_sampled_loop(options);
   HelicopterTrajectoryArtifact trajectory;
-  trajectory.model = subject.model;
+  trajectory.model = std::make_shared<const model::HelicopterModel>(simulation_model);
   trajectory.closed_loop = true;
   trajectory.times_s = result.integration.trajectory.times_s;
   trajectory.states = result.integration.trajectory.states;
@@ -1290,6 +1869,13 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
   trajectory.step_s = step_s;
   trajectory.steps_taken = result.integration.steps_taken;
   trajectory.failure_events = std::move(applied_failure_events);
+  trajectory.initial_condition_provenance = initial.provenance;
+  trajectory.disturbance_provenance = context.input->get("turbulence")
+                                          ? turbulence_provenance(context)
+                                          : wind_provenance(wind_schedule);
+  trajectory.parameter_provenance =
+      "mass_scale=" + fixed(mass_scale, 9) + ", cg_offset_body_m=[" + fixed(cg_offset_body_m(0), 9)
+      + ", " + fixed(cg_offset_body_m(1), 9) + ", " + fixed(cg_offset_body_m(2), 9) + "]";
   trajectory.applied_controls = result.held_controls;
   trajectory.controller_measurement_names = controller->measurement_names;
   trajectory.controller_state_names = controller->controller_state_names;
@@ -1307,18 +1893,28 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
     trajectory.controller_measurement_stale.push_back(tick.measurement_stale);
   }
 
+  for (const double time_s : trajectory.times_s) {
+    trajectory.wind_samples_ned_m_s.push_back(
+        wind_at(wind_schedule, time_s, subject.environment.wind_ned_m_s));
+  }
+
   for (std::size_t i = 0; i < trajectory.states.size(); ++i) {
     const auto& state = trajectory.states[i];
+    const int step = static_cast<int>(std::llround(trajectory.times_s[i] / step_s));
+    const model::HelicopterModel output_model =
+        model_at_failure_step(simulation_model, failure_events, step);
     const core::State rigid = model::VehicleModel::rigid_body_part(state);
-    const Eigen::VectorXd auxiliary = simulation_model.auxiliary_part(state);
+    const Eigen::VectorXd auxiliary = output_model.auxiliary_part(state);
     const Eigen::VectorXd& output_controls =
         trajectory.applied_controls.size() == trajectory.states.size()
             ? trajectory.applied_controls[i]
             : last_applied;
+    model::Environment output_environment = subject.environment;
+    output_environment.wind_ned_m_s = trajectory.wind_samples_ned_m_s[i];
     trajectory.outputs.push_back(
-        simulation_model.outputs(rigid, auxiliary, output_controls, subject.environment));
+        output_model.outputs(rigid, auxiliary, output_controls, output_environment));
     const auto envelope =
-        simulation_model.envelope(rigid, auxiliary, output_controls, subject.environment);
+        output_model.envelope(rigid, auxiliary, output_controls, output_environment);
     if (envelope.outside) {
       ++trajectory.envelope_departures;
       if (envelope.worst_departure > trajectory.worst_envelope.worst_departure) {
@@ -1372,6 +1968,9 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   for (const auto& name : run.output_names) {
     out << ",output_" << name;
   }
+  if (run.wind_samples_ned_m_s.size() == run.times_s.size()) {
+    out << ",wind_north_m_s,wind_east_m_s,wind_down_m_s";
+  }
   const bool has_held_controls =
       run.closed_loop && run.applied_controls.size() == run.times_s.size();
   if (has_held_controls) {
@@ -1388,6 +1987,10 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
     }
     for (Eigen::Index j = 0; j < run.outputs[i].size(); ++j) {
       out << "," << run.outputs[i](j);
+    }
+    if (run.wind_samples_ned_m_s.size() == run.times_s.size()) {
+      out << "," << run.wind_samples_ned_m_s[i](0) << "," << run.wind_samples_ned_m_s[i](1) << ","
+          << run.wind_samples_ned_m_s[i](2);
     }
     if (has_held_controls) {
       for (Eigen::Index j = 0; j < run.applied_controls[i].size(); ++j) {
@@ -1472,6 +2075,405 @@ Artifact report_helicopter_csv_capability(const StageContext& context) {
   }
   artifact.summary = summary.str();
   artifact.payload = std::string(path);
+  return artifact;
+}
+
+// ---------------------------------------------------------------------------
+// analyze.helicopter_response
+// ---------------------------------------------------------------------------
+
+Artifact analyze_helicopter_response_capability(const StageContext& context) {
+  const auto& open = context.upstream_at("open_loop")
+                         .payload_as<HelicopterTrajectoryArtifact>("helicopter_trajectory");
+  const auto& closed = context.upstream_at("closed_loop")
+                           .payload_as<HelicopterTrajectoryArtifact>("helicopter_trajectory");
+  bool matched_time_lattice = open.times_s.size() == closed.times_s.size();
+  if (matched_time_lattice) {
+    for (std::size_t i = 0; i < open.times_s.size(); ++i) {
+      matched_time_lattice =
+          matched_time_lattice && std::fabs(open.times_s[i] - closed.times_s[i]) <= 1.0e-12;
+    }
+  }
+  if (!matched_time_lattice || open.states.front().size() != closed.states.front().size()
+      || open.states.size() != closed.states.size()) {
+    throw std::invalid_argument(
+        "analyze.helicopter_response requires open_loop and closed_loop on the same time lattice");
+  }
+  HelicopterResponseArtifact response;
+  response.requirements = finite_number_map(context.input->get("requirements"),
+                                            "analyze.helicopter_response requirements");
+  const std::vector<std::string> signals =
+      string_list(context.input->get("signals"), "analyze.helicopter_response signals");
+  const std::map<std::string, double> references =
+      finite_number_map(context.input->get("reference"), "analyze.helicopter_response reference");
+
+  response.matched_initial_condition =
+      (open.states.front() - closed.states.front()).norm() <= 1.0e-12;
+  response.matched_disturbance =
+      open.wind_samples_ned_m_s.size() == closed.wind_samples_ned_m_s.size();
+  if (response.matched_disturbance) {
+    for (std::size_t i = 0; i < open.wind_samples_ned_m_s.size(); ++i) {
+      response.matched_disturbance =
+          response.matched_disturbance
+          && (open.wind_samples_ned_m_s[i] - closed.wind_samples_ned_m_s[i]).norm() <= 1.0e-12;
+    }
+  }
+  if (!response.matched_initial_condition || !response.matched_disturbance) {
+    throw std::invalid_argument(
+        "analyze.helicopter_response requires identical initial conditions and disturbance "
+        "histories for the controlled/uncontrolled comparison");
+  }
+
+  const double settling_budget = response.requirements.count("tracking_error")
+                                     ? response.requirements.at("tracking_error")
+                                     : 0.0;
+  if (!(settling_budget > 0.0)) {
+    throw std::invalid_argument(
+        "analyze.helicopter_response requirements must declare a positive tracking_error budget "
+        "before a controller is tuned against the study");
+  }
+  for (const std::string& signal : signals) {
+    const auto explicit_reference = references.find(signal);
+    const auto measurement = std::find(closed.controller_measurement_names.begin(),
+                                       closed.controller_measurement_names.end(),
+                                       signal);
+    const std::optional<std::size_t> scheduled_index =
+        measurement == closed.controller_measurement_names.end()
+            ? std::nullopt
+            : std::optional<std::size_t>(static_cast<std::size_t>(
+                  measurement - closed.controller_measurement_names.begin()));
+    const auto reference_at = [&](std::size_t sample) {
+      if (explicit_reference != references.end()) {
+        return explicit_reference->second;
+      }
+      if (scheduled_index && !closed.controller_references.empty()) {
+        std::size_t tick = 0;
+        while (tick + 1 < closed.controller_times_s.size()
+               && closed.controller_times_s[tick + 1] <= open.times_s[sample] + 1.0e-12) {
+          ++tick;
+        }
+        return closed.controller_references[tick](static_cast<Eigen::Index>(*scheduled_index));
+      }
+      return trajectory_signal(open, 0, signal);
+    };
+    HelicopterResponseMetric metric;
+    metric.signal = signal;
+    metric.reference = reference_at(closed.times_s.size() - 1);
+    metric.settling_time_s = 0.0;
+    for (std::size_t i = 0; i < closed.times_s.size(); ++i) {
+      const double reference = reference_at(i);
+      const double error = trajectory_signal(closed, i, signal) - reference;
+      const double uncontrolled = trajectory_signal(open, i, signal) - reference;
+      metric.peak_error = std::max(metric.peak_error, std::fabs(error));
+      metric.uncontrolled_peak_error =
+          std::max(metric.uncontrolled_peak_error, std::fabs(uncontrolled));
+      if (std::fabs(error) > settling_budget) {
+        metric.settling_time_s = std::numeric_limits<double>::infinity();
+      } else if (std::isinf(metric.settling_time_s)) {
+        bool remains_settled = true;
+        for (std::size_t j = i; j < closed.times_s.size(); ++j) {
+          if (std::fabs(trajectory_signal(closed, j, signal) - reference_at(j)) > settling_budget) {
+            remains_settled = false;
+            break;
+          }
+        }
+        if (remains_settled) {
+          metric.settling_time_s = closed.times_s[i];
+        }
+      }
+    }
+    metric.final_error = std::fabs(trajectory_signal(closed, closed.times_s.size() - 1, signal)
+                                   - reference_at(closed.times_s.size() - 1));
+    response.metrics.push_back(metric);
+  }
+
+  if (closed.closed_loop && !closed.controller_requested.empty()) {
+    const double tick_period = closed.controller_times_s.size() > 1
+                                   ? closed.controller_times_s[1] - closed.controller_times_s[0]
+                                   : closed.step_s;
+    int saturated_ticks = 0;
+    for (std::size_t i = 0; i < closed.controller_requested.size(); ++i) {
+      response.maximum_control_deviation = std::max(
+          response.maximum_control_deviation,
+          (closed.controller_applied[i] - closed.controller_requested[i]).cwiseAbs().maxCoeff());
+      const Eigen::VectorXd difference =
+          closed.controller_requested[i] - closed.controller_saturated[i];
+      if (difference.cwiseAbs().maxCoeff() > 1.0e-12) {
+        ++saturated_ticks;
+      }
+    }
+    response.saturation_duration_s = static_cast<double>(saturated_ticks) * tick_period;
+  }
+  const auto rotor =
+      std::find(closed.output_names.begin(), closed.output_names.end(), "main_rotor_speed_rad_s");
+  if (rotor != closed.output_names.end()) {
+    const double initial_speed = closed.outputs.front()(rotor - closed.output_names.begin());
+    for (const auto& output : closed.outputs) {
+      response.maximum_rotor_speed_excursion =
+          std::max(response.maximum_rotor_speed_excursion,
+                   std::fabs(output(rotor - closed.output_names.begin()) - initial_speed));
+    }
+  }
+  response.controlled_envelope_departures = closed.envelope_departures;
+  response.uncontrolled_envelope_departures = open.envelope_departures;
+
+  response.criteria_passed = true;
+  const auto budget_exceeded = [&response](const std::string& name, double measured) {
+    const auto budget = response.requirements.find(name);
+    return budget != response.requirements.end() && measured > budget->second;
+  };
+  for (const auto& metric : response.metrics) {
+    response.criteria_passed =
+        response.criteria_passed && !budget_exceeded("tracking_error", metric.peak_error);
+    if (response.requirements.count("settling_time_s") != 0) {
+      response.criteria_passed =
+          response.criteria_passed && std::isfinite(metric.settling_time_s)
+          && metric.settling_time_s <= response.requirements.at("settling_time_s");
+    }
+    if (response.requirements.count("overshoot") != 0 && metric.uncontrolled_peak_error > 0.0) {
+      response.criteria_passed = response.criteria_passed
+                                 && metric.peak_error / metric.uncontrolled_peak_error
+                                        <= response.requirements.at("overshoot");
+    }
+  }
+  response.criteria_passed =
+      response.criteria_passed
+      && !budget_exceeded("control_effort_rad", response.maximum_control_deviation)
+      && !budget_exceeded("saturation_duration_s", response.saturation_duration_s)
+      && !budget_exceeded("rotor_speed_excursion_rad_s", response.maximum_rotor_speed_excursion)
+      && (response.requirements.count("validity_envelope_departures") == 0
+          || response.controlled_envelope_departures
+                 <= response.requirements.at("validity_envelope_departures"));
+
+  Artifact artifact;
+  artifact.kind = "helicopter_response";
+  std::ostringstream summary;
+  summary << "matched open/closed-loop study; " << signals.size() << " response signal(s)";
+  for (const auto& metric : response.metrics) {
+    summary << "; " << metric.signal << " peak " << scientific(metric.peak_error) << ", final "
+            << scientific(metric.final_error) << ", settling ";
+    if (std::isfinite(metric.settling_time_s)) {
+      summary << fixed(metric.settling_time_s, 3) << " s";
+    } else {
+      summary << "not settled";
+    }
+  }
+  summary << "; max command tracking deviation " << scientific(response.maximum_control_deviation)
+          << ", saturation duration " << fixed(response.saturation_duration_s, 3) << " s"
+          << ", rotor-speed excursion " << scientific(response.maximum_rotor_speed_excursion)
+          << ", envelope departures controlled/uncontrolled "
+          << response.controlled_envelope_departures << "/"
+          << response.uncontrolled_envelope_departures << "; engineering criteria "
+          << (response.criteria_passed ? "PASS" : "FAIL");
+  artifact.summary = summary.str();
+  artifact.payload = std::move(response);
+  return artifact;
+}
+
+Artifact ensemble_helicopter_capability(const StageContext& context) {
+  const auto& trim =
+      context.upstream_at("trim").payload_as<HelicopterTrimArtifact>("helicopter_trim");
+  (void)trim;
+  const ValuePtr members = context.input->get("members");
+  if (!members || members->kind() != Value::Kind::List || members->as_list().empty()) {
+    throw std::invalid_argument(
+        "study.helicopter_ensemble members must be a non-empty declaration-order list");
+  }
+  const double step_s = context.input->number_at("step_s");
+  const int steps = context.input->integer_at("steps", 0);
+  const int sample_stride = context.input->integer_at("sample_stride", 1);
+  if (!(step_s > 0.0) || !std::isfinite(step_s) || steps < 1 || sample_stride < 1) {
+    throw std::invalid_argument(
+        "study.helicopter_ensemble requires positive step_s, steps and sample_stride");
+  }
+  const bool parallel = context.input->bool_at("parallel", false);
+  const std::string manifest_prefix = context.input->string_at("manifest_prefix", "member");
+  if (manifest_prefix.empty()) {
+    throw std::invalid_argument("study.helicopter_ensemble manifest_prefix must be non-empty");
+  }
+  const int criteria_limit = context.input->integer_at("criteria_max_envelope_departures", 0);
+  if (criteria_limit < 0) {
+    throw std::invalid_argument(
+        "study.helicopter_ensemble criteria_max_envelope_departures must be non-negative");
+  }
+
+  struct MemberInput {
+    std::string id;
+    std::uint64_t seed = 0;
+    double mass_scale = 1.0;
+    Eigen::Vector3d cg_offset_body_m = Eigen::Vector3d::Zero();
+    ValuePtr perturbation;
+  };
+
+  std::vector<MemberInput> declared;
+  declared.reserve(members->as_list().size());
+  std::set<std::string> ids;
+  for (std::size_t i = 0; i < members->as_list().size(); ++i) {
+    const ValuePtr& entry = members->as_list()[i];
+    require_map_keys(entry,
+                     {"id", "seed", "mass_scale", "cg_offset_body_m", "initial_state_perturbation"},
+                     "study.helicopter_ensemble members[]");
+    const std::string id = entry->string_at("id");
+    if (!ids.insert(id).second) {
+      throw std::invalid_argument("study.helicopter_ensemble member ids must be unique");
+    }
+    const double seed_number = entry->number_at("seed");
+    if (!std::isfinite(seed_number) || seed_number < 0.0 || std::floor(seed_number) != seed_number
+        || seed_number > 9007199254740991.0) {
+      throw std::invalid_argument(
+          "study.helicopter_ensemble member seeds must be non-negative exactly representable "
+          "integers");
+    }
+    const double mass_scale = entry->number_at("mass_scale", 1.0);
+    if (!(mass_scale > 0.0) || !std::isfinite(mass_scale)) {
+      throw std::invalid_argument(
+          "study.helicopter_ensemble member mass_scale must be positive and finite");
+    }
+    const Eigen::Vector3d cg_offset = [&]() -> Eigen::Vector3d {
+      const ValuePtr value = entry->get("cg_offset_body_m");
+      if (!value) {
+        return Eigen::Vector3d::Zero();
+      }
+      const Eigen::VectorXd parsed =
+          value_vector(value, 3, "study.helicopter_ensemble member cg_offset_body_m");
+      if (parsed.norm() > 2.0) {
+        throw std::invalid_argument(
+            "study.helicopter_ensemble member cg_offset_body_m must lie within the declared "
+            "2 m design range");
+      }
+      return Eigen::Vector3d(parsed);
+    }();
+    declared.push_back({id,
+                        static_cast<std::uint64_t>(seed_number),
+                        mass_scale,
+                        cg_offset,
+                        entry->get("initial_state_perturbation")});
+  }
+
+  const ValuePtr turbulence = context.input->get("turbulence");
+  if (turbulence) {
+    require_map_keys(turbulence,
+                     {"model", "seed", "mean_ned_m_s", "stddev_ned_m_s", "correlation_time_s"},
+                     "study.helicopter_ensemble turbulence");
+    if (turbulence->string_at("model") != "gaussian_ou_v1") {
+      throw std::invalid_argument(
+          "study.helicopter_ensemble turbulence.model must be 'gaussian_ou_v1'");
+    }
+  }
+
+  const auto run_member = [&](const MemberInput& member) {
+    std::map<std::string, ValuePtr> input;
+    input.emplace("trim", context.input->get("trim"));
+    input.emplace("step_s", Value::number(step_s));
+    input.emplace("steps", Value::number(static_cast<double>(steps)));
+    input.emplace("sample_stride", Value::number(static_cast<double>(sample_stride)));
+    input.emplace("mass_scale", Value::number(member.mass_scale));
+    if (!member.cg_offset_body_m.isZero()) {
+      input.emplace("cg_offset_body_m",
+                    Value::list({Value::number(member.cg_offset_body_m(0)),
+                                 Value::number(member.cg_offset_body_m(1)),
+                                 Value::number(member.cg_offset_body_m(2))}));
+    }
+    if (member.perturbation) {
+      input.emplace("initial_state_perturbation", member.perturbation);
+    }
+    if (turbulence) {
+      std::map<std::string, ValuePtr> fields = turbulence->as_map();
+      fields["seed"] = Value::number(static_cast<double>(member.seed));
+      input.emplace("turbulence", Value::map(std::move(fields)));
+    }
+    StageContext member_context = context;
+    member_context.input = Value::map(std::move(input));
+    member_context.stage_id = context.stage_id + "." + member.id;
+    HelicopterEnsembleMember record;
+    record.id = member.id;
+    record.seed = member.seed;
+    record.mass_scale = member.mass_scale;
+    record.cg_offset_body_m = member.cg_offset_body_m;
+    try {
+      const Artifact run = simulate_helicopter_capability(member_context);
+      const auto& trajectory =
+          run.payload_as<HelicopterTrajectoryArtifact>("helicopter_trajectory");
+      record.completed = trajectory.reason == numerics::TerminationReason::Completed;
+      record.envelope_departures = trajectory.envelope_departures;
+      record.criteria_passed = record.completed && record.envelope_departures <= criteria_limit;
+      record.termination = record.completed ? "completed" : numerics::to_string(trajectory.reason);
+    } catch (const std::exception& error) {
+      record.completed = false;
+      record.criteria_passed = false;
+      record.termination = std::string("refused: ") + error.what();
+    }
+    return record;
+  };
+
+  std::vector<HelicopterEnsembleMember> records(declared.size());
+  if (parallel) {
+    std::vector<std::future<HelicopterEnsembleMember>> futures;
+    futures.reserve(declared.size());
+    for (const auto& member : declared) {
+      futures.push_back(std::async(std::launch::async, run_member, member));
+    }
+    for (std::size_t i = 0; i < futures.size(); ++i) {
+      records[i] = futures[i].get();
+    }
+  } else {
+    for (std::size_t i = 0; i < declared.size(); ++i) {
+      records[i] = run_member(declared[i]);
+    }
+  }
+
+  std::ostringstream aggregate;
+  aggregate.imbue(std::locale::classic());
+  aggregate << "{\n  \"ordering\": \"declaration_order\",\n  \"parallel\": "
+            << (parallel ? "true" : "false") << ",\n  \"members\": [\n";
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    auto& record = records[i];
+    record.manifest_path = manifest_prefix + "-" + std::to_string(i) + ".json";
+    std::ostringstream manifest;
+    manifest.imbue(std::locale::classic());
+    manifest << "{\n  \"id\": \"" << record.id << "\",\n  \"seed\": " << record.seed
+             << ",\n  \"random_algorithm\": \"splitmix64_mt19937_64_box_muller_v1\",\n"
+                "  \"mass_scale\": "
+             << std::setprecision(17) << record.mass_scale << ",\n  \"cg_offset_body_m\": ["
+             << record.cg_offset_body_m(0) << ", " << record.cg_offset_body_m(1) << ", "
+             << record.cg_offset_body_m(2) << "]"
+             << ",\n  \"solver\": \"rk4_fixed\",\n  \"step_s\": " << step_s
+             << ",\n  \"steps\": " << steps << ",\n  \"model\": \"" << trim.model->description()
+             << "\",\n  \"completion\": " << (record.completed ? "true" : "false")
+             << ",\n  \"criteria_passed\": " << (record.criteria_passed ? "true" : "false")
+             << ",\n  \"envelope_departures\": " << record.envelope_departures
+             << ",\n  \"termination\": \"" << record.termination << "\"\n}\n";
+    context.write_output(record.manifest_path, manifest.str());
+    aggregate << "    {\"id\": \"" << record.id << "\", \"manifest\": \"" << record.manifest_path
+              << "\", \"completed\": " << (record.completed ? "true" : "false")
+              << ", \"criteria_passed\": " << (record.criteria_passed ? "true" : "false") << "}"
+              << (i + 1 == records.size() ? "\n" : ",\n");
+  }
+  aggregate << "  ]\n}\n";
+  const std::string aggregate_path = context.input->string_at("aggregate_path", "ensemble.json");
+  context.write_output(aggregate_path, aggregate.str());
+
+  HelicopterEnsembleArtifact ensemble;
+  ensemble.members = std::move(records);
+  ensemble.parallel = parallel;
+  ensemble.ordering_policy = "declaration_order; continuation is not used; members are independent";
+  Artifact artifact;
+  artifact.kind = "helicopter_ensemble";
+  const int completed_count = static_cast<int>(
+      std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
+        return member.completed;
+      }));
+  const int criteria_count = static_cast<int>(
+      std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
+        return member.criteria_passed;
+      }));
+  std::ostringstream summary;
+  summary << ensemble.members.size() << " independent helicopter members in declaration order; "
+          << completed_count << " completed, " << criteria_count
+          << " passed engineering criteria; aggregate in " << aggregate_path << "; execution "
+          << (parallel ? "parallel" : "serial");
+  artifact.summary = summary.str();
+  artifact.payload = std::move(ensemble);
   return artifact;
 }
 
@@ -1570,6 +2572,52 @@ void write_agreement_section(std::ostream& out, const AgreementArtifact& subject
          "so the observed order should sit at 2. An order near 1, or a discrepancy that stops "
          "falling, indicates a first-order error — a wrong sign, a missing term, a point that is "
          "not an equilibrium — or a term that is not differentiable at the trim point.\n\n";
+}
+
+void write_response_section(std::ostream& out, const HelicopterResponseArtifact& response) {
+  out << "The controlled and uncontrolled trajectories share the same initial state and "
+         "disturbance history. Requirements were declared before the controller run.\n\n";
+  out << "| Requirement | Declared budget |\n|---|---:|\n";
+  for (const auto& [name, value] : response.requirements) {
+    out << "| " << name << " | " << scientific(value, 4) << " |\n";
+  }
+  out << "\n| Signal | Reference | Controlled peak error | Final error | Settling time (s) | "
+         "Uncontrolled peak error |\n|---|---:|---:|---:|---:|---:|\n";
+  for (const auto& metric : response.metrics) {
+    out << "| " << metric.signal << " | " << scientific(metric.reference, 4) << " | "
+        << scientific(metric.peak_error, 4) << " | " << scientific(metric.final_error, 4) << " | ";
+    if (std::isfinite(metric.settling_time_s)) {
+      out << fixed(metric.settling_time_s, 4);
+    } else {
+      out << "not settled";
+    }
+    out << " | " << scientific(metric.uncontrolled_peak_error, 4) << " |\n";
+  }
+  out << "\nActuator command-to-state maximum deviation: "
+      << scientific(response.maximum_control_deviation, 4)
+      << ". Saturation duration: " << fixed(response.saturation_duration_s, 4)
+      << " s. Rotor-speed excursion: " << scientific(response.maximum_rotor_speed_excursion, 4)
+      << " rad/s. Envelope departures (controlled/uncontrolled): "
+      << response.controlled_envelope_departures << "/" << response.uncontrolled_envelope_departures
+      << ". Engineering criteria: **" << (response.criteria_passed ? "PASS" : "FAIL") << "**.\n\n";
+}
+
+void write_ensemble_section(std::ostream& out, const HelicopterEnsembleArtifact& ensemble) {
+  out << "Members execute independently in " << ensemble.ordering_policy << ". Execution was "
+      << (ensemble.parallel ? "parallel" : "serial") << ".\n\n";
+  out << "| Member | Seed | Mass scale | CG offset body (m) | Completion | Criteria | "
+         "Envelope departures | Manifest |\n"
+         "|---|---:|---:|---|---|---|---:|---|\n";
+  for (const auto& member : ensemble.members) {
+    out << "| " << member.id << " | " << member.seed << " | " << fixed(member.mass_scale, 6)
+        << " | [" << fixed(member.cg_offset_body_m(0), 4) << ", "
+        << fixed(member.cg_offset_body_m(1), 4) << ", " << fixed(member.cg_offset_body_m(2), 4)
+        << "] | " << (member.completed ? "completed" : "refused/diverged") << " | "
+        << (member.criteria_passed ? "pass" : "fail/excluded") << " | "
+        << member.envelope_departures << " | " << member.manifest_path << " |\n";
+  }
+  out << "\nSuccessful completion is reported separately from passing the declared engineering "
+         "criteria.\n\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -1673,6 +2721,17 @@ void write_trajectory_section(std::ostream& out, const HelicopterTrajectoryArtif
     }
     out << "\n";
   }
+  if (!run.initial_condition_provenance.empty()) {
+    out << "Initial condition:\n\n";
+    for (const auto& item : run.initial_condition_provenance) {
+      out << "- " << item << "\n";
+    }
+    out << "\n";
+  }
+  out << run.disturbance_provenance << ".\n\n";
+  if (!run.parameter_provenance.empty()) {
+    out << "Parameter variation: " << run.parameter_provenance << ".\n\n";
+  }
 
   if (!run.times_s.empty()) {
     out << "| Output | Initial | Final |\n|---|---|---|\n";
@@ -1699,6 +2758,16 @@ bool write_helicopter_section(std::ostream& out, const Artifact& artifact) {
   }
   if (artifact.kind == "nonlinear_agreement") {
     write_agreement_section(out, artifact.payload_as<AgreementArtifact>("nonlinear_agreement"));
+    return true;
+  }
+  if (artifact.kind == "helicopter_response") {
+    write_response_section(out,
+                           artifact.payload_as<HelicopterResponseArtifact>("helicopter_response"));
+    return true;
+  }
+  if (artifact.kind == "helicopter_ensemble") {
+    write_ensemble_section(out,
+                           artifact.payload_as<HelicopterEnsembleArtifact>("helicopter_ensemble"));
     return true;
   }
   if (artifact.kind == "helicopter") {
@@ -1766,7 +2835,13 @@ void register_helicopter_capabilities(Registry& registry) {
        "newton_iterations",
        "step_control",
        "step_size_rad",
-       "failure_events"}});
+       "failure_events",
+       "initial_state_perturbation",
+       "attitude_perturbation_body_rad",
+       "wind_schedule",
+       "turbulence",
+       "mass_scale",
+       "cg_offset_body_m"}});
 
   registry.add(Capability{
       "sim.helicopter.closed_loop",
@@ -1786,7 +2861,43 @@ void register_helicopter_capabilities(Registry& registry) {
        "controller_period_s",
        "delay_periods",
        "method",
-       "failure_events"}});
+       "failure_events",
+       "initial_state_perturbation",
+       "attitude_perturbation_body_rad",
+       "reference_schedule",
+       "wind_schedule",
+       "turbulence",
+       "mass_scale",
+       "cg_offset_body_m"}});
+
+  registry.add(Capability{
+      "study.helicopter_ensemble",
+      "Execute independent helicopter parameter members with seeded disturbances, per-member "
+      "manifests, deterministic declaration order and optional parallel execution",
+      "helicopter_ensemble",
+      Capability::State::ImplementedUnvalidated,
+      ensemble_helicopter_capability,
+      {"trim",
+       "members",
+       "step_s",
+       "steps",
+       "sample_stride",
+       "parallel",
+       "turbulence",
+       "criteria_max_envelope_departures",
+       "aggregate_path",
+       "manifest_prefix"},
+      {},
+      {"aggregate_path"}});
+
+  registry.add(Capability{
+      "analyze.helicopter_response",
+      "Compare matched open- and closed-loop helicopter trajectories with declared tracking, "
+      "settling, actuator, saturation, rotor-speed and envelope budgets",
+      "helicopter_response",
+      Capability::State::ImplementedUnvalidated,
+      analyze_helicopter_response_capability,
+      {"open_loop", "closed_loop", "signals", "reference", "requirements"}});
 
   registry.add(Capability{
       "analyze.nonlinear_agreement",

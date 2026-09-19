@@ -156,6 +156,7 @@ against.
 | `analyze.diskmargin` | implemented and validated | `analyze.diskmargin`, `analyze.diskmargin.phase`, `analyze.diskmargin.critical_frequency`, `analyze.sigma.grid_bound` |
 | `analyze.freqresp` | implemented and validated | `analyze.freqresp`, `analyze.freqresp.hessenberg` |
 | `analyze.gramians` | implemented, unvalidated | — |
+| `analyze.helicopter_response` | implemented, unvalidated | — |
 | `analyze.hinfnorm` | implemented, unvalidated | — |
 | `analyze.margins` | implemented and validated | `analyze.margins` |
 | `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
@@ -191,11 +192,13 @@ against.
 | `report.markdown` | implemented, unvalidated | — |
 | `report.record` | implemented, unvalidated | — |
 | `sim.helicopter` | implemented, unvalidated | — |
+| `sim.helicopter.closed_loop` | implemented, unvalidated | — |
 | `sim.linear` | implemented, unvalidated | — |
 | `sim.model` | implemented, unvalidated | — |
 | `sim.nonlinear` | implemented, unvalidated | — |
 | `sim.plant` | implemented, unvalidated | — |
 | `sim.sampled` | implemented, unvalidated | — |
+| `study.helicopter_ensemble` | implemented, unvalidated | — |
 | `synth.care` | implemented and validated | `synth.care.worked` |
 | `synth.dare` | implemented, unvalidated | — |
 | `synth.lqr` | implemented, unvalidated | — |

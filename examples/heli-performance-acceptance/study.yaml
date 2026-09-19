@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Matched open/closed-loop evidence. The initial attitude and rate errors are
+# declared in the public study schema; they are not hidden in a test fixture.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 0.0, altitude_m: 100.0}
+  - id: linear
+    capability: linearize.vehicle
+    input: {trim: {from: hover}, drop_position_and_heading: true}
+  - id: law
+    capability: synth.lqr
+    input:
+      system: {from: linear}
+      break_at: plant_input
+      q:
+        [
+          [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01, 0],
+          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.01]
+        ]
+      r: [[0.1, 0, 0, 0], [0, 0.1, 0, 0], [0, 0, 0.1, 0], [0, 0, 0, 0.1]]
+  - id: open
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 7500
+      sample_stride: 10
+      attitude_perturbation_body_rad: [0.04, -0.03, 0.0]
+      initial_state_perturbation: {roll_rate_rad_s: 0.08, pitch_rate_rad_s: -0.06}
+  - id: closed
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      controller_period_s: 0.01
+      step_s: 0.002
+      steps: 7500
+      sample_stride: 10
+      delay_periods: 0
+      attitude_perturbation_body_rad: [0.04, -0.03, 0.0]
+      initial_state_perturbation: {roll_rate_rad_s: 0.08, pitch_rate_rad_s: -0.06}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rad, control: lateral_cyclic_command_rad, kp: -1.0, ki: 0.0, kd: -0.12, derivative_filter_s: 0.05}
+          - {measurement: pitch_rad, control: longitudinal_cyclic_command_rad, kp: -1.0, ki: 0.0, kd: -0.12, derivative_filter_s: 0.05}
+          - {measurement: yaw_rate_rad_s, control: pedal_command_rad, kp: -0.08, ki: 0.0, kd: 0.0, derivative_filter_s: 0.02}
+  - id: attitude_response
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: closed}
+      signals: [roll_rad, pitch_rad]
+      requirements:
+        tracking_error: 0.05
+        settling_time_s: 8.0
+        overshoot: 1.25
+        control_effort_rad: 0.35
+        saturation_duration_s: 1.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 0
+  - id: csv_open
+    capability: report.helicopter_csv
+    input: {trajectory: {from: open}, path: open.csv}
+  - id: csv_closed
+    capability: report.helicopter_csv
+    input: {trajectory: {from: closed}, path: closed.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 measured helicopter control-performance acceptance
+      sections: [{from: hover}, {from: open}, {from: closed}, {from: attitude_response}]
+      path: performance.md

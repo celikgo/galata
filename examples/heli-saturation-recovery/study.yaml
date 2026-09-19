@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deliberate lateral-cyclic position saturation, actuator rate limiting and lag.
+# The release is on the fixed sample lattice so the anti-windup transient can
+# be measured from the controller and trajectory files.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: hover
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+  - id: open
+    capability: sim.helicopter
+    input:
+      trim: {from: hover}
+      step_s: 0.002
+      steps: 4500
+      sample_stride: 10
+  - id: saturated
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: hover}
+      controller_period_s: 0.02
+      step_s: 0.002
+      steps: 4500
+      sample_stride: 10
+      delay_periods: 1
+      reference_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0379]}
+          - {time_s: 1.0, values: [0.30]}
+          - {time_s: 1.2, values: [0.0379]}
+          - {time_s: 9.0, values: [0.0379]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rad, control: lateral_cyclic_command_rad, kp: -1.0, ki: 0.0, kd: -0.12, derivative_filter_s: 0.10, integrator_limit: 0.10, anti_windup_gain: 1.0}
+  - id: response
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: saturated}
+      signals: [roll_rad]
+      requirements:
+        tracking_error: 0.50
+        settling_time_s: 8.0
+        overshoot: 2.0
+        control_effort_rad: 0.60
+        saturation_duration_s: 3.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 0
+  - id: csv
+    capability: report.helicopter_csv
+    input: {trajectory: {from: saturated}, path: saturation.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 cyclic saturation and anti-windup release
+      sections: [{from: hover}, {from: saturated}, {from: response}]
+      path: saturation.md
