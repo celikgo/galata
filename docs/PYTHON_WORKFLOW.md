@@ -11,7 +11,7 @@ workflow:
 
 ```sh
 python3 -m pip install --no-deps .
-python3 examples/heli-python-workflow.py \
+python3 examples/shared-vehicle-python-workflow.py \
   --executable /absolute/path/to/galata \
   --output-dir /absolute/path/to/results
 ```
@@ -26,11 +26,11 @@ The public operation order is:
 
 ```python
 workflow = GalataWorkflow("/absolute/path/to/galata")
-model = workflow.load_model("models/souxmar-heli/souxmar-heli.yaml")
+model = workflow.load_model("models/nt33a/nt33a-fc1.yaml")
 study = workflow.configure(
     model, "results",
-    parameter_overrides={"mass.mass_kg": 2830.0},
-    flight_condition={"airspeed_m_s": 0.0, "altitude_m": 100.0},
+    parameter_overrides={"mass.mass_kg": 5405.0},
+    flight_condition={"airspeed_m_s": 69.4944, "altitude_m": 0.0},
 )
 trim = workflow.trim(study)
 linear = workflow.linearize(trim)
@@ -48,18 +48,21 @@ run manifest and upstream dependency. The versioned schemas are:
 
 | Artifact | Schema |
 | --- | --- |
-| model inspection | `galata.helicopter.schema.v1` |
-| trim | `galata.helicopter.trim.v1` |
+| model inspection | `galata.vehicle.schema.v1` (shared) or legacy `galata.helicopter.schema.v1` |
+| trim | `galata.vehicle.trim.v1` (shared) or legacy `galata.helicopter.trim.v1` |
 | linear system | `galata.linear_system.v1` |
 | controller | `galata.control_law.v1` |
-| response | `galata.helicopter.response.v1` |
+| response | `galata.vehicle.response.v1` (shared) or legacy `galata.helicopter.response.v1` |
 | portable bundle | `galata.bundle.v1` |
 
 Model schemas expose named parameters, states, controls, outputs, units and
-frames. Parameter overrides are validated in Python and applied again by the
-C++ model loader; the trim artifact records the values that reached execution.
-Invalid names, numerical refusals, and incompatible result types fail
-explicitly.
+frames. Fixed-wing, multirotor, and helicopter models can all use the shared
+`model.vehicle` → `trim.vehicle` → `linearize.shared` → `sim.vehicle` path;
+the helicopter-specific capability names remain compatibility adapters.
+Parameter overrides are validated in Python and applied again by the C++ model
+loader; schema identity and trim artifacts record the values that reached
+execution. Invalid names, numerical refusals, and incompatible result types
+fail explicitly.
 
 ## Comparisons and result bundles
 
@@ -92,8 +95,10 @@ using recorded scalar-first Hamilton quaternions. It displays North/East/up,
 with `up = -down`, and rotates body-forward into NED for each recorded frame.
 PNG export is optional and requires `pip install 'galata-engineering[png]'`.
 
-The initial M1 interface is helicopter-focused and CLI-backed. It does not yet
-provide a native Python numerical engine, full cross-vehicle C1 migration,
-estimators, higher-fidelity rotor physics, or full-aircraft/measured-data
-validation. The UH-60 geometry calculation remains source-transcription
-verification, not a test of Galata's rotor model.
+The delivered interface remains CLI-backed and uses the authoritative C++
+implementations. The shared cross-vehicle path reports basic tracking metrics;
+family-specific failure, sampled-sensor, and actuator analyses remain on their
+compatibility capabilities. Native Python numerical bindings, estimators,
+higher-fidelity rotor physics, and full-aircraft/measured-data validation remain
+open. The UH-60 geometry calculation remains source-transcription verification,
+not a test of Galata's rotor model.

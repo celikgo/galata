@@ -7,13 +7,16 @@
 #include "galata/identify/validate.hpp"
 #include "galata/model/aircraft.hpp"
 #include "galata/model/quadrotor.hpp"
+#include "galata/model/vehicle_adapters.hpp"
 #include "galata/numerics/integrator.hpp"
 #include "galata/pipeline/registry.hpp"
 #include "galata/synth/discrete_control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/trim/level.hpp"
+#include "galata/sim/vehicle_execution.hpp"
 
 #include <iosfwd>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -76,6 +79,34 @@ struct HoverTrimArtifact {
   // chain that trims and then linearises has not lost the identity of the model
   // it did that to. See `ModelIdentity`.
   ModelIdentity model_identity;
+};
+
+// Type-erased model and trim artifacts used by the shared execution path.
+// The established family-specific artifacts remain available to compatibility
+// adapters; new studies can use these without choosing a vehicle-specific
+// simulation or reporting family.
+struct VehicleArtifact {
+  std::shared_ptr<const model::VehicleModel> model;
+  std::string vehicle_kind;
+  ModelIdentity identity;
+  std::map<std::string, double> parameter_overrides;
+};
+
+struct VehicleTrimArtifact {
+  std::shared_ptr<const model::VehicleModel> model;
+  std::string vehicle_kind;
+  model::Environment environment;
+  Eigen::VectorXd extended_state;
+  Eigen::VectorXd controls;
+  double residual_norm = 0.0;
+  double residual_tolerance = 0.0;
+  std::map<std::string, double> parameter_overrides;
+};
+
+struct VehicleRunArtifact {
+  std::shared_ptr<const model::VehicleModel> model;
+  std::string vehicle_kind;
+  sim::VehicleExecutionResult result;
 };
 
 // One estimated parameter, with everything a reader needs to judge the number
@@ -310,6 +341,7 @@ void register_design_capabilities(Registry& registry);
 void register_model_capabilities(Registry& registry);
 void register_quadrotor_capabilities(Registry& registry);
 void register_helicopter_capabilities(Registry& registry);
+void register_vehicle_capabilities(Registry& registry);
 void register_discrete_capabilities(Registry& registry);
 void register_linear_graph_capability(Registry& registry);
 bool write_design_section(std::ostream& out, const Artifact& artifact);

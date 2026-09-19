@@ -11,6 +11,7 @@ add_library(galata_model
   discrete_system.cpp
   aircraft.cpp
   vehicle.cpp
+  vehicle_adapters.cpp
   rotor/rotor.cpp
   helicopter.cpp
   helicopter_io.cpp

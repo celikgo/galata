@@ -129,7 +129,9 @@ def plot_time_history(csv_path: PathLike, channels: Sequence[str], output: PathL
                       title: str = "Galata time history",
                       markers: Optional[Mapping[str, Sequence[float]]] = None) -> Path:
     target = Path(output)
-    target.write_text(_time_plot(load_csv(csv_path), channels, title, markers))
+    rows = load_csv(csv_path)
+    resolved = [_channel(rows, channel) for channel in channels]
+    target.write_text(_time_plot(rows, resolved, title, markers))
     return target
 
 
@@ -144,11 +146,10 @@ def plot_time_history_from_rows(rows: Sequence[Mapping[str, Optional[float]]], c
 def _channel(rows: Sequence[Mapping[str, Optional[float]]], signal: str) -> str:
     if not rows:
         raise ValueError("CSV has no data rows")
-    if signal in rows[0]:
-        return signal
-    prefixed = f"output_{signal}"
-    if prefixed in rows[0]:
-        return prefixed
+    for candidate in (signal, f"output_{signal}", f"output:{signal}",
+                      f"state_{signal}", f"state:{signal}"):
+        if candidate in rows[0]:
+            return candidate
     raise KeyError(signal)
 
 
@@ -271,10 +272,13 @@ def export_png(svg_source: PathLike, png_output: PathLike) -> Path:
 def plot_trajectory_projection(csv_path: PathLike, output: PathLike) -> Path:
     """Static NED-to-display projection; this function is intentionally not playback."""
     rows = load_csv(csv_path)
-    _validate_rows(rows, ["position_north_m", "position_east_m", "position_down_m"])
-    north = [row["position_north_m"] for row in rows]
-    east = [row["position_east_m"] for row in rows]
-    up = [-row["position_down_m"] for row in rows]
+    north_name = _channel(rows, "position_north_m")
+    east_name = _channel(rows, "position_east_m")
+    down_name = _channel(rows, "position_down_m")
+    _validate_rows(rows, [north_name, east_name, down_name])
+    north = [row[north_name] for row in rows]
+    east = [row[east_name] for row in rows]
+    up = [-row[down_name] for row in rows]
     if any(value is None or not math.isfinite(value) for value in north + east + up):
         raise ValueError("trajectory projection requires finite position observations")
     projected_x = [n + 0.45 * e for n, e in zip(north, east)]
@@ -295,12 +299,14 @@ def plot_trajectory_projection(csv_path: PathLike, output: PathLike) -> Path:
 def plot_trajectory_playback(csv_path: PathLike, output: PathLike) -> Path:
     """Write a self-contained offline HTML scrubber using recorded attitude."""
     rows = load_csv(csv_path)
-    _validate_rows(rows, ["position_north_m", "position_east_m", "position_down_m",
-                          "quaternion_w", "quaternion_x", "quaternion_y", "quaternion_z"])
-    frames = [{"time_s": row["time_s"], "north_m": row["position_north_m"],
-               "east_m": row["position_east_m"], "down_m": row["position_down_m"],
-               "quaternion": [row["quaternion_w"], row["quaternion_x"],
-                              row["quaternion_y"], row["quaternion_z"]]}
+    channel = {name: _channel(rows, name) for name in
+               ("position_north_m", "position_east_m", "position_down_m",
+                "quaternion_w", "quaternion_x", "quaternion_y", "quaternion_z")}
+    _validate_rows(rows, list(channel.values()))
+    frames = [{"time_s": row["time_s"], "north_m": row[channel["position_north_m"]],
+               "east_m": row[channel["position_east_m"]], "down_m": row[channel["position_down_m"]],
+               "quaternion": [row[channel["quaternion_w"]], row[channel["quaternion_x"]],
+                              row[channel["quaternion_y"]], row[channel["quaternion_z"]]]}
               for row in rows]
     for index, frame in enumerate(frames):
         values = frame["quaternion"]

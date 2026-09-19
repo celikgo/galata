@@ -276,6 +276,59 @@ TEST(ExampleNt33aTrimAndLinearise, RunsTheWholeChainAndReproducesThePublishedMod
   EXPECT_NE(text.find("State matrix A"), std::string::npos);
 }
 
+// C1 acceptance: the three vehicle families enter the same type-erased
+// execution, linearisation and reporting services.  The family-specific trim
+// solvers are allowed to remain adapters; the produced artifacts and the
+// sampled execution contract must not fork again after trim.
+TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
+  struct Example {
+    const char* directory;
+    const char* kind;
+  };
+  const std::vector<Example> examples = {
+      {"shared-fixed-wing-workflow", "fixed-wing"},
+      {"shared-multirotor-workflow", "multirotor"},
+      {"shared-helicopter-workflow", "helicopter"},
+  };
+  for (const auto& example : examples) {
+    SCOPED_TRACE(example.directory);
+    const auto result = run_example(example.directory, "study.yaml");
+    ASSERT_EQ(result.stages.size(), 8U);
+    const auto* vehicle_stage = result.find("vehicle");
+    ASSERT_NE(vehicle_stage, nullptr);
+    const auto& vehicle = vehicle_stage->payload_as<galata::pipeline::VehicleArtifact>(
+        "vehicle_model");
+    EXPECT_EQ(vehicle.vehicle_kind, example.kind);
+    EXPECT_FALSE(vehicle.model->state_names().empty());
+    EXPECT_FALSE(vehicle.model->control_metadata().empty());
+    const auto operations = vehicle.model->supported_operations();
+    EXPECT_NE(std::find(operations.begin(), operations.end(), "linearize"), operations.end());
+
+    const auto* trim_stage = result.find("trim");
+    ASSERT_NE(trim_stage, nullptr);
+    const auto& trim = trim_stage->payload_as<galata::pipeline::VehicleTrimArtifact>(
+        "vehicle_trim");
+    EXPECT_EQ(trim.model.get(), vehicle.model.get());
+    EXPECT_LT(trim.residual_norm, 1e-7);
+
+    const auto* linear_stage = result.find("linear");
+    ASSERT_NE(linear_stage, nullptr);
+    const auto& linear = linear_stage->payload_as<galata::model::LinearSystem>("linear_system");
+    EXPECT_GT(linear.a.rows(), 0);
+    EXPECT_EQ(linear.a.rows(), linear.a.cols());
+    EXPECT_EQ(linear.b.rows(), linear.a.rows());
+
+    const auto* run_stage = result.find("trajectory");
+    ASSERT_NE(run_stage, nullptr);
+    const auto& run = run_stage->payload_as<galata::pipeline::VehicleRunArtifact>(
+        "vehicle_trajectory");
+    ASSERT_FALSE(run.result.integration.trajectory.states.empty());
+    EXPECT_EQ(run.result.integration.trajectory.states.size(), run.result.controls.size());
+    EXPECT_EQ(run.result.integration.trajectory.states.size(), run.result.outputs.size());
+    EXPECT_EQ(run.model.get(), vehicle.model.get());
+  }
+}
+
 // ===========================================================================
 // The quadrotor programme's two end-to-end examples
 // ===========================================================================

@@ -82,6 +82,13 @@ class Model:
     schema: Mapping[str, Any]
 
     @property
+    def kind(self) -> str:
+        """Validated vehicle family used to select compatibility adapters."""
+        if self.schema.get("schema") == "galata.helicopter.schema.v1":
+            return "helicopter"
+        return str(self.schema.get("kind", "unknown"))
+
+    @property
     def parameters(self) -> Mapping[str, Mapping[str, Any]]:
         parameters = self.schema.get("parameters", {})
         if isinstance(parameters, Mapping):
@@ -252,16 +259,25 @@ class GalataWorkflow:
 
     @staticmethod
     def _model_stage(study: Study) -> Dict[str, Any]:
-        return {"id": "aircraft", "capability": "model.helicopter",
-                "input": {"path": str(study.model.path),
+        if study.model.kind == "helicopter":
+            capability = "model.helicopter"
+            extra = {}
+        else:
+            capability = "model.vehicle"
+            extra = {"kind": study.model.kind}
+        return {"id": "aircraft", "capability": capability,
+                "input": {"path": str(study.model.path), **extra,
                           "parameter_overrides": dict(study.parameter_overrides)}}
 
     @staticmethod
     def _trim_stage(study: Study) -> Dict[str, Any]:
         condition = {"airspeed_m_s": 0.0, "altitude_m": 100.0, "delta_isa_k": 0.0}
         condition.update(study.flight_condition)
-        return {"id": "trim", "capability": "trim.helicopter",
-                "input": {"helicopter": {"from": "aircraft"}, **condition}}
+        if study.model.kind == "helicopter":
+            return {"id": "trim", "capability": "trim.helicopter",
+                    "input": {"helicopter": {"from": "aircraft"}, **condition}}
+        return {"id": "trim", "capability": "trim.vehicle",
+                "input": {"vehicle": {"from": "aircraft"}, **condition}}
 
     def load_model(self, path: PathLike) -> Model:
         model_path = Path(path).expanduser().resolve()
@@ -269,18 +285,35 @@ class GalataWorkflow:
             raise WorkflowError(f"model file does not exist: {model_path}")
         with tempfile.TemporaryDirectory(prefix="galata-model-") as temporary:
             output = Path(temporary)
-            pipeline = [
-                {"id": "aircraft", "capability": "model.helicopter",
-                 "input": {"path": str(model_path)}},
-                {"id": "schema", "capability": "report.helicopter_schema_json",
-                 "input": {"helicopter": {"from": "aircraft"}, "path": "model-schema.json"}},
-            ]
+            source = model_path.read_text()
+            if "main_rotor:" in source or "drivetrain:" in source:
+                kind = "helicopter"
+                capability = "model.helicopter"
+                report_capability = "report.helicopter_schema_json"
+                reference_key = "helicopter"
+            elif "rotors:" in source:
+                kind = "multirotor"
+                capability = "model.vehicle"
+                report_capability = "report.vehicle_schema_json"
+                reference_key = "vehicle"
+            else:
+                kind = "fixed-wing"
+                capability = "model.vehicle"
+                report_capability = "report.vehicle_schema_json"
+                reference_key = "vehicle"
+            model_input: Dict[str, Any] = {"path": str(model_path)}
+            if capability == "model.vehicle":
+                model_input["kind"] = kind
+            pipeline = [{"id": "aircraft", "capability": capability, "input": model_input},
+                        {"id": "schema", "capability": report_capability,
+                         "input": {reference_key: {"from": "aircraft"}, "path": "model-schema.json"}}]
             study = Study(Model(model_path, _sha256(model_path), {}), output, {})
             run = self._run_pipeline(pipeline, study, "model")
             schema = json.loads(run.output("model-schema.json").read_text())
-        if schema.get("schema") != "galata.helicopter.schema.v1":
+        if schema.get("schema") not in ("galata.helicopter.schema.v1", "galata.vehicle.schema.v1"):
             raise OperationError(f"unexpected model schema: {schema.get('schema')}")
-        return Model(model_path, str(schema["model"]["sha256"]), schema)
+        identity = schema.get("identity", schema.get("model", {}))
+        return Model(model_path, str(identity["sha256"]), schema)
 
     def inspect(self, model: Model) -> Mapping[str, Any]:
         """Return the authoritative named model schema."""
@@ -289,7 +322,8 @@ class GalataWorkflow:
 
     @staticmethod
     def _require_model(model: Any) -> Model:
-        if not isinstance(model, Model) or model.schema.get("schema") != "galata.helicopter.schema.v1":
+        if not isinstance(model, Model) or model.schema.get("schema") not in (
+                "galata.helicopter.schema.v1", "galata.vehicle.schema.v1"):
             raise ArtifactError("expected a validated Model returned by load_model()")
         return model
 
@@ -305,7 +339,7 @@ class GalataWorkflow:
                     f"unknown parameter '{name}'; available parameters: {sorted(allowed)}")
             overrides[name] = _finite(value, f"parameter {name}")
         condition = dict(flight_condition or {})
-        unknown = sorted(set(condition) - {"airspeed_m_s", "altitude_m", "delta_isa_k"})
+        unknown = sorted(set(condition) - {"airspeed_m_s", "altitude_m", "delta_isa_k", "heading_rad"})
         if unknown:
             raise ValueError(f"unknown flight-condition fields: {unknown}")
         for name, value in condition.items():
@@ -315,8 +349,10 @@ class GalataWorkflow:
     def trim(self, study: Study) -> TrimResult:
         if not isinstance(study, Study):
             raise ArtifactError("trim() requires a Study returned by configure()")
+        report_capability = ("report.helicopter_trim_json" if study.model.kind == "helicopter"
+                             else "report.vehicle_trim_json")
         stages = [self._model_stage(study), self._trim_stage(study),
-                  {"id": "trim_report", "capability": "report.helicopter_trim_json",
+                  {"id": "trim_report", "capability": report_capability,
                    "input": {"trim": {"from": "trim"}, "path": "trim.json"}}]
         run = self._run_pipeline(stages, study, "trim")
         artifact = run.output("trim.json")
@@ -326,8 +362,10 @@ class GalataWorkflow:
                   ) -> LinearizationResult:
         if not isinstance(trim, TrimResult):
             raise ArtifactError("linearize() requires the result of trim()")
+        generic = trim.study.model.kind != "helicopter"
+        linear_capability = "linearize.shared" if generic else "linearize.vehicle"
         stages = [self._model_stage(trim.study), self._trim_stage(trim.study),
-                  {"id": "linear", "capability": "linearize.vehicle",
+                  {"id": "linear", "capability": linear_capability,
                    "input": {"trim": {"from": "trim"},
                              "drop_position_and_heading": bool(drop_position_and_heading)}},
                   {"id": "linear_report", "capability": "report.linear_system_json",
@@ -351,8 +389,10 @@ class GalataWorkflow:
         q_matrix = [list(map(float, row)) for row in q] if q is not None else _default_q(
             linearization.data.get("state_names", []))
         r_matrix = [list(map(float, row)) for row in r] if r is not None else _matrix_diagonal(input_count, 0.1)
+        generic = linearization.study.model.kind != "helicopter"
+        linear_capability = "linearize.shared" if generic else "linearize.vehicle"
         stages = [self._model_stage(linearization.study), self._trim_stage(linearization.study),
-                  {"id": "linear", "capability": "linearize.vehicle",
+                  {"id": "linear", "capability": linear_capability,
                    "input": {"trim": {"from": "trim"}, "drop_position_and_heading": True}},
                   {"id": "law", "capability": "synth.lqr",
                    "input": {"system": {"from": "linear"}, "break_at": "plant_input",
@@ -398,6 +438,10 @@ class GalataWorkflow:
         }
         if common["steps"] <= 0 or common["sample_stride"] <= 0:
             raise ValueError("steps and sample_stride must be positive")
+        if controller.study.model.kind != "helicopter":
+            return self._simulate_shared_vehicle(controller, perturbation, step_s, steps,
+                                                 sample_stride, perturbation_map,
+                                                 response_requirements, signal_requirements)
         # The controller artifact contains the selected Q/R matrices. Reusing
         # them makes the composed simulation depend on the preceding design.
         stages: List[Mapping[str, Any]] = [
@@ -433,6 +477,62 @@ class GalataWorkflow:
              "input": {"trajectory": {"from": "closed"}, "path": "closed.csv"}},
         ]
         run = self._run_pipeline(stages, controller.study, "simulate")
+        response_path, open_csv, closed_csv = (run.output(name) for name in
+                                               ("response.json", "open.csv", "closed.csv"))
+        return SimulationResult(json.loads(response_path.read_text()), run, response_path,
+                                controller.study, controller, open_csv, closed_csv, response_path)
+
+    @staticmethod
+    def _shared_chart_names(model: Model) -> List[str]:
+        names = ["position_north_m", "position_east_m", "position_down_m",
+                 "velocity_u_m_s", "velocity_v_m_s", "velocity_w_m_s",
+                 "roll_rad", "pitch_rad", "yaw_rad", "roll_rate_rad_s",
+                 "pitch_rate_rad_s", "yaw_rate_rad_s"]
+        states = list(model.states)
+        for item in states[13:]:
+            names.append(str(item.get("name", "")))
+        return names
+
+    def _simulate_shared_vehicle(self, controller: ControllerResult,
+                                 perturbation: Sequence[float], step_s: float, steps: int,
+                                 sample_stride: int,
+                                 initial_state_perturbation: Mapping[str, float],
+                                 requirements: Mapping[str, Any],
+                                 signal_requirements: Mapping[str, Any]) -> SimulationResult:
+        chart_names = self._shared_chart_names(controller.study.model)
+        initial = [0.0] * len(chart_names)
+        for name, value in zip(("roll_rad", "pitch_rad", "yaw_rad"), perturbation):
+            initial[chart_names.index(name)] = value
+        linear_capability = "linearize.shared"
+        for name, value in initial_state_perturbation.items():
+            if name not in chart_names:
+                raise ArtifactError(
+                    f"initial_state_perturbation names unknown shared chart channel '{name}'")
+            initial[chart_names.index(name)] = value
+        common = {"step_s": _finite(step_s, "step_s"), "steps": int(steps),
+                  "sample_stride": int(sample_stride),
+                  "initial_chart_perturbation": initial}
+        stages: List[Mapping[str, Any]] = [
+            self._model_stage(controller.study), self._trim_stage(controller.study),
+            {"id": "linear", "capability": linear_capability,
+             "input": {"trim": {"from": "trim"}, "drop_position_and_heading": True}},
+            {"id": "law", "capability": "synth.lqr",
+             "input": {"system": {"from": "linear"}, "break_at": "plant_input",
+                       "q": controller.data.get("q"), "r": controller.data.get("r")}},
+            {"id": "open", "capability": "sim.vehicle",
+             "input": {"trim": {"from": "trim"}, **common}},
+            {"id": "closed", "capability": "sim.vehicle",
+             "input": {"trim": {"from": "trim"}, "law": {"from": "law"}, **common}},
+            {"id": "response", "capability": "report.vehicle_response_json",
+             "input": {"open": {"from": "open"}, "closed": {"from": "closed"},
+                       "signals": list(signal_requirements),
+                       "signal_requirements": signal_requirements, "path": "response.json"}},
+            {"id": "open_csv", "capability": "report.vehicle_csv",
+             "input": {"trajectory": {"from": "open"}, "path": "open.csv"}},
+            {"id": "closed_csv", "capability": "report.vehicle_csv",
+             "input": {"trajectory": {"from": "closed"}, "path": "closed.csv"}},
+        ]
+        run = self._run_pipeline(stages, controller.study, "simulate-shared")
         response_path, open_csv, closed_csv = (run.output(name) for name in
                                                ("response.json", "open.csv", "closed.csv"))
         return SimulationResult(json.loads(response_path.read_text()), run, response_path,

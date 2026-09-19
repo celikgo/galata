@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+# Shared VehicleModel execution path for the fixed-wing compatibility adapter.
+version: 1
+stages:
+  - id: vehicle
+    capability: model.vehicle
+    input:
+      kind: fixed-wing
+      path: ../../models/nt33a/nt33a-fc1.yaml
+  - id: schema
+    capability: report.vehicle_schema_json
+    input:
+      vehicle: {from: vehicle}
+      path: schema.json
+  - id: trim
+    capability: trim.vehicle
+    input:
+      vehicle: {from: vehicle}
+      altitude_m: 0.0
+      airspeed_m_s: 69.4944
+  - id: trim_report
+    capability: report.vehicle_trim_json
+    input:
+      trim: {from: trim}
+      path: trim.json
+  - id: linear
+    capability: linearize.shared
+    input:
+      trim: {from: trim}
+      drop_position_and_heading: true
+  - id: matrices
+    capability: report.linear_system_json
+    input:
+      system: {from: linear}
+      path: linear.json
+  - id: trajectory
+    capability: sim.vehicle
+    input:
+      trim: {from: trim}
+      step_s: 0.01
+      steps: 100
+      sample_stride: 10
+  - id: trajectory_report
+    capability: report.vehicle_csv
+    input:
+      trajectory: {from: trajectory}
+      path: trajectory.csv

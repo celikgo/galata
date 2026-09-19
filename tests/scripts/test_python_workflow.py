@@ -34,6 +34,11 @@ from galata_workflow.plotting import (  # noqa: E402
 
 EXECUTABLE = ROOT / "build/dev/src/cli/galata"
 MODEL = ROOT / "models/souxmar-heli/souxmar-heli.yaml"
+SHARED_MODELS = (
+    ("fixed-wing", ROOT / "models/nt33a/nt33a-fc1.yaml", 69.4944, 0.0),
+    ("multirotor", ROOT / "examples/quadrotor-sampled-control/quad-heterogeneous.yaml", 0.0, 120.0),
+    ("helicopter", MODEL, 0.0, 100.0),
+)
 
 
 def _fake_run(directory: Path, files: dict[str, str]) -> Run:
@@ -52,6 +57,55 @@ def _fake_run(directory: Path, files: dict[str, str]) -> Run:
 
 
 class PythonWorkflowAcceptance(unittest.TestCase):
+    def test_shared_vehicle_operations_execute_for_all_families(self):
+        with tempfile.TemporaryDirectory(prefix="galata-shared-python-") as directory:
+            root = Path(directory)
+            workflow = GalataWorkflow(EXECUTABLE)
+            for kind, path, airspeed, altitude in SHARED_MODELS:
+                with self.subTest(kind=kind):
+                    model = workflow.load_model(path)
+                    original_mass = float(model.parameters["mass.mass_kg"]["value"])
+                    override = {"mass.mass_kg": original_mass * 1.001}
+                    study = workflow.configure(
+                        model, root / kind,
+                        parameter_overrides=override,
+                        flight_condition={"airspeed_m_s": airspeed, "altitude_m": altitude})
+                    trim = workflow.trim(study)
+                    residual = trim.get("diagnostics", {}).get("residual_norm",
+                                                               trim.get("residual_norm"))
+                    self.assertIsNotNone(residual)
+                    self.assertLess(float(residual), 1e-7)
+                    self.assertEqual(trim["parameter_overrides"], override)
+                    linear = workflow.linearize(trim)
+                    self.assertGreater(len(linear["a"]), 0)
+                    self.assertGreater(len(linear["b"]), 0)
+                    controller = workflow.design(linear)
+                    self.assertGreater(len(controller["gain_k"]), 0)
+                    simulation = workflow.simulate(
+                        controller,
+                        initial_state_perturbation={"roll_rate_rad_s": 0.02},
+                        steps=100, sample_stride=10,
+                        response_requirements={
+                            "signal_requirements": {
+                                "roll_rad": {"settling_band_rad": 0.2,
+                                              "settling_dwell_s": 0.02,
+                                              "settling_time_s": 1.0},
+                                "pitch_rad": {"settling_band_rad": 0.2,
+                                               "settling_dwell_s": 0.02,
+                                               "settling_time_s": 1.0}}})
+                    evaluation = workflow.evaluate(simulation)
+                    self.assertTrue(evaluation["execution_completed"])
+                    if kind != "helicopter":
+                        self.assertEqual(simulation["criteria_status"], "pass")
+                    else:
+                        self.assertIn("criteria_passed", simulation.data)
+                    self.assertTrue(simulation.closed_csv.is_file())
+                    header = simulation.closed_csv.read_text().splitlines()[0]
+                    if kind == "helicopter":
+                        self.assertIn("output_roll_rad", header)
+                    else:
+                        self.assertIn("state:", header)
+
     def test_composed_operations_are_real_and_cli_agrees(self):
         with tempfile.TemporaryDirectory(prefix="galata-python-acceptance-") as directory:
             scratch = Path(directory)

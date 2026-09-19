@@ -1239,6 +1239,7 @@ Registry build_registry() {
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);
   register_helicopter_capabilities(registry);
+  register_vehicle_capabilities(registry);
   register_discrete_capabilities(registry);
   return registry;
 }

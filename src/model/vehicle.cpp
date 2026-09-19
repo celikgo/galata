@@ -43,7 +43,65 @@ void require_finite(double value, const char* what) {
   }
 }
 
+ChannelMetadata metadata_for(const std::string& name) {
+  ChannelMetadata channel;
+  channel.name = name;
+  channel.frame = "model-declared";
+  if (name.find("position_") == 0) {
+    channel.unit = "m";
+    channel.frame = "NED";
+  } else if (name.find("velocity_") == 0) {
+    channel.unit = "m/s";
+    channel.frame = "body-FRD";
+  } else if (name.find("quaternion_") == 0) {
+    channel.unit = "1";
+    channel.frame = "body-to-NED";
+  } else if (name.find("rate_") != std::string::npos) {
+    channel.unit = "rad/s";
+    channel.frame = "body-FRD";
+  } else if (name.find("angle") != std::string::npos || name.find("_rad") != std::string::npos
+             || name.find("roll") != std::string::npos || name.find("pitch") != std::string::npos
+             || name.find("yaw") != std::string::npos) {
+    channel.unit = "rad";
+    channel.frame = "body-FRD";
+  } else if (name.find("omega") != std::string::npos) {
+    channel.unit = "rad/s";
+    channel.frame = "body-FRD";
+  } else {
+    channel.unit = "model-declared";
+  }
+  return channel;
+}
+
 }  // namespace
+
+std::vector<ChannelMetadata> VehicleModel::state_metadata() const {
+  std::vector<ChannelMetadata> result;
+  for (const auto& name : state_names()) {
+    result.push_back(metadata_for(name));
+  }
+  return result;
+}
+
+std::vector<ChannelMetadata> VehicleModel::control_metadata() const {
+  std::vector<ChannelMetadata> result;
+  for (const auto& name : control_names()) {
+    result.push_back(metadata_for(name));
+  }
+  return result;
+}
+
+std::vector<ChannelMetadata> VehicleModel::output_metadata() const {
+  std::vector<ChannelMetadata> result;
+  for (const auto& name : output_names()) {
+    result.push_back(metadata_for(name));
+  }
+  return result;
+}
+
+std::vector<std::string> VehicleModel::supported_operations() const {
+  return {"inspect", "evaluate", "simulate", "linearize"};
+}
 
 Environment Environment::sea_level_still_air() noexcept {
   Environment environment;

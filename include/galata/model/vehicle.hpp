@@ -119,6 +119,20 @@ struct EnvelopeStatus {
   std::string reason;            // empty when inside; names the quantity
 };
 
+// Machine-readable channel metadata shared by all vehicle adapters.  The
+// numerical core remains strictly SI; the frame is part of the channel
+// contract so a plotting or Python client cannot silently compare NED and
+// body quantities with the same unit string.
+struct ChannelMetadata {
+  std::string name;
+  std::string unit;
+  std::string frame;
+  bool has_lower_bound = false;
+  bool has_upper_bound = false;
+  double lower_bound = 0.0;
+  double upper_bound = 0.0;
+};
+
 class VehicleModel {
  public:
   virtual ~VehicleModel() = default;
@@ -143,6 +157,13 @@ class VehicleModel {
   [[nodiscard]] virtual std::vector<std::string> state_names() const = 0;
   [[nodiscard]] virtual std::vector<std::string> control_names() const = 0;
   [[nodiscard]] virtual std::vector<std::string> output_names() const = 0;
+
+  // Defaults are deliberately conservative and are overridden by adapters
+  // when a model has actuator or state bounds that are part of its contract.
+  [[nodiscard]] virtual std::vector<ChannelMetadata> state_metadata() const;
+  [[nodiscard]] virtual std::vector<ChannelMetadata> control_metadata() const;
+  [[nodiscard]] virtual std::vector<ChannelMetadata> output_metadata() const;
+  [[nodiscard]] virtual std::vector<std::string> supported_operations() const;
 
   [[nodiscard]] virtual int auxiliary_state_count() const = 0;
 
