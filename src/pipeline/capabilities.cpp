@@ -20,6 +20,7 @@
 #include "galata/model/quadrotor.hpp"
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/synth/control.hpp"
 #include "galata/trim/level.hpp"
 #include "galata/units.hpp"
 #include "galata/version.hpp"
@@ -30,6 +31,8 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 
@@ -43,6 +46,123 @@ std::string format(double value, int precision = 4) {
   std::ostringstream out;
   out << std::fixed << std::setprecision(precision) << value;
   return out.str();
+}
+
+std::string json_quote(const std::string& value) {
+  std::ostringstream out;
+  out << '"';
+  for (const char character : value) {
+    if (character == '\\' || character == '"') {
+      out << '\\';
+    }
+    out << character;
+  }
+  out << '"';
+  return out.str();
+}
+
+std::string json_number(double value) {
+  if (!std::isfinite(value)) {
+    return "null";
+  }
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+  return out.str();
+}
+
+void json_matrix(std::ostream& out, const Eigen::MatrixXd& matrix) {
+  out << '[';
+  for (Eigen::Index row = 0; row < matrix.rows(); ++row) {
+    out << (row == 0 ? "[" : ",[");
+    for (Eigen::Index column = 0; column < matrix.cols(); ++column) {
+      out << (column == 0 ? "" : ",") << json_number(matrix(row, column));
+    }
+    out << ']';
+  }
+  out << ']';
+}
+
+void json_strings(std::ostream& out, const std::vector<std::string>& values) {
+  out << '[';
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    out << (index == 0 ? "" : ",") << json_quote(values[index]);
+  }
+  out << ']';
+}
+
+Artifact write_structured_json(const StageContext& context,
+                               const std::string& path,
+                               const std::string& bytes,
+                               const std::string& summary) {
+  context.write_output(path, bytes);
+  Artifact result;
+  result.kind = "report";
+  result.summary = summary;
+  result.payload = context.resolve_output_path(path);
+  return result;
+}
+
+Artifact report_linear_system_json_capability(const StageContext& context) {
+  const auto& system =
+      context.upstream_at("system").payload_as<model::LinearSystem>("linear_system");
+  const Eigen::MatrixXd c = system.output_matrix();
+  const Eigen::MatrixXd d = system.feedthrough_matrix();
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << "{\"schema\":\"galata.linear_system.v1\",\"description\":"
+      << json_quote(system.description) << ",\"citation\":" << json_quote(system.citation)
+      << ",\"units\":" << json_quote(system.units) << ",\"state_names\":";
+  json_strings(out, system.state_names);
+  out << ",\"input_names\":";
+  json_strings(out, system.input_names);
+  out << ",\"output_names\":";
+  json_strings(out, system.output_labels());
+  out << ",\"a\":";
+  json_matrix(out, system.a);
+  out << ",\"b\":";
+  json_matrix(out, system.b);
+  out << ",\"c\":";
+  json_matrix(out, c);
+  out << ",\"d\":";
+  json_matrix(out, d);
+  out << "}\n";
+  return write_structured_json(
+      context, context.input->string_at("path"), out.str(), "wrote structured linear system");
+}
+
+Artifact report_control_law_json_capability(const StageContext& context) {
+  const auto& artifact = context.upstream_at("law");
+  if (artifact.kind != "control_law") {
+    throw std::invalid_argument(
+        "report.control_law_json requires a continuous control_law from synth.lqr");
+  }
+  const auto& law = artifact.payload_as<synth::LqrDesign>("control_law");
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << "{\"schema\":\"galata.control_law.v1\",\"type\":\"continuous_lqr\","
+         "\"plant_state_names\":";
+  json_strings(out, law.plant.state_names);
+  out << ",\"plant_input_names\":";
+  json_strings(out, law.plant.input_names);
+  out << ",\"gain_k\":";
+  json_matrix(out, law.riccati.k);
+  out << ",\"q\":";
+  json_matrix(out, law.q);
+  out << ",\"r\":";
+  json_matrix(out, law.r);
+  out << ",\"n\":";
+  json_matrix(out, law.n);
+  out << ",\"diagnostics\":{\"relative_residual\":" << json_number(law.riccati.relative_residual)
+      << ",\"residual_budget\":" << json_number(law.riccati.residual_budget)
+      << ",\"symmetry_defect\":" << json_number(law.riccati.symmetry_defect)
+      << ",\"subspace_condition\":" << json_number(law.riccati.subspace_condition)
+      << ",\"hamiltonian_separation\":" << json_number(law.riccati.hamiltonian_separation)
+      << "},\"closed_loop_a\":";
+  json_matrix(out, law.closed_loop.a);
+  out << "}\n";
+  return write_structured_json(
+      context, context.input->string_at("path"), out.str(), "wrote structured control law");
 }
 
 // --- model.linear.statespace ----------------------------------------------
@@ -1082,6 +1202,26 @@ Registry build_registry() {
                           {"path", "title", "sections"},
                           {},
                           {"path"}});
+
+  registry.add(Capability{
+      "report.linear_system_json",
+      "Write a versioned machine-readable linear system with named matrices and diagnostics inputs",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      report_linear_system_json_capability,
+      {"system", "path"},
+      {},
+      {"path"}});
+
+  registry.add(Capability{
+      "report.control_law_json",
+      "Write a versioned machine-readable supported controller artifact and Riccati diagnostics",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      report_control_law_json_capability,
+      {"law", "path"},
+      {},
+      {"path"}});
 
   registry.add(
       Capability{"report.html",

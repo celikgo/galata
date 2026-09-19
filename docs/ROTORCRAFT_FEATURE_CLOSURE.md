@@ -8,19 +8,19 @@ declared contract; it cannot validate the Souxmar F1 assumptions.
 ## Baseline and delivery scope
 
 The implementation baseline for this milestone was the clean checkout on
-`feat/rotorcraft-level1`, HEAD `3d7c9df766e367a624467763e28c8dd91a13cefb`.
-The immediately preceding implementation commit was `cf36d09` and its evidence
-commit was `3d7c9df`; the historical sampled-helicopter and closure commits are
-`a72fe30` and `44855a4`. The reported 869-test result was treated as handoff
-context, not rerun evidence, until this milestone's final verification.
+`feat/rotorcraft-level1`, HEAD `593a363abecdd197864b307e978ea4a32bff463e`.
+The reported 869-test result was treated as handoff context, not rerun evidence,
+until this milestone's final verification. Historical sampled-helicopter and
+closure commits remain `a72fe30` and `44855a4`.
 
 The first delivered increments closed the altitude/environment contract (H6) and
 made the existing helicopter failure hooks reachable from studies (H5). This
 milestone corrects response-metric semantics, adds error-driven anti-windup
 evidence, explicit ensemble acceptance statuses and distribution provenance, an
-installable CLI-backed Python workflow with offline plots, and an executable
-UH-60 component transcription check. The remaining rows are intentionally not
-promoted to complete by proximity or by a passing unrelated test.
+installable CLI-backed Python workflow with offline plots, portable result
+bundles, contract-checked comparisons, and executable quaternion playback. The
+remaining rows are intentionally not promoted to complete by proximity or by a
+passing unrelated test.
 
 ## Feature-closure register
 
@@ -34,7 +34,7 @@ promoted to complete by proximity or by a passing unrelated test.
 | H4 | Closed-loop helicopter simulation | `sim.helicopter.closed_loop` executes a generic nonlinear `VehicleModel` with fixed-step RK4, named perfect or impaired measurements, PID or continuous/sampled LQR state feedback, saturation, whole-period delay, zero-order hold, controller-state evidence and reference schedules; response analysis now separates peak/final/RMS error, dedicated settling, reference-relative overshoot and actuator mismatches | No sampled-loop margin claim, estimator, or aircraft-validity claim; measured performance remains a Souxmar design-study result | `ResponseMetrics.*`, `SampledLoop.AppliesBoundaryTickSaturationDelayAndHoldInOrder`, `ExampleHeliControlPerformance.DisturbedAttitudeRecoveryHasMeasuredCriteria`, `ExampleHeliControlPerformance.IncorrectFeedbackSignIsADeclaredNegativeControl`, `ExampleHeliReferenceTracking.ScheduledAltitudeChangeIsMeasuredAgainstTheRecordedReference`, `examples/heli-performance-acceptance`, `heli-reference-tracking`, `docs/RESPONSE_METRICS_MIGRATION.md` | Implemented and behaviorally verified, physically unvalidated |
 | H5 | Study-scheduled tail-rotor loss, engine degradation, and actuator jam | `sim.helicopter.failure_events` and the closed-loop path apply tail-rotor/engine fractions and actuator jams at deterministic fixed-step boundaries; trajectory outputs reconstruct the active failure state at each row, and events are logged in summaries and `<trajectory>.events.txt` | Autorotation remains outside the declared Level-1 model; no measured engine/jam aircraft evidence is implied | `ExampleHeliFailures.FailureTrajectoriesChangeAtTheDeclaredBoundary`, `ExampleHeliFailures.SimultaneousEventsAreStableAndLogsMatchTheAppliedChanges`, `ExampleHeliFailures.InvalidFailureInputsAreRefusedByName`, `examples/heli-engine-degradation`, `heli-actuator-jam` | Implemented and numerically verified for scheduled-study semantics |
 | H6 | Altitude-consistent atmosphere and trim/simulation transfer | `Environment::at_geometric_altitude` uses `core::isa`; trim accepts altitude and `delta_isa_k`, carries atmospheric metadata, and downstream simulation freezes the trim environment explicitly | If future studies vary atmosphere with position, add a separate environment-field policy; do not silently change the frozen policy | Atmosphere agreement at 3,000 m, impossible-altitude refusal, measurable trim-power change, 500 m example report metadata | Implemented and verified |
-| M1 | Python/CLI engineering workflow and general plotting | Installable `galata-engineering` package, machine-readable `galata run --json` manifests, named-channel SVG plotting, optional PNG export, open/closed comparisons, ensemble plots, and NED-to-N/E/up playback exist over the authoritative C++ services | Expand native model introspection and richer interactive playback; no second numerical implementation is permitted | `tests/scripts/test_python_workflow.py`, `examples/heli-python-workflow.py`, `docs/PYTHON_WORKFLOW.md`; CLI and Python output digests agree | Implemented initial CLI-backed workflow; native introspection/playback expansion remains open |
+| M1 | Python/CLI engineering workflow and general plotting | Installable `galata-engineering` executes validated model loading, parameter overrides, trim, named linearisation, LQR synthesis, disturbed simulation, structured response evaluation and portable export through the authoritative C++ CLI; plots validate grids/units/frames and playback scrubs recorded quaternion attitude | Native multi-vehicle numerical bindings and richer interactive playback remain future work; no second numerical implementation is permitted | `tests/scripts/test_python_workflow.py`, `examples/heli-python-workflow.py`, `docs/PYTHON_WORKFLOW.md`; direct CLI trim agrees numerically with Python, real matrices/gain/trajectory artifacts are inspected | Executable initial workflow delivered; native multi-vehicle bindings remain open |
 | M2 | Advanced blade/flap/inflow physics | Level-1 momentum/quasi-static model only; the exact-hover derivative limitation is documented and tested | Add only with independent equations and suitable evidence | Dynamic flapping/inflow evidence and revised hover linearisation budget | Deferred — separate physics increment |
 | M3 | High-fidelity propulsion, failures, and engine/rotor coupling | Governor lag, torque state, static failure multipliers, and actuator limits exist | Add validated drivetrain/engine maps and declared validity limits | Published or measured propulsion evidence | Deferred — model-data dependency |
 | M4 | Higher-fidelity aeroelastic/flight-envelope prediction | No dynamic flapping, lead-lag, stall, compressibility, ground effect, or autorotation model | Select scope and source data before implementation | Evidence for each claimed envelope extension | Deferred — outside Level-1 validity |
@@ -68,6 +68,7 @@ promoted to complete by proximity or by a passing unrelated test.
 | H3-ENSEMBLE-02: closed-loop requirements and failure statuses are separate | `study.helicopter_ensemble` manifests and aggregate | `ExampleHeliEnsemble.SerialAndParallelPreserveDeclarationOrderAndMembers` | Manifests record execution, numerical, envelope and controller status separately, plus refusal/failure reason, worker count, seed algorithm, distribution and sampled values; four members are smoke evidence only |
 | C1-ARCH-01: shared architecture boundary is explicit | `model::VehicleModel`, `numerics`, `sim::run_sampled_loop`, `linearize` services and compatibility adapters | `SampledLoop.AppliesBoundaryTickSaturationDelayAndHoldInOrder`, existing fixed-wing/multirotor/helicopter regression gates | `docs/SHARED_VEHICLE_ARCHITECTURE.md` records common authorities and remaining private adapters; full three-vehicle migration remains open |
 | M1-PY-01: CLI-backed Python workflow is executable and machine-readable | `pyproject.toml`, `galata_workflow`, `galata run --json`, named-channel plotting | `tests/scripts/test_python_workflow.py`, `examples/heli-python-workflow.py` | Load/provenance, configure, trim/linearize/design orchestration, simulation, manifest evaluation, bitwise comparison, SVG plotting, NED-to-N/E/up playback and export are exercised; C++ remains authoritative |
+| M1-PY-02: result inspection has trustworthy contracts | `GalataWorkflow.compare`, `compare_subset`, `compare_numeric`, portable bundle exporter, plotting validators and HTML playback | `PythonWorkflowAcceptance.test_full_comparison_requires_the_same_nonempty_output_set`, `PythonWorkflowAcceptance.test_plot_contracts_and_attitude_playback`, `PythonWorkflowAcceptance.test_composed_operations_are_real_and_cli_agrees` | Full equality requires identical non-empty selected output sets and per-output digests; explicit resampling, missing-data gaps, units/frames, relative bundle digests and recorded quaternion attitude are checked |
 | C2-COMP-01: published component transcription is executable | `examples/uh60-reference-component/reference-aircraft.json`, `compare.py` | `python3 examples/uh60-reference-component/compare.py` | NASA-TM-85890 Table 1 main-rotor radius/chord/blades/solidity/rotor-speed and weight are checked in SI-derived quantities; exact missing full-aircraft inputs remain open |
 
 ## Readiness decisions at this handoff
@@ -88,17 +89,21 @@ This section records only executable evidence from the final integrated state.
 The final delivery commit is reported alongside this record because its hash is
 created after the evidence update:
 
-- Starting commit: `3d7c9df766e367a624467763e28c8dd91a13cefb`.
-- Historical context: implementation `cf36d09`, evidence `3d7c9df`, and the
-  prior reported `869`-test result were not treated as this milestone's rerun.
+- Starting commit: `593a363abecdd197864b307e978ea4a32bff463e`.
+- Historical context: the prior reported `869`-test result was not treated as
+  this milestone's rerun.
 - Final CTest result: `876/876` tests passed, `0` failed; full-suite real time
-  was `765.52 s` on this macOS arm64 host.
-- Final repository gates: `cmake --build --preset dev -j 4`, the full CTest
-  suite, `python3 -m unittest discover -s tests/scripts` (`85` tests), the
-  executable Python workflow, the UH-60 component comparison, CLI capability
-  JSON, generated status/verification checks, `scripts/check-doc-references.sh`,
-  `scripts/check-doc-links.sh`, and `git diff --check` passed. The link gate
-  checked 494 links and reported 10 slow/refused-host warnings, no failures.
+  was `855.61 s` on this macOS arm64 host.
+- Python repository suite: `87` tests passed in `121.42 s`, including isolated
+  installation, execution outside the repository, result inspection, plots,
+  playback and export. The executable example produced a `3.7395e-15` trim
+  residual, a `16x16` linearisation, a `4x16` gain, `101` trajectory samples,
+  roll/pitch settling of `0.22/0.50 s`, and criteria PASS. Its repeat run was
+  bit-identical for `response.json`, `open.csv`, and `closed.csv`.
+- Repository gates: the final dev build, version consistency, strict-SI,
+  generated capability table, documentation references, documentation links,
+  and `git diff --check` passed. The link gate checked 494 links and reported
+  11 slow/refused-host warnings, no failures.
 - Platform scope: this delivery was executed on macOS arm64; no Linux result is
   claimed here. `/Users/celikgo/souxmar-helicopter` was not modified.
 - Published-reference result: the executable UH-60 component transcription

@@ -205,9 +205,14 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `model.quadrotor` | Load a nonlinear multirotor plant — rotors with first-order speed lag, per-axis drag and an optional battery | `quadrotor` | implemented, unvalidated |
 | `model.quadrotor.export` | Write a multirotor as the YAML model.quadrotor reads, with a required record of where its numbers came from — which parameters were fitted, from what, and which were carried over untouched | `quadrotor` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
+| `report.control_law_json` | Write a versioned machine-readable supported controller artifact and Riccati diagnostics | `report` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
 | `report.helicopter_csv` | Export a helicopter trajectory as CSV with every state and output named, carrying the run's termination reason so a refused run cannot be read as a completed one | `report` | implemented, unvalidated |
+| `report.helicopter_response_json` | Write versioned machine-readable helicopter response metrics and acceptance verdict | `report` | implemented, unvalidated |
+| `report.helicopter_schema_json` | Write versioned machine-readable helicopter vocabulary, units, frames and parameter values | `report` | implemented, unvalidated |
+| `report.helicopter_trim_json` | Write versioned machine-readable helicopter trim values and numerical diagnostics | `report` | implemented, unvalidated |
 | `report.html` | Write a self-contained HTML report with readable tables and no remote resources | `report` | implemented, unvalidated |
+| `report.linear_system_json` | Write a versioned machine-readable linear system with named matrices and diagnostics inputs | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
 | `sim.helicopter` | Integrate the nonlinear helicopter from a trim under a declared control step, with a declared integration method and per-state magnitude bounds that refuse a divergence instead of reporting it as a completed run | `helicopter_trajectory` | implemented, unvalidated |

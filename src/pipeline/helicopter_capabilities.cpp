@@ -24,11 +24,12 @@
 // aircraft environment. It is supported only for positive airspeed and its
 // statistics are accepted as a declared study budget, not as aircraft data.
 
+#include "galata/analyze/response_metrics.hpp"
 #include "galata/core/atmosphere.hpp"
 #include "galata/core/quaternion.hpp"
+#include "galata/core/sha256.hpp"
 #include "galata/linearize/extended.hpp"
 #include "galata/linearize/vehicle.hpp"
-#include "galata/analyze/response_metrics.hpp"
 #include "galata/model/helicopter.hpp"
 #include "galata/numerics/integration_method.hpp"
 #include "galata/pipeline/registry.hpp"
@@ -44,6 +45,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <iomanip>
 #include <limits>
@@ -103,6 +105,7 @@ struct HelicopterArtifact {
   std::shared_ptr<const model::HelicopterModel> model;
   std::string path;
   std::string sha256;
+  std::map<std::string, double> parameter_overrides;
 };
 
 struct HelicopterTrimArtifact {
@@ -114,6 +117,7 @@ struct HelicopterTrimArtifact {
   // command that differs from it drives the actuator away from the trim.
   Eigen::VectorXd holding_controls;
   model::HelicopterModel::Breakdown breakdown;
+  std::map<std::string, double> parameter_overrides;
 };
 
 struct HelicopterTrajectoryArtifact {
@@ -213,6 +217,164 @@ struct HelicopterResponseArtifact {
   bool matched_disturbance = false;
   bool criteria_passed = false;
 };
+
+std::map<std::string, double*> helicopter_parameter_fields(model::HelicopterModel& heli) {
+  std::map<std::string, double*> fields{
+      {"mass.mass_kg", &heli.mass.mass_kg},
+      {"mass.inertia_xx_kg_m2", &heli.mass.inertia_cg_body_kg_m2(0, 0)},
+      {"mass.inertia_yy_kg_m2", &heli.mass.inertia_cg_body_kg_m2(1, 1)},
+      {"mass.inertia_zz_kg_m2", &heli.mass.inertia_cg_body_kg_m2(2, 2)},
+      {"main_rotor.radius_m", &heli.main_rotor.radius_m},
+      {"main_rotor.chord_m", &heli.main_rotor.chord_m},
+      {"main_rotor.inflow_time_constant_s", &heli.main_rotor.inflow_time_constant_s},
+      {"tail_rotor.radius_m", &heli.tail_rotor.radius_m},
+      {"tail_rotor.chord_m", &heli.tail_rotor.chord_m},
+      {"tail_rotor.inflow_time_constant_s", &heli.tail_rotor.inflow_time_constant_s},
+      {"airframe.flat_plate_area_m2", &heli.airframe.flat_plate_area_m2},
+      {"drivetrain.reference_rotor_speed_rad_s", &heli.drivetrain.reference_rotor_speed_rad_s},
+      {"drivetrain.governor_proportional_n_m_s", &heli.drivetrain.governor_proportional_n_m_s},
+      {"drivetrain.governor_time_constant_s", &heli.drivetrain.governor_time_constant_s},
+      {"drivetrain.maximum_engine_torque_n_m", &heli.drivetrain.maximum_engine_torque_n_m},
+      {"drivetrain.accessory_torque_n_m", &heli.drivetrain.accessory_torque_n_m},
+      {"tail_rotor_blockage_factor", &heli.tail_rotor_blockage_factor},
+      {"pedal_to_tail_collective", &heli.pedal_to_tail_collective},
+  };
+  const auto control_names = heli.control_names();
+  for (std::size_t index = 0; index < control_names.size(); ++index) {
+    const std::string prefix =
+        "actuators."
+        + control_names[index].substr(
+            0, control_names[index].size() - std::string("_command_rad").size());
+    auto& limits = heli.actuators[index];
+    fields.emplace(prefix + ".minimum_rad", &limits.minimum_rad);
+    fields.emplace(prefix + ".maximum_rad", &limits.maximum_rad);
+    fields.emplace(prefix + ".rate_limit_rad_s", &limits.rate_limit_rad_s);
+    fields.emplace(prefix + ".time_constant_s", &limits.time_constant_s);
+  }
+  return fields;
+}
+
+std::map<std::string, double> apply_helicopter_parameter_overrides(model::HelicopterModel& heli,
+                                                                   const ValuePtr& declared) {
+  std::map<std::string, double> applied;
+  if (!declared) {
+    return applied;
+  }
+  if (declared->kind() != Value::Kind::Map) {
+    throw std::invalid_argument(
+        "model.helicopter parameter_overrides must be a map of named finite SI values");
+  }
+  const auto fields = helicopter_parameter_fields(heli);
+  for (const auto& [name, value] : declared->as_map()) {
+    const auto field = fields.find(name);
+    if (field == fields.end()) {
+      std::ostringstream message;
+      message << "model.helicopter parameter_overrides names unknown parameter '" << name
+              << "'. Available:";
+      for (const auto& [known, ignored] : fields) {
+        (void)ignored;
+        message << " " << known;
+      }
+      throw std::invalid_argument(message.str());
+    }
+    if (value->kind() != Value::Kind::Number || !std::isfinite(value->as_number())) {
+      throw std::invalid_argument("model.helicopter parameter_overrides['" + name
+                                  + "'] must be a finite number in SI units");
+    }
+    *field->second = value->as_number();
+    applied.emplace(name, value->as_number());
+  }
+  heli.validate();
+  return applied;
+}
+
+std::map<std::string, double> helicopter_parameter_values(const model::HelicopterModel& heli) {
+  model::HelicopterModel copy = heli;
+  const auto fields = helicopter_parameter_fields(copy);
+  std::map<std::string, double> values;
+  for (const auto& [name, field] : fields) {
+    values.emplace(name, *field);
+  }
+  return values;
+}
+
+std::string json_number(double value) {
+  if (!std::isfinite(value)) {
+    return "null";
+  }
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+  return out.str();
+}
+
+void json_vector(std::ostream& out, const Eigen::VectorXd& values) {
+  out << '[';
+  for (Eigen::Index index = 0; index < values.size(); ++index) {
+    out << (index == 0 ? "" : ",") << json_number(values(index));
+  }
+  out << ']';
+}
+
+void json_strings(std::ostream& out, const std::vector<std::string>& values) {
+  out << '[';
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    out << (index == 0 ? "" : ",") << json_string(values[index]);
+  }
+  out << ']';
+}
+
+std::string unit_for_channel(const std::string& name) {
+  if (name.ends_with("_rad_s")) {
+    return "rad/s";
+  }
+  if (name.ends_with("_rad")) {
+    return "rad";
+  }
+  if (name.ends_with("_m_s")) {
+    return "m/s";
+  }
+  if (name.ends_with("_n_m")) {
+    return "N m";
+  }
+  if (name.ends_with("_m")) {
+    return "m";
+  }
+  if (name.ends_with("_n")) {
+    return "N";
+  }
+  if (name.ends_with("_w")) {
+    return "W";
+  }
+  if (name.ends_with("_kg")) {
+    return "kg";
+  }
+  if (name.ends_with("_kg_m2")) {
+    return "kg m^2";
+  }
+  return "dimensionless";
+}
+
+std::string frame_for_channel(const std::string& name) {
+  if (name.find("position_") == 0 || name == "altitude_m") {
+    return name == "altitude_m" ? "NED-derived altitude" : "NED position";
+  }
+  if (name.find("velocity_") == 0) {
+    return "body FRD velocity";
+  }
+  if (name.find("quaternion_") == 0 || name == "roll_rad" || name == "pitch_rad"
+      || name == "yaw_rad") {
+    return "body-to-NED Hamilton attitude";
+  }
+  if (name.find("rate_") != std::string::npos || name.find("_rate_") != std::string::npos) {
+    return "body FRD angular rate";
+  }
+  if (name.find("command_") != std::string::npos || name.find("cyclic") != std::string::npos
+      || name == "pedal_rad") {
+    return "body actuator/control";
+  }
+  return "model-native";
+}
 
 struct FailureEvent {
   int step = 0;
@@ -832,8 +994,8 @@ ResponseRequirements parse_response_requirements(const ValuePtr& aggregate_value
     }
     for (const auto& [name, entry] : aggregate_value->as_map()) {
       if (!aggregate_names.contains(name)) {
-        throw std::invalid_argument("analyze.helicopter_response requirements contains unknown requirement '"
-                                    + name + "'");
+        throw std::invalid_argument(
+            "analyze.helicopter_response requirements contains unknown requirement '" + name + "'");
       }
       if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())
           || entry->as_number() < 0.0) {
@@ -875,8 +1037,8 @@ ResponseRequirements parse_response_requirements(const ValuePtr& aggregate_value
     for (const auto& [name, entry] : requirements->as_map()) {
       if (!allowed.contains(name)) {
         throw std::invalid_argument("analyze.helicopter_response signal '" + signal
-                                    + "' contains unknown or unit-incompatible requirement '"
-                                    + name + "'");
+                                    + "' contains unknown or unit-incompatible requirement '" + name
+                                    + "'");
       }
       if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())
           || entry->as_number() < 0.0) {
@@ -1046,8 +1208,8 @@ struct ClosedLoopControllerRuntime {
         const bool drives_further_into_saturation =
             std::fabs(loop.last_requested - loop.last_saturated) > 1.0e-12
             && (loop.last_requested - loop.last_saturated) * integral_drive > 0.0;
-        loop.integrator += (drives_further_into_saturation ? 0.0 : integral_drive)
-                           + back_calculation;
+        loop.integrator +=
+            (drives_further_into_saturation ? 0.0 : integral_drive) + back_calculation;
         loop.integrator =
             std::clamp(loop.integrator, -loop.integrator_limit, loop.integrator_limit);
         loop.previous_error = error;
@@ -1355,6 +1517,8 @@ Artifact load_helicopter_capability(const StageContext& context) {
   const std::string declared = context.input->string_at("path");
   const std::string bytes = context.read_input(declared);
   auto model = std::make_shared<model::HelicopterModel>(model::parse_helicopter(bytes, declared));
+  const auto parameter_overrides =
+      apply_helicopter_parameter_overrides(*model, context.input->get("parameter_overrides"));
 
   Artifact artifact;
   artifact.kind = "helicopter";
@@ -1365,7 +1529,8 @@ Artifact load_helicopter_capability(const StageContext& context) {
           << fixed(-model->tail_rotor.position_cg_to_hub_body_m.x(), 2) << " m — "
           << model->description();
   artifact.summary = summary.str();
-  artifact.payload = HelicopterArtifact{std::move(model), declared, {}};
+  artifact.payload =
+      HelicopterArtifact{std::move(model), declared, core::sha256(bytes), parameter_overrides};
   return artifact;
 }
 
@@ -1475,8 +1640,12 @@ Artifact trim_helicopter_capability(const StageContext& context) {
     summary << "; ENVELOPE: " << result.envelope.reason;
   }
   artifact.summary = summary.str();
-  artifact.payload =
-      HelicopterTrimArtifact{subject.model, result, environment, std::move(holding), breakdown};
+  artifact.payload = HelicopterTrimArtifact{subject.model,
+                                            result,
+                                            environment,
+                                            std::move(holding),
+                                            breakdown,
+                                            subject.parameter_overrides};
   return artifact;
 }
 
@@ -2298,8 +2467,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
   const ResponseRequirements parsed_requirements = parse_response_requirements(
       context.input->get("requirements"), context.input->get("signal_requirements"), signals);
   response.requirements = parsed_requirements.aggregate;
-  const auto aggregate_budget = [&parsed_requirements](const std::string& name)
-      -> std::optional<double> {
+  const auto aggregate_budget =
+      [&parsed_requirements](const std::string& name) -> std::optional<double> {
     const auto found = parsed_requirements.aggregate.find(name);
     return found == parsed_requirements.aggregate.end() ? std::nullopt
                                                         : std::optional<double>(found->second);
@@ -2364,18 +2533,17 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
     }
     const double settling_dwell = signal_budget("settling_dwell_s").value_or(0.0);
     metric.settling_time_s = 0.0;
+
     struct SegmentStart {
       std::size_t index = 0;
       bool reference_step = false;
     };
+
     std::vector<SegmentStart> segment_starts{{0, false}};
     const auto is_discontinuity = [](const std::vector<double>& values, std::size_t i) {
       const double change = std::fabs(values[i] - values[i - 1]);
-      const double previous_change =
-          i > 1 ? std::fabs(values[i - 1] - values[i - 2]) : 0.0;
-      const double next_change = i + 1 < values.size()
-                                     ? std::fabs(values[i + 1] - values[i])
-                                     : 0.0;
+      const double previous_change = i > 1 ? std::fabs(values[i - 1] - values[i - 2]) : 0.0;
+      const double next_change = i + 1 < values.size() ? std::fabs(values[i + 1] - values[i]) : 0.0;
       return change > 1.0e-9 && previous_change <= 1.0e-9 && next_change <= 1.0e-9;
     };
     for (std::size_t i = 1; i < reference_values.size(); ++i) {
@@ -2432,8 +2600,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
         metric.final_error = segment_result.final_tracking_error;
       }
       if (segment_result.settling_status == analyze::SettlingStatus::DemonstratedRecovery) {
-        metric.settling_time_s = std::max(metric.settling_time_s,
-                                          segment_result.settling_duration_s);
+        metric.settling_time_s =
+            std::max(metric.settling_time_s, segment_result.settling_duration_s);
       }
       metric.segment_settling_statuses.emplace_back(
           analyze::to_string(segment_result.settling_status));
@@ -2451,8 +2619,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
       const double error = controlled_values[i] - reference_values[i];
       const double uncontrolled = uncontrolled_values[i] - reference_values[i];
       sum_squared += error * error;
-      metric.uncontrolled_peak_error = std::max(metric.uncontrolled_peak_error,
-                                                std::fabs(uncontrolled));
+      metric.uncontrolled_peak_error =
+          std::max(metric.uncontrolled_peak_error, std::fabs(uncontrolled));
     }
     metric.rms_error = std::sqrt(sum_squared / static_cast<double>(controlled_values.size()));
     metric.reference = reference_values.back();
@@ -2487,9 +2655,10 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
           closed.controller_saturated[i] - closed.controller_applied[i];
       response.requested_minus_limited_peak = std::max(
           response.requested_minus_limited_peak, requested_minus_limited.cwiseAbs().maxCoeff());
-      response.limited_minus_delayed_peak = std::max(
-          response.limited_minus_delayed_peak, limited_minus_delayed.cwiseAbs().maxCoeff());
-      const Eigen::VectorXd effort = closed.controller_applied[i] - closed.controller_applied.front();
+      response.limited_minus_delayed_peak = std::max(response.limited_minus_delayed_peak,
+                                                     limited_minus_delayed.cwiseAbs().maxCoeff());
+      const Eigen::VectorXd effort =
+          closed.controller_applied[i] - closed.controller_applied.front();
       response.control_effort_peak =
           std::max(response.control_effort_peak, effort.cwiseAbs().maxCoeff());
       squared_effort +=
@@ -2503,16 +2672,18 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
         }
         return {};
       };
-      const std::size_t trajectory_sample = std::min(
-          closed.states.size() - 1,
-          static_cast<std::size_t>(
-              std::lower_bound(closed.times_s.begin(), closed.times_s.end(),
-                               closed.controller_times_s[i])
-              - closed.times_s.begin()));
+      const std::size_t trajectory_sample =
+          std::min(closed.states.size() - 1,
+                   static_cast<std::size_t>(std::lower_bound(closed.times_s.begin(),
+                                                             closed.times_s.end(),
+                                                             closed.controller_times_s[i])
+                                            - closed.times_s.begin()));
       for (std::size_t control = 0;
-           control < static_cast<std::size_t>(closed.controller_applied[i].size()); ++control) {
+           control < static_cast<std::size_t>(closed.controller_applied[i].size());
+           ++control) {
         const std::string state_name = actual_name(closed.model->control_names()[control]);
-        const auto actual = std::find(closed.state_names.begin(), closed.state_names.end(), state_name);
+        const auto actual =
+            std::find(closed.state_names.begin(), closed.state_names.end(), state_name);
         if (actual != closed.state_names.end()) {
           response.delayed_minus_actual_peak = std::max(
               response.delayed_minus_actual_peak,
@@ -2546,8 +2717,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
   };
   for (const auto& metric : response.metrics) {
     const auto found = parsed_requirements.per_signal.find(metric.signal);
-    const auto budget = [&](const std::string& key, const std::string& legacy)
-        -> std::optional<double> {
+    const auto budget = [&](const std::string& key,
+                            const std::string& legacy) -> std::optional<double> {
       if (found != parsed_requirements.per_signal.end()) {
         const auto signal_budget = found->second.find(key);
         if (signal_budget != found->second.end()) {
@@ -2576,7 +2747,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
       response.criteria_passed =
           response.criteria_passed && metric.overshoot_fraction <= *overshoot_budget;
     }
-    const auto ratio_budget = budget("open_closed_peak_error_ratio", "open_closed_peak_error_ratio");
+    const auto ratio_budget =
+        budget("open_closed_peak_error_ratio", "open_closed_peak_error_ratio");
     if (ratio_budget && std::isfinite(metric.open_closed_peak_error_ratio)) {
       response.criteria_passed =
           response.criteria_passed && metric.open_closed_peak_error_ratio <= *ratio_budget;
@@ -2584,8 +2756,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
     const auto improvement_budget =
         budget("open_closed_improvement_fraction", "open_closed_improvement_fraction");
     if (improvement_budget && std::isfinite(metric.open_closed_improvement_fraction)) {
-      response.criteria_passed =
-          response.criteria_passed && metric.open_closed_improvement_fraction >= *improvement_budget;
+      response.criteria_passed = response.criteria_passed
+                                 && metric.open_closed_improvement_fraction >= *improvement_budget;
     }
   }
   response.criteria_passed =
@@ -2620,8 +2792,8 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
           << ", limited-delayed peak " << scientific(response.limited_minus_delayed_peak)
           << ", delayed-actual peak " << scientific(response.delayed_minus_actual_peak)
           << ", control-effort peak/RMS " << scientific(response.control_effort_peak) << "/"
-          << scientific(response.control_effort_rms)
-          << ", saturation duration " << fixed(response.saturation_duration_s, 3) << " s"
+          << scientific(response.control_effort_rms) << ", saturation duration "
+          << fixed(response.saturation_duration_s, 3) << " s"
           << ", rotor-speed excursion " << scientific(response.maximum_rotor_speed_excursion)
           << ", envelope departures controlled/uncontrolled "
           << response.controlled_envelope_departures << "/"
@@ -2649,9 +2821,8 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
         "study.helicopter_ensemble requires positive step_s, steps and sample_stride");
   }
   const bool parallel = context.input->bool_at("parallel", false);
-  const int worker_count = context.input->integer_at("worker_count", parallel
-                                                          ? static_cast<int>(members->as_list().size())
-                                                          : 1);
+  const int worker_count = context.input->integer_at(
+      "worker_count", parallel ? static_cast<int>(members->as_list().size()) : 1);
   if (worker_count < 1) {
     throw std::invalid_argument("study.helicopter_ensemble worker_count must be positive");
   }
@@ -2672,12 +2843,12 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
   std::string distribution_provenance = "manual member values; not a Monte Carlo sample";
   if (parameter_distribution) {
     if (parameter_distribution->kind() != Value::Kind::Map) {
-      throw std::invalid_argument(
-          "study.helicopter_ensemble parameter_distribution must be a map");
+      throw std::invalid_argument("study.helicopter_ensemble parameter_distribution must be a map");
     }
     const ValuePtr mass = parameter_distribution->get("mass_scale");
     if (mass) {
-      require_map_keys(mass, {"distribution", "mean", "stddev", "minimum", "maximum"},
+      require_map_keys(mass,
+                       {"distribution", "mean", "stddev", "minimum", "maximum"},
                        "study.helicopter_ensemble parameter_distribution.mass_scale");
       if (mass->string_at("distribution") != "normal_box_muller_v1") {
         throw std::invalid_argument(
@@ -2689,15 +2860,15 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
       mass_minimum = mass->number_at("minimum");
       mass_maximum = mass->number_at("maximum");
       if (!std::isfinite(mass_mean) || !std::isfinite(mass_stddev) || mass_stddev < 0.0
-          || !std::isfinite(mass_minimum) || !std::isfinite(mass_maximum)
-          || !(mass_minimum > 0.0) || mass_maximum < mass_minimum) {
+          || !std::isfinite(mass_minimum) || !std::isfinite(mass_maximum) || !(mass_minimum > 0.0)
+          || mass_maximum < mass_minimum) {
         throw std::invalid_argument(
             "study.helicopter_ensemble mass_scale distribution has invalid bounds or moments");
       }
-      distribution_provenance =
-          "mass_scale ~ normal_box_muller_v1(mean=" + fixed(mass_mean, 9)
-          + ", stddev=" + fixed(mass_stddev, 9) + ", truncated=[" + fixed(mass_minimum, 9)
-          + ", " + fixed(mass_maximum, 9) + "]); independent streams by member seed";
+      distribution_provenance = "mass_scale ~ normal_box_muller_v1(mean=" + fixed(mass_mean, 9)
+                                + ", stddev=" + fixed(mass_stddev, 9) + ", truncated=["
+                                + fixed(mass_minimum, 9) + ", " + fixed(mass_maximum, 9)
+                                + "]); independent streams by member seed";
     }
   }
 
@@ -2753,10 +2924,12 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
     std::string member_distribution = distribution_provenance;
     if (parameter_distribution && parameter_distribution->get("mass_scale")) {
       sampled_mass_scale = std::clamp(
-          mass_mean + mass_stddev
-              * turbulence_normal(static_cast<std::uint64_t>(seed_number),
-                                   static_cast<int>(i), 101),
-          mass_minimum, mass_maximum);
+          mass_mean
+              + mass_stddev
+                    * turbulence_normal(
+                        static_cast<std::uint64_t>(seed_number), static_cast<int>(i), 101),
+          mass_minimum,
+          mass_maximum);
       member_distribution = distribution_provenance;
     }
     declared.push_back({id,
@@ -2815,8 +2988,7 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
       std::optional<Artifact> response_run;
       if (member.closed_loop) {
         if (member.closed_loop->kind() != Value::Kind::Map) {
-          throw std::invalid_argument(
-              "study.helicopter_ensemble closed_loop must be a map");
+          throw std::invalid_argument("study.helicopter_ensemble closed_loop must be a map");
         }
         std::map<std::string, ValuePtr> closed_input = input;
         for (const auto& [key, value] : member.closed_loop->as_map()) {
@@ -2889,10 +3061,10 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
     } catch (const std::exception& error) {
       record.completed = false;
       record.numerical_checks_passed = false;
-     record.envelope_checks_passed = false;
-     record.controller_requirements_passed = false;
+      record.envelope_checks_passed = false;
+      record.controller_requirements_passed = false;
       record.controller_requirements_status = "execution_failed";
-     record.criteria_passed = false;
+      record.criteria_passed = false;
       record.execution_status = "refused";
       record.failure_reason = error.what();
       record.termination = std::string("refused: ") + error.what();
@@ -2905,9 +3077,10 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
     // The declaration order is the aggregation order. A fixed worker limit
     // changes scheduling only; it never changes member seeds or stream
     // derivation.
-    for (std::size_t first = 0; first < declared.size(); first += static_cast<std::size_t>(worker_count)) {
-      const std::size_t last = std::min(
-          declared.size(), first + static_cast<std::size_t>(worker_count));
+    for (std::size_t first = 0; first < declared.size();
+         first += static_cast<std::size_t>(worker_count)) {
+      const std::size_t last =
+          std::min(declared.size(), first + static_cast<std::size_t>(worker_count));
       std::vector<std::future<HelicopterEnsembleMember>> futures;
       futures.reserve(last - first);
       for (std::size_t i = first; i < last; ++i) {
@@ -2959,8 +3132,8 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
              << ",\n  \"termination\": " << json_string(record.termination)
              << ",\n  \"failure_reason\": " << json_string(record.failure_reason) << "\n}\n";
     context.write_output(record.manifest_path, manifest.str());
-    aggregate << "    {\"id\": " << json_string(record.id) << ", \"manifest\": "
-              << json_string(record.manifest_path)
+    aggregate << "    {\"id\": " << json_string(record.id)
+              << ", \"manifest\": " << json_string(record.manifest_path)
               << ", \"completed\": " << (record.completed ? "true" : "false")
               << ", \"execution_status\": " << json_string(record.execution_status)
               << ", \"numerical_checks_passed\": "
@@ -3120,9 +3293,9 @@ void write_response_section(std::ostream& out, const HelicopterResponseArtifact&
          "Overshoot | Open/closed ratio | Improvement | Uncontrolled peak error |\n"
          "|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|\n";
   for (const auto& metric : response.metrics) {
-    out << "| " << metric.signal << " | " << metric.unit << " | "
-        << scientific(metric.reference, 4) << " | " << scientific(metric.peak_error, 4) << " | "
-        << scientific(metric.final_error, 4) << " | " << scientific(metric.rms_error, 4) << " | ";
+    out << "| " << metric.signal << " | " << metric.unit << " | " << scientific(metric.reference, 4)
+        << " | " << scientific(metric.peak_error, 4) << " | " << scientific(metric.final_error, 4)
+        << " | " << scientific(metric.rms_error, 4) << " | ";
     if (std::isfinite(metric.settling_time_s)) {
       out << fixed(metric.settling_time_s, 4) << " s (" << metric.settling_status << ")";
     } else {
@@ -3156,12 +3329,209 @@ void write_response_section(std::ostream& out, const HelicopterResponseArtifact&
       << " rad. Delayed-command-minus-actual peak: "
       << scientific(response.delayed_minus_actual_peak, 4)
       << " rad. Control effort peak/RMS from trim: " << scientific(response.control_effort_peak, 4)
-      << "/" << scientific(response.control_effort_rms, 4) << " rad. Saturation duration: "
-      << fixed(response.saturation_duration_s, 4)
+      << "/" << scientific(response.control_effort_rms, 4)
+      << " rad. Saturation duration: " << fixed(response.saturation_duration_s, 4)
       << " s. Rotor-speed excursion: " << scientific(response.maximum_rotor_speed_excursion, 4)
       << " rad/s. Envelope departures (controlled/uncontrolled): "
       << response.controlled_envelope_departures << "/" << response.uncontrolled_envelope_departures
       << ". Engineering criteria: **" << (response.criteria_passed ? "PASS" : "FAIL") << "**.\n\n";
+}
+
+Artifact write_json_output(const StageContext& context,
+                           const std::string& path,
+                           const std::string& bytes,
+                           const std::string& summary) {
+  context.write_output(path, bytes);
+  Artifact result;
+  result.kind = "report";
+  result.summary = summary;
+  result.payload = context.resolve_output_path(path);
+  return result;
+}
+
+Artifact report_helicopter_schema_json_capability(const StageContext& context) {
+  const auto& subject =
+      context.upstream_at("helicopter").payload_as<HelicopterArtifact>("helicopter");
+  const auto states = subject.model->state_names();
+  const auto controls = subject.model->control_names();
+  const auto outputs = subject.model->output_names();
+  const auto parameters = helicopter_parameter_values(*subject.model);
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << "{\"schema\":\"galata.helicopter.schema.v1\",\"model\":{\"path\":"
+      << json_string(subject.path) << ",\"sha256\":" << json_string(subject.sha256)
+      << ",\"description\":" << json_string(subject.model->description())
+      << ",\"citation\":" << json_string(subject.model->citation)
+      << "},\"conventions\":{"
+         "\"attitude\":\"Hamilton scalar-first body-to-NED\","
+         "\"position\":\"NED metres\",\"velocity\":\"body FRD m/s\","
+         "\"controls\":\"body actuator commands in radians\"},\"states\":[";
+  for (std::size_t index = 0; index < states.size(); ++index) {
+    if (index != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(states[index])
+        << ",\"unit\":" << json_string(unit_for_channel(states[index]))
+        << ",\"frame\":" << json_string(frame_for_channel(states[index])) << '}';
+  }
+  out << "],\"controls\":[";
+  for (std::size_t index = 0; index < controls.size(); ++index) {
+    if (index != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(controls[index])
+        << ",\"unit\":" << json_string(unit_for_channel(controls[index]))
+        << ",\"frame\":" << json_string(frame_for_channel(controls[index])) << '}';
+  }
+  out << "],\"outputs\":[";
+  for (std::size_t index = 0; index < outputs.size(); ++index) {
+    if (index != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(outputs[index])
+        << ",\"unit\":" << json_string(unit_for_channel(outputs[index]))
+        << ",\"frame\":" << json_string(frame_for_channel(outputs[index])) << '}';
+  }
+  out << "],\"parameters\":[";
+  std::size_t index = 0;
+  for (const auto& [name, value] : parameters) {
+    if (index++ != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(name) << ",\"value\":" << json_number(value)
+        << ",\"unit\":" << json_string(unit_for_channel(name)) << '}';
+  }
+  out << "],\"parameter_overrides\":{";
+  index = 0;
+  for (const auto& [name, value] : subject.parameter_overrides) {
+    if (index++ != 0) {
+      out << ',';
+    }
+    out << json_string(name) << ':' << json_number(value);
+  }
+  out << "}}\n";
+  return write_json_output(
+      context, context.input->string_at("path"), out.str(), "wrote structured helicopter schema");
+}
+
+Artifact report_helicopter_trim_json_capability(const StageContext& context) {
+  const auto& trim =
+      context.upstream_at("trim").payload_as<HelicopterTrimArtifact>("helicopter_trim");
+  const auto state_names = trim.model->state_names();
+  const auto control_names = trim.model->control_names();
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << "{\"schema\":\"galata.helicopter.trim.v1\",\"state_names\":";
+  json_strings(out, state_names);
+  out << ",\"state_values\":";
+  json_vector(out, trim.result.extended_state);
+  out << ",\"controls\":[";
+  for (std::size_t index = 0; index < control_names.size(); ++index) {
+    if (index != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(control_names[index])
+        << ",\"value\":" << json_number(trim.holding_controls(static_cast<Eigen::Index>(index)))
+        << ",\"unit\":\"rad\"}";
+  }
+  out << "],\"unknowns\":[";
+  for (std::size_t index = 0; index < trim.result.unknown_names.size(); ++index) {
+    if (index != 0) {
+      out << ',';
+    }
+    out << "{\"name\":" << json_string(trim.result.unknown_names[index]) << ",\"value\":"
+        << json_number(trim.result.unknown_values(static_cast<Eigen::Index>(index)))
+        << ",\"unit\":" << json_string(unit_for_channel(trim.result.unknown_names[index])) << '}';
+  }
+  out << "],\"condition\":{\"altitude_m\":" << json_number(trim.environment.atmospheric_altitude_m)
+      << ",\"delta_isa_k\":" << json_number(trim.environment.delta_isa_k)
+      << ",\"density_kg_m3\":" << json_number(trim.environment.density_kg_m3)
+      << ",\"airspeed_m_s\":" << json_number(trim.result.extended_state(3))
+      << "},\"diagnostics\":{\"converged\":" << (trim.result.converged ? "true" : "false")
+      << ",\"residual_norm\":" << json_number(trim.result.residual_norm)
+      << ",\"residual_tolerance\":" << json_number(trim.result.residual_tolerance)
+      << ",\"iterations\":" << trim.result.iterations
+      << ",\"jacobian_rank\":" << trim.result.jacobian_rank
+      << ",\"unknown_count\":" << trim.result.unknown_count
+      << ",\"jacobian_condition_number\":" << json_number(trim.result.jacobian_condition_number)
+      << ",\"envelope_outside\":" << (trim.result.envelope.outside ? "true" : "false")
+      << ",\"envelope_reason\":" << json_string(trim.result.envelope.reason)
+      << "},"
+         "\"parameter_overrides\":{";
+  std::size_t index = 0;
+  for (const auto& [name, value] : trim.parameter_overrides) {
+    if (index++ != 0) {
+      out << ',';
+    }
+    out << json_string(name) << ':' << json_number(value);
+  }
+  out << "},\"breakdown\":{\"main_thrust_n\":" << json_number(trim.breakdown.main.thrust_n)
+      << ",\"tail_thrust_n\":" << json_number(trim.breakdown.tail.thrust_n)
+      << ",\"total_power_w\":" << json_number(trim.breakdown.total_power_w)
+      << ",\"rotor_speed_rad_s\":" << json_number(trim.breakdown.rotor_speed_rad_s) << "}}\n";
+  return write_json_output(
+      context, context.input->string_at("path"), out.str(), "wrote structured helicopter trim");
+}
+
+Artifact report_helicopter_response_json_capability(const StageContext& context) {
+  const auto& response =
+      context.upstream_at("response").payload_as<HelicopterResponseArtifact>("helicopter_response");
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out << "{\"schema\":\"galata.helicopter.response.v1\",\"criteria_passed\":"
+      << (response.criteria_passed ? "true" : "false") << ",\"matched_initial_condition\":"
+      << (response.matched_initial_condition ? "true" : "false")
+      << ",\"matched_disturbance\":" << (response.matched_disturbance ? "true" : "false")
+      << ",\"requirements\":{";
+  std::size_t index = 0;
+  for (const auto& [name, value] : response.requirements) {
+    if (index++ != 0) {
+      out << ',';
+    }
+    out << json_string(name) << ':' << json_number(value);
+  }
+  out << "},\"metrics\":[";
+  for (std::size_t metric_index = 0; metric_index < response.metrics.size(); ++metric_index) {
+    const auto& metric = response.metrics[metric_index];
+    if (metric_index != 0) {
+      out << ',';
+    }
+    out << "{\"signal\":" << json_string(metric.signal) << ",\"unit\":" << json_string(metric.unit)
+        << ",\"reference\":" << json_number(metric.reference)
+        << ",\"peak_error\":" << json_number(metric.peak_error)
+        << ",\"final_error\":" << json_number(metric.final_error)
+        << ",\"rms_error\":" << json_number(metric.rms_error)
+        << ",\"settling_time_s\":" << json_number(metric.settling_time_s)
+        << ",\"settling_status\":" << json_string(metric.settling_status)
+        << ",\"overshoot_applicable\":" << (metric.overshoot_applicable ? "true" : "false")
+        << ",\"overshoot_fraction\":" << json_number(metric.overshoot_fraction)
+        << ",\"open_closed_peak_error_ratio\":" << json_number(metric.open_closed_peak_error_ratio)
+        << ",\"open_closed_improvement_fraction\":"
+        << json_number(metric.open_closed_improvement_fraction)
+        << ",\"uncontrolled_peak_error\":" << json_number(metric.uncontrolled_peak_error)
+        << ",\"segment_settling_statuses\":";
+    json_strings(out, metric.segment_settling_statuses);
+    out << ",\"segment_settling_times_s\":[";
+    for (std::size_t segment = 0; segment < metric.segment_settling_times_s.size(); ++segment) {
+      out << (segment == 0 ? "" : ",") << json_number(metric.segment_settling_times_s[segment]);
+    }
+    out << "]}";
+  }
+  out << "],\"actuator\":{\"requested_minus_limited_peak_rad\":"
+      << json_number(response.requested_minus_limited_peak)
+      << ",\"limited_minus_delayed_peak_rad\":" << json_number(response.limited_minus_delayed_peak)
+      << ",\"delayed_minus_actual_peak_rad\":" << json_number(response.delayed_minus_actual_peak)
+      << ",\"control_effort_peak_rad\":" << json_number(response.control_effort_peak)
+      << ",\"control_effort_rms_rad\":" << json_number(response.control_effort_rms)
+      << ",\"saturation_duration_s\":" << json_number(response.saturation_duration_s)
+      << ",\"rotor_speed_excursion_rad_s\":" << json_number(response.maximum_rotor_speed_excursion)
+      << ",\"controlled_envelope_departures\":" << response.controlled_envelope_departures
+      << ",\"uncontrolled_envelope_departures\":" << response.uncontrolled_envelope_departures
+      << "}}\n";
+  return write_json_output(context,
+                           context.input->string_at("path"),
+                           out.str(),
+                           "wrote structured helicopter response metrics");
 }
 
 void write_ensemble_section(std::ostream& out, const HelicopterEnsembleArtifact& ensemble) {
@@ -3177,8 +3547,8 @@ void write_ensemble_section(std::ostream& out, const HelicopterEnsembleArtifact&
         << "] | " << member.execution_status << " | "
         << (member.numerical_checks_passed ? "pass" : "fail") << " | "
         << (member.envelope_checks_passed ? "pass" : "fail") << " | "
-        << member.controller_requirements_status
-        << " | " << (member.criteria_passed ? "pass" : "fail/excluded") << " | "
+        << member.controller_requirements_status << " | "
+        << (member.criteria_passed ? "pass" : "fail/excluded") << " | "
         << member.envelope_departures << " | " << member.failure_reason << " | "
         << member.manifest_path << " |\n";
   }
@@ -3356,7 +3726,7 @@ void register_helicopter_capabilities(Registry& registry) {
       "helicopter",
       Capability::State::ImplementedUnvalidated,
       load_helicopter_capability,
-      {"path"},
+      {"path", "parameter_overrides"},
       {"path"}});
 
   registry.add(Capability{
@@ -3487,6 +3857,36 @@ void register_helicopter_capabilities(Registry& registry) {
       Capability::State::ImplementedUnvalidated,
       report_helicopter_csv_capability,
       {"trajectory", "path"},
+      {},
+      {"path"}});
+
+  registry.add(Capability{
+      "report.helicopter_schema_json",
+      "Write versioned machine-readable helicopter vocabulary, units, frames and parameter values",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      report_helicopter_schema_json_capability,
+      {"helicopter", "path"},
+      {},
+      {"path"}});
+
+  registry.add(Capability{
+      "report.helicopter_trim_json",
+      "Write versioned machine-readable helicopter trim values and numerical diagnostics",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      report_helicopter_trim_json_capability,
+      {"trim", "path"},
+      {},
+      {"path"}});
+
+  registry.add(Capability{
+      "report.helicopter_response_json",
+      "Write versioned machine-readable helicopter response metrics and acceptance verdict",
+      "report",
+      Capability::State::ImplementedUnvalidated,
+      report_helicopter_response_json_capability,
+      {"response", "path"},
       {},
       {"path"}});
 }
