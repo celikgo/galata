@@ -1,0 +1,23 @@
+{
+  "aircraft": "Sikorsky UH-60A Black Hawk",
+  "configuration_role": "published-reference component transcription; not Souxmar validation",
+  "source": {
+    "citation": "Hilbert, K. B., A Mathematical Model of the UH-60 Helicopter, NASA TM-85890, April 1984",
+    "url": "https://ntrs.nasa.gov/citations/19840015585",
+    "table": "Table 1, UH-60 description requirements",
+    "pdf_pages": [17, 18],
+    "reuse": "US Government work; public-use report"
+  },
+  "transcribed_inputs": {
+    "main_rotor_radius_ft": 26.83,
+    "main_rotor_chord_ft": 1.73,
+    "main_rotor_omega_rad_s": 27.0,
+    "main_rotor_blades": 4.0,
+    "main_rotor_solidity": 0.08210,
+    "aircraft_weight_lbf": 16400.0
+  },
+  "acceptance": {
+    "solidity_absolute_tolerance": 0.00001,
+    "conversion_relative_tolerance": 1e-12
+  }
+}

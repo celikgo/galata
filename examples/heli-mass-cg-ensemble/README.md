@@ -1,11 +1,13 @@
 # Seeded mass/CG sensitivity ensemble
 
 Four independent forward-flight members vary mass and centre of gravity within
-declared design ranges and use member-specific seeds. The aggregate and one
-manifest per member preserve declaration order; `parallel: true` changes only
-execution scheduling. The study emits both parallel and serial aggregates for
-direct determinism comparison. These distributions are design assumptions, not
-measured aircraft uncertainty.
+declared design ranges and use member-specific seeds. Mass is sampled from the
+declared truncated-normal `normal_box_muller_v1` distribution; CG offsets are
+explicit design members, not a statistical aircraft-uncertainty claim. The
+aggregate and one manifest per member preserve declaration order; `parallel:
+true` changes only execution scheduling. The study emits both parallel and
+serial aggregates for direct determinism comparison. These distributions are
+design assumptions, not measured aircraft uncertainty.
 
 ```bash
 build/dev/src/cli/galata run examples/heli-mass-cg-ensemble/study.yaml \

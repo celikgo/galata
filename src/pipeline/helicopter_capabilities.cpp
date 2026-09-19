@@ -28,6 +28,7 @@
 #include "galata/core/quaternion.hpp"
 #include "galata/linearize/extended.hpp"
 #include "galata/linearize/vehicle.hpp"
+#include "galata/analyze/response_metrics.hpp"
 #include "galata/model/helicopter.hpp"
 #include "galata/numerics/integration_method.hpp"
 #include "galata/pipeline/registry.hpp"
@@ -75,6 +76,18 @@ std::string scientific(double value, int digits = 1) {
   out.imbue(std::locale::classic());
   out << std::scientific << std::setprecision(digits) << value;
   return out.str();
+}
+
+std::string json_string(const std::string& value) {
+  std::string result = "\"";
+  for (const char character : value) {
+    if (character == '\\' || character == '"') {
+      result += '\\';
+    }
+    result += character;
+  }
+  result += '"';
+  return result;
 }
 
 // Degrees are for the SUMMARY LINE ONLY, which is user-interface text. ADR-0003
@@ -135,6 +148,7 @@ struct HelicopterTrajectoryArtifact {
   std::vector<bool> controller_measurement_stale;
   std::vector<std::string> sensor_provenance;
   std::vector<Eigen::Vector3d> wind_samples_ned_m_s;
+  std::map<std::string, double> trim_reference_values;
   std::vector<std::string> initial_condition_provenance;
   std::string disturbance_provenance;
   std::string parameter_provenance;
@@ -146,8 +160,15 @@ struct HelicopterEnsembleMember {
   double mass_scale = 1.0;
   Eigen::Vector3d cg_offset_body_m = Eigen::Vector3d::Zero();
   bool completed = false;
+  bool numerical_checks_passed = false;
+  bool envelope_checks_passed = false;
+  bool controller_requirements_passed = true;
+  std::string controller_requirements_status = "not_requested";
   bool criteria_passed = false;
   int envelope_departures = 0;
+  std::string execution_status;
+  std::string failure_reason;
+  std::string distribution_provenance;
   std::string termination;
   std::string manifest_path;
 };
@@ -160,17 +181,30 @@ struct HelicopterEnsembleArtifact {
 
 struct HelicopterResponseMetric {
   std::string signal;
+  std::string unit;
   double reference = 0.0;
   double peak_error = 0.0;
   double final_error = 0.0;
+  double rms_error = 0.0;
   double settling_time_s = std::numeric_limits<double>::infinity();  // s
+  std::string settling_status;
+  std::vector<std::string> segment_settling_statuses;
+  std::vector<double> segment_settling_times_s;
+  double overshoot_fraction = std::numeric_limits<double>::quiet_NaN();
+  bool overshoot_applicable = false;
   double uncontrolled_peak_error = 0.0;
+  double open_closed_peak_error_ratio = std::numeric_limits<double>::quiet_NaN();
+  double open_closed_improvement_fraction = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct HelicopterResponseArtifact {
   std::vector<HelicopterResponseMetric> metrics;
   std::map<std::string, double> requirements;
-  double maximum_control_deviation = 0.0;      // rad
+  double requested_minus_limited_peak = 0.0;   // rad
+  double limited_minus_delayed_peak = 0.0;     // rad
+  double delayed_minus_actual_peak = 0.0;      // rad
+  double control_effort_peak = 0.0;            // rad from trim
+  double control_effort_rms = 0.0;             // rad from trim
   double saturation_duration_s = 0.0;          // s
   double maximum_rotor_speed_excursion = 0.0;  // rad/s
   int controlled_envelope_departures = 0;
@@ -734,6 +768,128 @@ std::map<std::string, double> finite_number_map(const ValuePtr& value,
   return result;
 }
 
+std::string response_unit(const std::string& signal) {
+  if (signal.size() >= 5 && signal.ends_with("_rad_s")) {
+    return "rad/s";
+  }
+  if (signal.size() >= 4 && signal.ends_with("_rad")) {
+    return "rad";
+  }
+  if (signal.size() >= 2 && signal.ends_with("_m")) {
+    return "m";
+  }
+  if (signal.size() >= 2 && signal.ends_with("_n")) {
+    return "N";
+  }
+  return "native";
+}
+
+std::string response_unit_suffix(const std::string& signal) {
+  if (signal.ends_with("_rad_s")) {
+    return "rad_s";
+  }
+  if (signal.ends_with("_rad")) {
+    return "rad";
+  }
+  if (signal.ends_with("_m")) {
+    return "m";
+  }
+  if (signal.ends_with("_n")) {
+    return "n";
+  }
+  return "native";
+}
+
+struct ResponseRequirements {
+  std::map<std::string, double> aggregate;
+  std::map<std::string, std::map<std::string, double>> per_signal;
+};
+
+ResponseRequirements parse_response_requirements(const ValuePtr& aggregate_value,
+                                                 const ValuePtr& signal_value,
+                                                 const std::vector<std::string>& signals) {
+  ResponseRequirements result;
+  const std::set<std::string> aggregate_names = {
+      "requested_minus_limited_peak_rad",
+      "limited_minus_delayed_peak_rad",
+      "delayed_minus_actual_peak_rad",
+      "control_effort_peak_rad",
+      "control_effort_rms_rad",
+      "saturation_duration_s",
+      "rotor_speed_excursion_rad_s",
+      "validity_envelope_departures",
+      // Explicit migration aliases from the pre-milestone schema. They are
+      // retained only so historical studies remain executable.
+      "tracking_error",
+      "settling_time_s",
+      "overshoot",
+      "control_effort_rad",
+  };
+  if (aggregate_value) {
+    if (aggregate_value->kind() != Value::Kind::Map) {
+      throw std::invalid_argument(
+          "analyze.helicopter_response requirements must be a map of named finite budgets");
+    }
+    for (const auto& [name, entry] : aggregate_value->as_map()) {
+      if (!aggregate_names.contains(name)) {
+        throw std::invalid_argument("analyze.helicopter_response requirements contains unknown requirement '"
+                                    + name + "'");
+      }
+      if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())
+          || entry->as_number() < 0.0) {
+        throw std::invalid_argument("analyze.helicopter_response requirement '" + name
+                                    + "' must be a finite non-negative number");
+      }
+      result.aggregate.emplace(name, entry->as_number());
+    }
+  }
+  if (!signal_value) {
+    return result;
+  }
+  if (signal_value->kind() != Value::Kind::Map) {
+    throw std::invalid_argument(
+        "analyze.helicopter_response signal_requirements must be a map keyed by signal name");
+  }
+  const std::set<std::string> requested(signals.begin(), signals.end());
+  for (const auto& [signal, requirements] : signal_value->as_map()) {
+    if (!requested.contains(signal)) {
+      throw std::invalid_argument("analyze.helicopter_response signal_requirements names signal '"
+                                  + signal + "' that is not in signals");
+    }
+    if (requirements->kind() != Value::Kind::Map) {
+      throw std::invalid_argument("analyze.helicopter_response requirements for '" + signal
+                                  + "' must be a map");
+    }
+    const std::string suffix = response_unit_suffix(signal);
+    const std::set<std::string> allowed = {
+        "peak_tracking_error_" + suffix,
+        "final_tracking_error_" + suffix,
+        "rms_tracking_error_" + suffix,
+        "settling_band_" + suffix,
+        "settling_dwell_s",
+        "settling_time_s",
+        "overshoot_fraction",
+        "open_closed_peak_error_ratio",
+        "open_closed_improvement_fraction",
+    };
+    for (const auto& [name, entry] : requirements->as_map()) {
+      if (!allowed.contains(name)) {
+        throw std::invalid_argument("analyze.helicopter_response signal '" + signal
+                                    + "' contains unknown or unit-incompatible requirement '"
+                                    + name + "'");
+      }
+      if (entry->kind() != Value::Kind::Number || !std::isfinite(entry->as_number())
+          || entry->as_number() < 0.0) {
+        throw std::invalid_argument("analyze.helicopter_response signal requirement '" + name
+                                    + "' for '" + signal
+                                    + "' must be a finite non-negative number");
+      }
+      result.per_signal[signal].emplace(name, entry->as_number());
+    }
+  }
+  return result;
+}
+
 double trajectory_signal(const HelicopterTrajectoryArtifact& run,
                          std::size_t sample,
                          const std::string& signal) {
@@ -878,9 +1034,20 @@ struct ClosedLoopControllerRuntime {
             loop.has_previous_error ? (error - loop.previous_error) / period_s : 0.0;
         const double alpha = loop.derivative_filter_s / (loop.derivative_filter_s + period_s);
         loop.filtered_derivative = alpha * loop.filtered_derivative + (1.0 - alpha) * derivative;
-        loop.integrator +=
-            loop.ki * error * period_s
-            + loop.anti_windup_gain * (loop.last_saturated - loop.last_requested) * period_s;
+        const double integral_drive = loop.ki * error * period_s;
+        const double back_calculation =
+            loop.anti_windup_gain * (loop.last_saturated - loop.last_requested) * period_s;
+        // Conditional integration handles the actuator limitation directly:
+        // when the error-driven integral term would push an already-limited
+        // request farther into saturation, freeze that drive and retain only
+        // the declared back-calculation unwind. This is intentionally
+        // separate from the finite integrator bound; a bound alone is not
+        // anti-windup.
+        const bool drives_further_into_saturation =
+            std::fabs(loop.last_requested - loop.last_saturated) > 1.0e-12
+            && (loop.last_requested - loop.last_saturated) * integral_drive > 0.0;
+        loop.integrator += (drives_further_into_saturation ? 0.0 : integral_drive)
+                           + back_calculation;
         loop.integrator =
             std::clamp(loop.integrator, -loop.integrator_limit, loop.integrator_limit);
         loop.previous_error = error;
@@ -1634,6 +1801,8 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   trajectory.step_s = step_s;
   trajectory.steps_taken = result.steps_taken;
   trajectory.failure_events = std::move(applied_failure_events);
+  trajectory.trim_reference_values = helicopter_named_values(
+      heli, subject.result.extended_state, subject.holding_controls, subject.environment);
   trajectory.initial_condition_provenance = initial.provenance;
   trajectory.disturbance_provenance = context.input->get("turbulence")
                                           ? turbulence_provenance(context)
@@ -1869,6 +2038,8 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
   trajectory.step_s = step_s;
   trajectory.steps_taken = result.integration.steps_taken;
   trajectory.failure_events = std::move(applied_failure_events);
+  trajectory.trim_reference_values = helicopter_named_values(
+      heli, subject.result.extended_state, subject.holding_controls, subject.environment);
   trajectory.initial_condition_provenance = initial.provenance;
   trajectory.disturbance_provenance = context.input->get("turbulence")
                                           ? turbulence_provenance(context)
@@ -2124,14 +2295,15 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
         "histories for the controlled/uncontrolled comparison");
   }
 
-  const double settling_budget = response.requirements.count("tracking_error")
-                                     ? response.requirements.at("tracking_error")
-                                     : 0.0;
-  if (!(settling_budget > 0.0)) {
-    throw std::invalid_argument(
-        "analyze.helicopter_response requirements must declare a positive tracking_error budget "
-        "before a controller is tuned against the study");
-  }
+  const ResponseRequirements parsed_requirements = parse_response_requirements(
+      context.input->get("requirements"), context.input->get("signal_requirements"), signals);
+  response.requirements = parsed_requirements.aggregate;
+  const auto aggregate_budget = [&parsed_requirements](const std::string& name)
+      -> std::optional<double> {
+    const auto found = parsed_requirements.aggregate.find(name);
+    return found == parsed_requirements.aggregate.end() ? std::nullopt
+                                                        : std::optional<double>(found->second);
+  };
   for (const std::string& signal : signals) {
     const auto explicit_reference = references.find(signal);
     const auto measurement = std::find(closed.controller_measurement_names.begin(),
@@ -2154,36 +2326,151 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
         }
         return closed.controller_references[tick](static_cast<Eigen::Index>(*scheduled_index));
       }
-      return trajectory_signal(open, 0, signal);
+      const auto trim_reference = open.trim_reference_values.find(signal);
+      if (trim_reference != open.trim_reference_values.end()) {
+        return trim_reference->second;
+      }
+      throw std::invalid_argument("analyze.helicopter_response has no trim reference for signal '"
+                                  + signal + "'; declare reference explicitly");
     };
+    std::vector<double> reference_values(closed.times_s.size());
+    std::vector<double> controlled_values(closed.times_s.size());
+    std::vector<double> uncontrolled_values(closed.times_s.size());
+    for (std::size_t i = 0; i < closed.times_s.size(); ++i) {
+      reference_values[i] = reference_at(i);
+      controlled_values[i] = trajectory_signal(closed, i, signal);
+      uncontrolled_values[i] = trajectory_signal(open, i, signal);
+    }
     HelicopterResponseMetric metric;
     metric.signal = signal;
-    metric.reference = reference_at(closed.times_s.size() - 1);
-    metric.settling_time_s = 0.0;
-    for (std::size_t i = 0; i < closed.times_s.size(); ++i) {
-      const double reference = reference_at(i);
-      const double error = trajectory_signal(closed, i, signal) - reference;
-      const double uncontrolled = trajectory_signal(open, i, signal) - reference;
-      metric.peak_error = std::max(metric.peak_error, std::fabs(error));
-      metric.uncontrolled_peak_error =
-          std::max(metric.uncontrolled_peak_error, std::fabs(uncontrolled));
-      if (std::fabs(error) > settling_budget) {
-        metric.settling_time_s = std::numeric_limits<double>::infinity();
-      } else if (std::isinf(metric.settling_time_s)) {
-        bool remains_settled = true;
-        for (std::size_t j = i; j < closed.times_s.size(); ++j) {
-          if (std::fabs(trajectory_signal(closed, j, signal) - reference_at(j)) > settling_budget) {
-            remains_settled = false;
-            break;
-          }
+    metric.unit = response_unit(signal);
+    const auto signal_requirements = parsed_requirements.per_signal.find(signal);
+    const std::string suffix = response_unit_suffix(signal);
+    const auto signal_budget = [&](const std::string& name) -> std::optional<double> {
+      if (signal_requirements != parsed_requirements.per_signal.end()) {
+        const auto found = signal_requirements->second.find(name);
+        if (found != signal_requirements->second.end()) {
+          return found->second;
         }
-        if (remains_settled) {
-          metric.settling_time_s = closed.times_s[i];
+      }
+      return std::nullopt;
+    };
+    const auto settling_band = signal_budget("settling_band_" + suffix)
+                                   .value_or(aggregate_budget("tracking_error").value_or(-1.0));
+    if (!(settling_band >= 0.0)) {
+      throw std::invalid_argument("analyze.helicopter_response signal '" + signal
+                                  + "' must declare settling_band_" + suffix
+                                  + " (or the legacy tracking_error migration alias)");
+    }
+    const double settling_dwell = signal_budget("settling_dwell_s").value_or(0.0);
+    metric.settling_time_s = 0.0;
+    struct SegmentStart {
+      std::size_t index = 0;
+      bool reference_step = false;
+    };
+    std::vector<SegmentStart> segment_starts{{0, false}};
+    const auto is_discontinuity = [](const std::vector<double>& values, std::size_t i) {
+      const double change = std::fabs(values[i] - values[i - 1]);
+      const double previous_change =
+          i > 1 ? std::fabs(values[i - 1] - values[i - 2]) : 0.0;
+      const double next_change = i + 1 < values.size()
+                                     ? std::fabs(values[i + 1] - values[i])
+                                     : 0.0;
+      return change > 1.0e-9 && previous_change <= 1.0e-9 && next_change <= 1.0e-9;
+    };
+    for (std::size_t i = 1; i < reference_values.size(); ++i) {
+      // A held reference step is a one-sample discontinuity. A ramp changes
+      // every sample and is therefore analyzed as tracking, not as a series
+      // of fictitious settling events.
+      const bool reference_step = is_discontinuity(reference_values, i);
+      const bool wind_step =
+          i < closed.wind_samples_ned_m_s.size() && i < open.wind_samples_ned_m_s.size()
+          && (open.wind_samples_ned_m_s[i] - open.wind_samples_ned_m_s[i - 1]).norm() > 1.0e-9
+          && (i == 1
+              || (open.wind_samples_ned_m_s[i - 1] - open.wind_samples_ned_m_s[i - 2]).norm()
+                     <= 1.0e-9)
+          && (i + 1 >= open.wind_samples_ned_m_s.size()
+              || (open.wind_samples_ned_m_s[i + 1] - open.wind_samples_ned_m_s[i]).norm()
+                     <= 1.0e-9);
+      if (reference_step || wind_step) {
+        const std::size_t start =
+            wind_step && !reference_step && i + 1 < reference_values.size() ? i + 1 : i;
+        if (segment_starts.back().index == start) {
+          segment_starts.back().reference_step =
+              segment_starts.back().reference_step || reference_step;
+        } else {
+          segment_starts.push_back({start, reference_step});
         }
       }
     }
-    metric.final_error = std::fabs(trajectory_signal(closed, closed.times_s.size() - 1, signal)
-                                   - reference_at(closed.times_s.size() - 1));
+    for (std::size_t segment = 0; segment < segment_starts.size(); ++segment) {
+      const std::size_t start = segment_starts[segment].index;
+      const std::size_t end = segment + 1 < segment_starts.size()
+                                  ? segment_starts[segment + 1].index - 1
+                                  : reference_values.size() - 1;
+      std::vector<double> segment_times(
+          closed.times_s.begin() + static_cast<std::ptrdiff_t>(start),
+          closed.times_s.begin() + static_cast<std::ptrdiff_t>(end + 1));
+      std::vector<double> segment_references(
+          reference_values.begin() + static_cast<std::ptrdiff_t>(start),
+          reference_values.begin() + static_cast<std::ptrdiff_t>(end + 1));
+      std::vector<double> segment_controlled(
+          controlled_values.begin() + static_cast<std::ptrdiff_t>(start),
+          controlled_values.begin() + static_cast<std::ptrdiff_t>(end + 1));
+      const bool has_step = segment_starts[segment].reference_step;
+      analyze::ResponseMetricOptions options;
+      options.event_time_s = segment_times.front();
+      options.settling_band = settling_band;
+      options.settling_dwell_s = settling_dwell;
+      options.has_reference_step = has_step;
+      options.reference_before = has_step ? reference_values[start - 1] : reference_values[start];
+      options.reference_after = reference_values[start];
+      const auto segment_result = analyze::analyze_response_segment(
+          segment_times, segment_references, segment_controlled, options);
+      metric.peak_error = std::max(metric.peak_error, segment_result.peak_tracking_error);
+      if (segment == segment_starts.size() - 1) {
+        metric.final_error = segment_result.final_tracking_error;
+      }
+      if (segment_result.settling_status == analyze::SettlingStatus::DemonstratedRecovery) {
+        metric.settling_time_s = std::max(metric.settling_time_s,
+                                          segment_result.settling_duration_s);
+      }
+      metric.segment_settling_statuses.emplace_back(
+          analyze::to_string(segment_result.settling_status));
+      metric.segment_settling_times_s.push_back(segment_result.settling_duration_s);
+      if (segment_result.overshoot_applicable) {
+        metric.overshoot_applicable = true;
+        metric.overshoot_fraction =
+            std::isnan(metric.overshoot_fraction)
+                ? segment_result.overshoot_fraction
+                : std::max(metric.overshoot_fraction, segment_result.overshoot_fraction);
+      }
+    }
+    double sum_squared = 0.0;
+    for (std::size_t i = 0; i < controlled_values.size(); ++i) {
+      const double error = controlled_values[i] - reference_values[i];
+      const double uncontrolled = uncontrolled_values[i] - reference_values[i];
+      sum_squared += error * error;
+      metric.uncontrolled_peak_error = std::max(metric.uncontrolled_peak_error,
+                                                std::fabs(uncontrolled));
+    }
+    metric.rms_error = std::sqrt(sum_squared / static_cast<double>(controlled_values.size()));
+    metric.reference = reference_values.back();
+    // A reference can change again before the preceding segment settles. All
+    // segment results remain visible; the declared settling requirement is
+    // evaluated against the final segment, which is the only segment with a
+    // complete post-event observation window.
+    metric.settling_status = metric.segment_settling_statuses.back();
+    metric.settling_time_s = metric.segment_settling_times_s.back();
+    if (metric.uncontrolled_peak_error > 0.0) {
+      metric.open_closed_peak_error_ratio = metric.peak_error / metric.uncontrolled_peak_error;
+      metric.open_closed_improvement_fraction = 1.0 - metric.open_closed_peak_error_ratio;
+    }
+    if (signal_requirements == parsed_requirements.per_signal.end()
+        && !aggregate_budget("tracking_error").has_value()) {
+      throw std::invalid_argument("analyze.helicopter_response signal '" + signal
+                                  + "' has no declared performance requirements");
+    }
     response.metrics.push_back(metric);
   }
 
@@ -2192,17 +2479,52 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
                                    ? closed.controller_times_s[1] - closed.controller_times_s[0]
                                    : closed.step_s;
     int saturated_ticks = 0;
+    double squared_effort = 0.0;
     for (std::size_t i = 0; i < closed.controller_requested.size(); ++i) {
-      response.maximum_control_deviation = std::max(
-          response.maximum_control_deviation,
-          (closed.controller_applied[i] - closed.controller_requested[i]).cwiseAbs().maxCoeff());
-      const Eigen::VectorXd difference =
+      const Eigen::VectorXd requested_minus_limited =
           closed.controller_requested[i] - closed.controller_saturated[i];
-      if (difference.cwiseAbs().maxCoeff() > 1.0e-12) {
+      const Eigen::VectorXd limited_minus_delayed =
+          closed.controller_saturated[i] - closed.controller_applied[i];
+      response.requested_minus_limited_peak = std::max(
+          response.requested_minus_limited_peak, requested_minus_limited.cwiseAbs().maxCoeff());
+      response.limited_minus_delayed_peak = std::max(
+          response.limited_minus_delayed_peak, limited_minus_delayed.cwiseAbs().maxCoeff());
+      const Eigen::VectorXd effort = closed.controller_applied[i] - closed.controller_applied.front();
+      response.control_effort_peak =
+          std::max(response.control_effort_peak, effort.cwiseAbs().maxCoeff());
+      squared_effort +=
+          effort.squaredNorm() / static_cast<double>(std::max<Eigen::Index>(1, effort.size()));
+      if (requested_minus_limited.cwiseAbs().maxCoeff() > 1.0e-12) {
         ++saturated_ticks;
+      }
+      const auto actual_name = [](const std::string& command) -> std::string {
+        if (command.ends_with("_command_rad")) {
+          return command.substr(0, command.size() - std::string("_command_rad").size()) + "_rad";
+        }
+        return {};
+      };
+      const std::size_t trajectory_sample = std::min(
+          closed.states.size() - 1,
+          static_cast<std::size_t>(
+              std::lower_bound(closed.times_s.begin(), closed.times_s.end(),
+                               closed.controller_times_s[i])
+              - closed.times_s.begin()));
+      for (std::size_t control = 0;
+           control < static_cast<std::size_t>(closed.controller_applied[i].size()); ++control) {
+        const std::string state_name = actual_name(closed.model->control_names()[control]);
+        const auto actual = std::find(closed.state_names.begin(), closed.state_names.end(), state_name);
+        if (actual != closed.state_names.end()) {
+          response.delayed_minus_actual_peak = std::max(
+              response.delayed_minus_actual_peak,
+              std::fabs(closed.controller_applied[i](static_cast<Eigen::Index>(control))
+                        - closed.states[trajectory_sample](
+                            static_cast<Eigen::Index>(actual - closed.state_names.begin()))));
+        }
       }
     }
     response.saturation_duration_s = static_cast<double>(saturated_ticks) * tick_period;
+    response.control_effort_rms =
+        std::sqrt(squared_effort / static_cast<double>(closed.controller_applied.size()));
   }
   const auto rotor =
       std::find(closed.output_names.begin(), closed.output_names.end(), "main_rotor_speed_rad_s");
@@ -2223,22 +2545,57 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
     return budget != response.requirements.end() && measured > budget->second;
   };
   for (const auto& metric : response.metrics) {
-    response.criteria_passed =
-        response.criteria_passed && !budget_exceeded("tracking_error", metric.peak_error);
-    if (response.requirements.count("settling_time_s") != 0) {
-      response.criteria_passed =
-          response.criteria_passed && std::isfinite(metric.settling_time_s)
-          && metric.settling_time_s <= response.requirements.at("settling_time_s");
+    const auto found = parsed_requirements.per_signal.find(metric.signal);
+    const auto budget = [&](const std::string& key, const std::string& legacy)
+        -> std::optional<double> {
+      if (found != parsed_requirements.per_signal.end()) {
+        const auto signal_budget = found->second.find(key);
+        if (signal_budget != found->second.end()) {
+          return signal_budget->second;
+        }
+      }
+      return aggregate_budget(legacy);
+    };
+    const std::string suffix = response_unit_suffix(metric.signal);
+    const auto peak_budget = budget("peak_tracking_error_" + suffix, "tracking_error");
+    const auto final_budget = budget("final_tracking_error_" + suffix, "final_tracking_error");
+    const auto rms_budget = budget("rms_tracking_error_" + suffix, "rms_tracking_error");
+    response.criteria_passed = response.criteria_passed
+                               && (!peak_budget || metric.peak_error <= *peak_budget)
+                               && (!final_budget || metric.final_error <= *final_budget)
+                               && (!rms_budget || metric.rms_error <= *rms_budget);
+    const auto settling_budget = budget("settling_time_s", "settling_time_s");
+    if (settling_budget) {
+      const bool within_budget = metric.settling_status == "already_within_band"
+                                 || (metric.settling_status == "demonstrated_recovery"
+                                     && metric.settling_time_s <= *settling_budget);
+      response.criteria_passed = response.criteria_passed && within_budget;
     }
-    if (response.requirements.count("overshoot") != 0 && metric.uncontrolled_peak_error > 0.0) {
-      response.criteria_passed = response.criteria_passed
-                                 && metric.peak_error / metric.uncontrolled_peak_error
-                                        <= response.requirements.at("overshoot");
+    const auto overshoot_budget = budget("overshoot_fraction", "overshoot");
+    if (overshoot_budget && metric.overshoot_applicable) {
+      response.criteria_passed =
+          response.criteria_passed && metric.overshoot_fraction <= *overshoot_budget;
+    }
+    const auto ratio_budget = budget("open_closed_peak_error_ratio", "open_closed_peak_error_ratio");
+    if (ratio_budget && std::isfinite(metric.open_closed_peak_error_ratio)) {
+      response.criteria_passed =
+          response.criteria_passed && metric.open_closed_peak_error_ratio <= *ratio_budget;
+    }
+    const auto improvement_budget =
+        budget("open_closed_improvement_fraction", "open_closed_improvement_fraction");
+    if (improvement_budget && std::isfinite(metric.open_closed_improvement_fraction)) {
+      response.criteria_passed =
+          response.criteria_passed && metric.open_closed_improvement_fraction >= *improvement_budget;
     }
   }
   response.criteria_passed =
       response.criteria_passed
-      && !budget_exceeded("control_effort_rad", response.maximum_control_deviation)
+      && !budget_exceeded("requested_minus_limited_peak_rad", response.requested_minus_limited_peak)
+      && !budget_exceeded("limited_minus_delayed_peak_rad", response.limited_minus_delayed_peak)
+      && !budget_exceeded("delayed_minus_actual_peak_rad", response.delayed_minus_actual_peak)
+      && !budget_exceeded("control_effort_peak_rad", response.control_effort_peak)
+      && !budget_exceeded("control_effort_rms_rad", response.control_effort_rms)
+      && !budget_exceeded("control_effort_rad", response.control_effort_peak)
       && !budget_exceeded("saturation_duration_s", response.saturation_duration_s)
       && !budget_exceeded("rotor_speed_excursion_rad_s", response.maximum_rotor_speed_excursion)
       && (response.requirements.count("validity_envelope_departures") == 0
@@ -2250,15 +2607,20 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
   std::ostringstream summary;
   summary << "matched open/closed-loop study; " << signals.size() << " response signal(s)";
   for (const auto& metric : response.metrics) {
-    summary << "; " << metric.signal << " peak " << scientific(metric.peak_error) << ", final "
-            << scientific(metric.final_error) << ", settling ";
+    summary << "; " << metric.signal << " peak " << scientific(metric.peak_error) << " "
+            << metric.unit << ", final " << scientific(metric.final_error) << " " << metric.unit
+            << ", RMS " << scientific(metric.rms_error) << " " << metric.unit << ", settling ";
     if (std::isfinite(metric.settling_time_s)) {
-      summary << fixed(metric.settling_time_s, 3) << " s";
+      summary << fixed(metric.settling_time_s, 3) << " s (" << metric.settling_status << ")";
     } else {
-      summary << "not settled";
+      summary << metric.settling_status;
     }
   }
-  summary << "; max command tracking deviation " << scientific(response.maximum_control_deviation)
+  summary << "; requested-limited peak " << scientific(response.requested_minus_limited_peak)
+          << ", limited-delayed peak " << scientific(response.limited_minus_delayed_peak)
+          << ", delayed-actual peak " << scientific(response.delayed_minus_actual_peak)
+          << ", control-effort peak/RMS " << scientific(response.control_effort_peak) << "/"
+          << scientific(response.control_effort_rms)
           << ", saturation duration " << fixed(response.saturation_duration_s, 3) << " s"
           << ", rotor-speed excursion " << scientific(response.maximum_rotor_speed_excursion)
           << ", envelope departures controlled/uncontrolled "
@@ -2287,6 +2649,12 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
         "study.helicopter_ensemble requires positive step_s, steps and sample_stride");
   }
   const bool parallel = context.input->bool_at("parallel", false);
+  const int worker_count = context.input->integer_at("worker_count", parallel
+                                                          ? static_cast<int>(members->as_list().size())
+                                                          : 1);
+  if (worker_count < 1) {
+    throw std::invalid_argument("study.helicopter_ensemble worker_count must be positive");
+  }
   const std::string manifest_prefix = context.input->string_at("manifest_prefix", "member");
   if (manifest_prefix.empty()) {
     throw std::invalid_argument("study.helicopter_ensemble manifest_prefix must be non-empty");
@@ -2296,6 +2664,42 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
     throw std::invalid_argument(
         "study.helicopter_ensemble criteria_max_envelope_departures must be non-negative");
   }
+  const ValuePtr parameter_distribution = context.input->get("parameter_distribution");
+  double mass_mean = 1.0;
+  double mass_stddev = 0.0;
+  double mass_minimum = 0.1;
+  double mass_maximum = 10.0;
+  std::string distribution_provenance = "manual member values; not a Monte Carlo sample";
+  if (parameter_distribution) {
+    if (parameter_distribution->kind() != Value::Kind::Map) {
+      throw std::invalid_argument(
+          "study.helicopter_ensemble parameter_distribution must be a map");
+    }
+    const ValuePtr mass = parameter_distribution->get("mass_scale");
+    if (mass) {
+      require_map_keys(mass, {"distribution", "mean", "stddev", "minimum", "maximum"},
+                       "study.helicopter_ensemble parameter_distribution.mass_scale");
+      if (mass->string_at("distribution") != "normal_box_muller_v1") {
+        throw std::invalid_argument(
+            "study.helicopter_ensemble mass_scale distribution must be "
+            "'normal_box_muller_v1'");
+      }
+      mass_mean = mass->number_at("mean");
+      mass_stddev = mass->number_at("stddev");
+      mass_minimum = mass->number_at("minimum");
+      mass_maximum = mass->number_at("maximum");
+      if (!std::isfinite(mass_mean) || !std::isfinite(mass_stddev) || mass_stddev < 0.0
+          || !std::isfinite(mass_minimum) || !std::isfinite(mass_maximum)
+          || !(mass_minimum > 0.0) || mass_maximum < mass_minimum) {
+        throw std::invalid_argument(
+            "study.helicopter_ensemble mass_scale distribution has invalid bounds or moments");
+      }
+      distribution_provenance =
+          "mass_scale ~ normal_box_muller_v1(mean=" + fixed(mass_mean, 9)
+          + ", stddev=" + fixed(mass_stddev, 9) + ", truncated=[" + fixed(mass_minimum, 9)
+          + ", " + fixed(mass_maximum, 9) + "]); independent streams by member seed";
+    }
+  }
 
   struct MemberInput {
     std::string id;
@@ -2303,6 +2707,8 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
     double mass_scale = 1.0;
     Eigen::Vector3d cg_offset_body_m = Eigen::Vector3d::Zero();
     ValuePtr perturbation;
+    std::string distribution_provenance;
+    ValuePtr closed_loop;
   };
 
   std::vector<MemberInput> declared;
@@ -2343,11 +2749,23 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
       }
       return Eigen::Vector3d(parsed);
     }();
+    double sampled_mass_scale = mass_scale;
+    std::string member_distribution = distribution_provenance;
+    if (parameter_distribution && parameter_distribution->get("mass_scale")) {
+      sampled_mass_scale = std::clamp(
+          mass_mean + mass_stddev
+              * turbulence_normal(static_cast<std::uint64_t>(seed_number),
+                                   static_cast<int>(i), 101),
+          mass_minimum, mass_maximum);
+      member_distribution = distribution_provenance;
+    }
     declared.push_back({id,
                         static_cast<std::uint64_t>(seed_number),
-                        mass_scale,
+                        sampled_mass_scale,
                         cg_offset,
-                        entry->get("initial_state_perturbation")});
+                        entry->get("initial_state_perturbation"),
+                        member_distribution,
+                        context.input->get("closed_loop")});
   }
 
   const ValuePtr turbulence = context.input->get("turbulence");
@@ -2383,24 +2801,100 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
       input.emplace("turbulence", Value::map(std::move(fields)));
     }
     StageContext member_context = context;
-    member_context.input = Value::map(std::move(input));
+    member_context.input = Value::map(input);
     member_context.stage_id = context.stage_id + "." + member.id;
     HelicopterEnsembleMember record;
     record.id = member.id;
     record.seed = member.seed;
     record.mass_scale = member.mass_scale;
     record.cg_offset_body_m = member.cg_offset_body_m;
+    record.distribution_provenance = member.distribution_provenance;
     try {
-      const Artifact run = simulate_helicopter_capability(member_context);
+      Artifact run = simulate_helicopter_capability(member_context);
+      const Artifact* run_for_checks = &run;
+      std::optional<Artifact> response_run;
+      if (member.closed_loop) {
+        if (member.closed_loop->kind() != Value::Kind::Map) {
+          throw std::invalid_argument(
+              "study.helicopter_ensemble closed_loop must be a map");
+        }
+        std::map<std::string, ValuePtr> closed_input = input;
+        for (const auto& [key, value] : member.closed_loop->as_map()) {
+          closed_input[key] = value;
+        }
+        closed_input["trim"] = context.input->get("trim");
+        closed_input["step_s"] = Value::number(step_s);
+        closed_input["steps"] = Value::number(static_cast<double>(steps));
+        closed_input["sample_stride"] = Value::number(static_cast<double>(sample_stride));
+        closed_input["mass_scale"] = Value::number(member.mass_scale);
+        StageContext closed_context = context;
+        closed_context.input = Value::map(std::move(closed_input));
+        closed_context.stage_id = context.stage_id + "." + member.id + ".closed_loop";
+        response_run = simulate_helicopter_closed_loop_capability(closed_context);
+        run_for_checks = &*response_run;
+      }
       const auto& trajectory =
-          run.payload_as<HelicopterTrajectoryArtifact>("helicopter_trajectory");
+          run_for_checks->payload_as<HelicopterTrajectoryArtifact>("helicopter_trajectory");
       record.completed = trajectory.reason == numerics::TerminationReason::Completed;
+      record.numerical_checks_passed = trajectory.reason == numerics::TerminationReason::Completed
+                                       && trajectory.steps_taken == steps;
       record.envelope_departures = trajectory.envelope_departures;
-      record.criteria_passed = record.completed && record.envelope_departures <= criteria_limit;
+      record.envelope_checks_passed = record.envelope_departures <= criteria_limit;
+      record.controller_requirements_passed = true;
+      record.controller_requirements_status = "not_requested";
+      if (member.closed_loop && context.input->get("response")) {
+        try {
+          const ValuePtr response = context.input->get("response");
+          require_map_keys(response,
+                           {"signals", "reference", "requirements", "signal_requirements"},
+                           "study.helicopter_ensemble response");
+          std::map<std::string, ValuePtr> response_input;
+          response_input.emplace("open_loop", Value::stage_reference(member.id + ".open"));
+          response_input.emplace("closed_loop", Value::stage_reference(member.id + ".closed"));
+          for (const char* key : {"signals", "reference", "requirements", "signal_requirements"}) {
+            if (const ValuePtr value = response->get(key)) {
+              response_input.emplace(key, value);
+            }
+          }
+          StageContext response_context = context;
+          response_context.input = Value::map(std::move(response_input));
+          response_context.stage_id = context.stage_id + "." + member.id + ".response";
+          response_context.upstream[member.id + ".open"] = run;
+          response_context.upstream[member.id + ".closed"] = *response_run;
+          const Artifact response_artifact =
+              analyze_helicopter_response_capability(response_context);
+          const auto& response_payload =
+              response_artifact.payload_as<HelicopterResponseArtifact>("helicopter_response");
+          record.controller_requirements_passed = response_payload.criteria_passed;
+          record.controller_requirements_status =
+              record.controller_requirements_passed ? "passed" : "failed";
+          if (!record.controller_requirements_passed) {
+            record.failure_reason = "controller-performance requirements failed";
+          }
+        } catch (const std::exception& error) {
+          record.controller_requirements_passed = false;
+          record.controller_requirements_status = "unsupported_or_missing_metrics";
+          record.failure_reason = error.what();
+        }
+      }
+      record.criteria_passed = record.numerical_checks_passed && record.envelope_checks_passed;
+      record.criteria_passed = record.criteria_passed && record.controller_requirements_passed;
+      record.execution_status = record.completed ? "completed" : "diverged";
       record.termination = record.completed ? "completed" : numerics::to_string(trajectory.reason);
+      if (!record.completed) {
+        record.failure_reason = trajectory.termination_detail;
+      } else if (!record.envelope_checks_passed) {
+        record.failure_reason = "validity-envelope departure budget exceeded";
+      }
     } catch (const std::exception& error) {
       record.completed = false;
-      record.criteria_passed = false;
+      record.numerical_checks_passed = false;
+     record.envelope_checks_passed = false;
+     record.controller_requirements_passed = false;
+      record.controller_requirements_status = "execution_failed";
+     record.criteria_passed = false;
+      record.execution_status = "refused";
+      record.failure_reason = error.what();
       record.termination = std::string("refused: ") + error.what();
     }
     return record;
@@ -2408,13 +2902,20 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
 
   std::vector<HelicopterEnsembleMember> records(declared.size());
   if (parallel) {
-    std::vector<std::future<HelicopterEnsembleMember>> futures;
-    futures.reserve(declared.size());
-    for (const auto& member : declared) {
-      futures.push_back(std::async(std::launch::async, run_member, member));
-    }
-    for (std::size_t i = 0; i < futures.size(); ++i) {
-      records[i] = futures[i].get();
+    // The declaration order is the aggregation order. A fixed worker limit
+    // changes scheduling only; it never changes member seeds or stream
+    // derivation.
+    for (std::size_t first = 0; first < declared.size(); first += static_cast<std::size_t>(worker_count)) {
+      const std::size_t last = std::min(
+          declared.size(), first + static_cast<std::size_t>(worker_count));
+      std::vector<std::future<HelicopterEnsembleMember>> futures;
+      futures.reserve(last - first);
+      for (std::size_t i = first; i < last; ++i) {
+        futures.push_back(std::async(std::launch::async, run_member, declared[i]));
+      }
+      for (std::size_t i = first; i < last; ++i) {
+        records[i] = futures[i - first].get();
+      }
     }
   } else {
     for (std::size_t i = 0; i < declared.size(); ++i) {
@@ -2425,13 +2926,16 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
   std::ostringstream aggregate;
   aggregate.imbue(std::locale::classic());
   aggregate << "{\n  \"ordering\": \"declaration_order\",\n  \"parallel\": "
-            << (parallel ? "true" : "false") << ",\n  \"members\": [\n";
+            << (parallel ? "true" : "false") << ",\n  \"worker_count\": " << worker_count
+            << ",\n  \"random_algorithm\": \"splitmix64_mt19937_64_box_muller_v1\",\n"
+            << "  \"distribution\": " << json_string(distribution_provenance)
+            << ",\n  \"members\": [\n";
   for (std::size_t i = 0; i < records.size(); ++i) {
     auto& record = records[i];
     record.manifest_path = manifest_prefix + "-" + std::to_string(i) + ".json";
     std::ostringstream manifest;
     manifest.imbue(std::locale::classic());
-    manifest << "{\n  \"id\": \"" << record.id << "\",\n  \"seed\": " << record.seed
+    manifest << "{\n  \"id\": " << json_string(record.id) << ",\n  \"seed\": " << record.seed
              << ",\n  \"random_algorithm\": \"splitmix64_mt19937_64_box_muller_v1\",\n"
                 "  \"mass_scale\": "
              << std::setprecision(17) << record.mass_scale << ",\n  \"cg_offset_body_m\": ["
@@ -2440,13 +2944,35 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
              << ",\n  \"solver\": \"rk4_fixed\",\n  \"step_s\": " << step_s
              << ",\n  \"steps\": " << steps << ",\n  \"model\": \"" << trim.model->description()
              << "\",\n  \"completion\": " << (record.completed ? "true" : "false")
+             << ",\n  \"execution_status\": " << json_string(record.execution_status)
+             << ",\n  \"numerical_checks_passed\": "
+             << (record.numerical_checks_passed ? "true" : "false")
+             << ",\n  \"envelope_checks_passed\": "
+             << (record.envelope_checks_passed ? "true" : "false")
+             << ",\n  \"controller_requirements_passed\": "
+             << (record.controller_requirements_passed ? "true" : "false")
+             << ",\n  \"controller_requirements_status\": "
+             << json_string(record.controller_requirements_status)
              << ",\n  \"criteria_passed\": " << (record.criteria_passed ? "true" : "false")
              << ",\n  \"envelope_departures\": " << record.envelope_departures
-             << ",\n  \"termination\": \"" << record.termination << "\"\n}\n";
+             << ",\n  \"distribution\": " << json_string(record.distribution_provenance)
+             << ",\n  \"termination\": " << json_string(record.termination)
+             << ",\n  \"failure_reason\": " << json_string(record.failure_reason) << "\n}\n";
     context.write_output(record.manifest_path, manifest.str());
-    aggregate << "    {\"id\": \"" << record.id << "\", \"manifest\": \"" << record.manifest_path
-              << "\", \"completed\": " << (record.completed ? "true" : "false")
-              << ", \"criteria_passed\": " << (record.criteria_passed ? "true" : "false") << "}"
+    aggregate << "    {\"id\": " << json_string(record.id) << ", \"manifest\": "
+              << json_string(record.manifest_path)
+              << ", \"completed\": " << (record.completed ? "true" : "false")
+              << ", \"execution_status\": " << json_string(record.execution_status)
+              << ", \"numerical_checks_passed\": "
+              << (record.numerical_checks_passed ? "true" : "false")
+              << ", \"envelope_checks_passed\": "
+              << (record.envelope_checks_passed ? "true" : "false")
+              << ", \"controller_requirements_passed\": "
+              << (record.controller_requirements_passed ? "true" : "false")
+              << ", \"controller_requirements_status\": "
+              << json_string(record.controller_requirements_status)
+              << ", \"criteria_passed\": " << (record.criteria_passed ? "true" : "false")
+              << ", \"failure_reason\": " << json_string(record.failure_reason) << "}"
               << (i + 1 == records.size() ? "\n" : ",\n");
   }
   aggregate << "  ]\n}\n";
@@ -2463,14 +2989,23 @@ Artifact ensemble_helicopter_capability(const StageContext& context) {
       std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
         return member.completed;
       }));
+  const int numerical_count = static_cast<int>(
+      std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
+        return member.numerical_checks_passed;
+      }));
+  const int envelope_count = static_cast<int>(
+      std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
+        return member.envelope_checks_passed;
+      }));
   const int criteria_count = static_cast<int>(
       std::count_if(ensemble.members.begin(), ensemble.members.end(), [](const auto& member) {
         return member.criteria_passed;
       }));
   std::ostringstream summary;
   summary << ensemble.members.size() << " independent helicopter members in declaration order; "
-          << completed_count << " completed, " << criteria_count
-          << " passed engineering criteria; aggregate in " << aggregate_path << "; execution "
+          << completed_count << " completed, " << numerical_count << " numerical checks passed, "
+          << envelope_count << " envelope checks passed, " << criteria_count
+          << " engineering criteria passed; aggregate in " << aggregate_path << "; execution "
           << (parallel ? "parallel" : "serial");
   artifact.summary = summary.str();
   artifact.payload = std::move(ensemble);
@@ -2581,21 +3116,48 @@ void write_response_section(std::ostream& out, const HelicopterResponseArtifact&
   for (const auto& [name, value] : response.requirements) {
     out << "| " << name << " | " << scientific(value, 4) << " |\n";
   }
-  out << "\n| Signal | Reference | Controlled peak error | Final error | Settling time (s) | "
-         "Uncontrolled peak error |\n|---|---:|---:|---:|---:|---:|\n";
+  out << "\n| Signal | Unit | Reference | Peak error | Final error | RMS error | Settling | "
+         "Overshoot | Open/closed ratio | Improvement | Uncontrolled peak error |\n"
+         "|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|\n";
   for (const auto& metric : response.metrics) {
-    out << "| " << metric.signal << " | " << scientific(metric.reference, 4) << " | "
-        << scientific(metric.peak_error, 4) << " | " << scientific(metric.final_error, 4) << " | ";
+    out << "| " << metric.signal << " | " << metric.unit << " | "
+        << scientific(metric.reference, 4) << " | " << scientific(metric.peak_error, 4) << " | "
+        << scientific(metric.final_error, 4) << " | " << scientific(metric.rms_error, 4) << " | ";
     if (std::isfinite(metric.settling_time_s)) {
-      out << fixed(metric.settling_time_s, 4);
+      out << fixed(metric.settling_time_s, 4) << " s (" << metric.settling_status << ")";
     } else {
-      out << "not settled";
+      out << metric.settling_status;
     }
-    out << " | " << scientific(metric.uncontrolled_peak_error, 4) << " |\n";
+    out << " | ";
+    if (metric.overshoot_applicable) {
+      out << scientific(metric.overshoot_fraction, 4);
+    } else {
+      out << "inapplicable";
+    }
+    out << " | " << scientific(metric.open_closed_peak_error_ratio, 4) << " | "
+        << scientific(metric.open_closed_improvement_fraction, 4) << " | "
+        << scientific(metric.uncontrolled_peak_error, 4) << " |\n";
+    out << "| `" << metric.signal << "` settling segments | — | — | — | — | — | ";
+    for (std::size_t segment = 0; segment < metric.segment_settling_statuses.size(); ++segment) {
+      if (segment > 0) {
+        out << "; ";
+      }
+      out << segment << ":" << metric.segment_settling_statuses[segment];
+      if (segment < metric.segment_settling_times_s.size()
+          && std::isfinite(metric.segment_settling_times_s[segment])) {
+        out << " @ " << fixed(metric.segment_settling_times_s[segment], 4) << " s";
+      }
+    }
+    out << " | — | — | — | — |\n";
   }
-  out << "\nActuator command-to-state maximum deviation: "
-      << scientific(response.maximum_control_deviation, 4)
-      << ". Saturation duration: " << fixed(response.saturation_duration_s, 4)
+  out << "\nActuator requested-minus-limited peak: "
+      << scientific(response.requested_minus_limited_peak, 4)
+      << " rad. Limited-minus-delayed peak: " << scientific(response.limited_minus_delayed_peak, 4)
+      << " rad. Delayed-command-minus-actual peak: "
+      << scientific(response.delayed_minus_actual_peak, 4)
+      << " rad. Control effort peak/RMS from trim: " << scientific(response.control_effort_peak, 4)
+      << "/" << scientific(response.control_effort_rms, 4) << " rad. Saturation duration: "
+      << fixed(response.saturation_duration_s, 4)
       << " s. Rotor-speed excursion: " << scientific(response.maximum_rotor_speed_excursion, 4)
       << " rad/s. Envelope departures (controlled/uncontrolled): "
       << response.controlled_envelope_departures << "/" << response.uncontrolled_envelope_departures
@@ -2605,16 +3167,20 @@ void write_response_section(std::ostream& out, const HelicopterResponseArtifact&
 void write_ensemble_section(std::ostream& out, const HelicopterEnsembleArtifact& ensemble) {
   out << "Members execute independently in " << ensemble.ordering_policy << ". Execution was "
       << (ensemble.parallel ? "parallel" : "serial") << ".\n\n";
-  out << "| Member | Seed | Mass scale | CG offset body (m) | Completion | Criteria | "
-         "Envelope departures | Manifest |\n"
-         "|---|---:|---:|---|---|---|---:|---|\n";
+  out << "| Member | Seed | Mass scale | CG offset body (m) | Execution | Numerical | Envelope | "
+         "Controller | Criteria | Envelope departures | Failure reason | Manifest |\n"
+         "|---|---:|---:|---|---|---|---|---|---|---:|---|---|\n";
   for (const auto& member : ensemble.members) {
     out << "| " << member.id << " | " << member.seed << " | " << fixed(member.mass_scale, 6)
         << " | [" << fixed(member.cg_offset_body_m(0), 4) << ", "
         << fixed(member.cg_offset_body_m(1), 4) << ", " << fixed(member.cg_offset_body_m(2), 4)
-        << "] | " << (member.completed ? "completed" : "refused/diverged") << " | "
-        << (member.criteria_passed ? "pass" : "fail/excluded") << " | "
-        << member.envelope_departures << " | " << member.manifest_path << " |\n";
+        << "] | " << member.execution_status << " | "
+        << (member.numerical_checks_passed ? "pass" : "fail") << " | "
+        << (member.envelope_checks_passed ? "pass" : "fail") << " | "
+        << member.controller_requirements_status
+        << " | " << (member.criteria_passed ? "pass" : "fail/excluded") << " | "
+        << member.envelope_departures << " | " << member.failure_reason << " | "
+        << member.manifest_path << " |\n";
   }
   out << "\nSuccessful completion is reported separately from passing the declared engineering "
          "criteria.\n\n";
@@ -2883,7 +3449,11 @@ void register_helicopter_capabilities(Registry& registry) {
        "steps",
        "sample_stride",
        "parallel",
+       "worker_count",
        "turbulence",
+       "parameter_distribution",
+       "closed_loop",
+       "response",
        "criteria_max_envelope_departures",
        "aggregate_path",
        "manifest_prefix"},
@@ -2897,7 +3467,7 @@ void register_helicopter_capabilities(Registry& registry) {
       "helicopter_response",
       Capability::State::ImplementedUnvalidated,
       analyze_helicopter_response_capability,
-      {"open_loop", "closed_loop", "signals", "reference", "requirements"}});
+      {"open_loop", "closed_loop", "signals", "reference", "requirements", "signal_requirements"}});
 
   registry.add(Capability{
       "analyze.nonlinear_agreement",

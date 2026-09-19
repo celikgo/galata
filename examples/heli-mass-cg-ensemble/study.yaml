@@ -20,6 +20,7 @@ stages:
       steps: 500
       sample_stride: 10
       parallel: true
+      worker_count: 2
       aggregate_path: ensemble.json
       manifest_prefix: parallel/member
       turbulence:
@@ -29,6 +30,13 @@ stages:
         stddev_ned_m_s: [0.5, 0.2, 0.2]
         correlation_time_s: 0.5
       criteria_max_envelope_departures: 0
+      parameter_distribution:
+        mass_scale:
+          distribution: normal_box_muller_v1
+          mean: 1.0
+          stddev: 0.025
+          minimum: 0.95
+          maximum: 1.05
       members:
         - {id: light-forward, seed: 101, mass_scale: 0.95, cg_offset_body_m: [0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.01}}
         - {id: nominal, seed: 102, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.00}}
@@ -42,6 +50,7 @@ stages:
       steps: 500
       sample_stride: 10
       parallel: false
+      worker_count: 1
       aggregate_path: ensemble-serial.json
       manifest_prefix: serial/member
       turbulence:
@@ -51,6 +60,13 @@ stages:
         stddev_ned_m_s: [0.5, 0.2, 0.2]
         correlation_time_s: 0.5
       criteria_max_envelope_departures: 0
+      parameter_distribution:
+        mass_scale:
+          distribution: normal_box_muller_v1
+          mean: 1.0
+          stddev: 0.025
+          minimum: 0.95
+          maximum: 1.05
       members:
         - {id: light-forward, seed: 101, mass_scale: 0.95, cg_offset_body_m: [0.10, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.01}}
         - {id: nominal, seed: 102, mass_scale: 1.00, cg_offset_body_m: [0.00, 0.00, 0.00], initial_state_perturbation: {roll_rate_rad_s: 0.00}}

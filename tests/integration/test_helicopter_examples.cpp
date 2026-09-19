@@ -390,9 +390,53 @@ TEST(ExampleHeliEnsemble, SerialAndParallelPreserveDeclarationOrderAndMembers) {
   }
   EXPECT_NE(parallel.find("declaration_order"), std::string::npos);
   EXPECT_NE(serial.find("declaration_order"), std::string::npos);
+  EXPECT_NE(parallel.find("normal_box_muller_v1"), std::string::npos);
+  EXPECT_NE(serial.find("normal_box_muller_v1"), std::string::npos);
+  EXPECT_NE(parallel.find("\"worker_count\": 2"), std::string::npos);
+  EXPECT_NE(serial.find("\"worker_count\": 1"), std::string::npos);
+  EXPECT_NE(parallel.find("\"controller_requirements_status\": \"not_requested\""),
+            std::string::npos);
   EXPECT_NE(read_text(directory / "parallel/member-1.json").find("\"seed\": 102"),
             std::string::npos);
   EXPECT_NE(read_text(directory / "serial/member-1.json").find("\"seed\": 102"), std::string::npos);
+}
+TEST(ExampleHeliEnsemble, CompletedMemberWithPoorTrackingFailsControllerRequirements) {
+  const std::string document =
+      "version: 1\n"
+      "stages:\n"
+      "  - id: aircraft\n"
+      "    capability: model.helicopter\n"
+      "    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}\n"
+      "  - id: trim\n"
+      "    capability: trim.helicopter\n"
+      "    input: {helicopter: {from: aircraft}, airspeed_m_s: 0, altitude_m: 100}\n"
+      "  - id: ensemble\n"
+      "    capability: study.helicopter_ensemble\n"
+      "    input:\n"
+      "      trim: {from: trim}\n"
+      "      step_s: 0.002\n"
+      "      steps: 1000\n"
+      "      sample_stride: 10\n"
+      "      aggregate_path: bad.json\n"
+      "      manifest_prefix: bad/member\n"
+      "      members: [{id: poor-tracking, seed: 17, mass_scale: 1.0, initial_state_perturbation: {roll_rate_rad_s: 0.08}}]\n"
+      "      closed_loop:\n"
+      "        controller_period_s: 0.01\n"
+      "        delay_periods: 0\n"
+      "        controller:\n"
+      "          type: pid\n"
+      "          missing_measurement: refuse\n"
+      "          loops: [{measurement: roll_rad, control: lateral_cyclic_command_rad, kp: 1.0, ki: 0.0, kd: 0.0, derivative_filter_s: 0.05}]\n"
+      "      response:\n"
+      "        signals: [roll_rad]\n"
+      "        signal_requirements: {roll_rad: {peak_tracking_error_rad: 0.001, final_tracking_error_rad: 0.001, rms_tracking_error_rad: 0.001, settling_band_rad: 0.001, settling_dwell_s: 0.2, settling_time_s: 0.5}}\n";
+  const auto result = run_heli_document("heli-ensemble-poor-tracking", document);
+  const std::string summary = stage_named(result, "ensemble").summary;
+  EXPECT_NE(summary.find("0 engineering criteria passed"), std::string::npos) << summary;
+  const auto manifest = std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR)
+                        / "heli-ensemble-poor-tracking/bad/member-0.json";
+  EXPECT_NE(read_text(manifest).find("\"controller_requirements_status\": \"failed\""),
+            std::string::npos);
 }
 
 TEST(ExampleHeliReferenceTracking, ScheduledAltitudeChangeIsMeasuredAgainstTheRecordedReference) {
@@ -501,6 +545,85 @@ TEST(ExampleHeliSaturation, PositionRateLagAndAntiWindupEvidenceAreRecorded) {
     }
   }
   EXPECT_GT(maximum_lag, 0.01);
+}
+
+TEST(ExampleHeliSaturation, IntegralWindupReleaseShowsMeasuredAntiWindupBenefit) {
+  const auto result = run_heli_example("heli-anti-windup-recovery");
+  const std::string disabled = stage_named(result, "response_disabled").summary;
+  const std::string enabled = stage_named(result, "response_enabled").summary;
+  EXPECT_NE(disabled.find("engineering criteria FAIL"), std::string::npos) << disabled;
+  EXPECT_NE(enabled.find("engineering criteria PASS"), std::string::npos) << enabled;
+
+  const auto directory =
+      std::filesystem::path(GALATA_INTEGRATION_SCRATCH_DIR) / "heli-anti-windup-recovery";
+  const auto disabled_controller = read_csv(directory / "anti-windup-disabled.csv.controller.csv");
+  const auto enabled_controller = read_csv(directory / "anti-windup-enabled.csv.controller.csv");
+  const auto disabled_trace = read_csv(directory / "anti-windup-disabled.csv");
+  const auto enabled_trace = read_csv(directory / "anti-windup-enabled.csv");
+  const std::size_t integrator = csv_column(
+      disabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
+  const std::size_t time = csv_column(disabled_controller, "time_s");
+  const std::size_t requested =
+      csv_column(disabled_controller, "requested_lateral_cyclic_command_rad");
+  const std::size_t saturated =
+      csv_column(disabled_controller, "saturated_lateral_cyclic_command_rad");
+  bool disabled_wound = false;
+  bool enabled_wound = false;
+  bool both_saturated = false;
+  double disabled_integral_at_release = 0.0;
+  double enabled_integral_at_release = 0.0;
+  for (std::size_t i = 0; i < disabled_controller.rows.size(); ++i) {
+    const double t = disabled_controller.rows[i][time];
+    disabled_wound = disabled_wound || (t >= 1.0 && t < 3.0
+                                        && std::fabs(disabled_controller.rows[i][integrator]) > 1.0e-3);
+    both_saturated = both_saturated
+                     || (std::fabs(disabled_controller.rows[i][requested]
+                                   - disabled_controller.rows[i][saturated]) > 1.0e-6);
+    if (std::fabs(t - 3.0) < 0.021) {
+      disabled_integral_at_release = disabled_controller.rows[i][integrator];
+    }
+  }
+  const std::size_t enabled_integral = csv_column(
+      enabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
+  for (std::size_t i = 0; i < enabled_controller.rows.size(); ++i) {
+    const double t = enabled_controller.rows[i][csv_column(enabled_controller, "time_s")];
+    enabled_wound = enabled_wound || (t >= 1.0 && t < 3.0
+                                      && std::fabs(enabled_controller.rows[i][enabled_integral]) > 1.0e-3);
+    if (std::fabs(t - 3.0) < 0.021) {
+      enabled_integral_at_release = enabled_controller.rows[i][enabled_integral];
+    }
+  }
+  EXPECT_TRUE(disabled_wound);
+  EXPECT_TRUE(enabled_wound);
+  EXPECT_TRUE(both_saturated);
+
+  const std::size_t trace_time = csv_column(disabled_trace, "time_s");
+  const std::size_t disabled_roll = csv_column(disabled_trace, "output_roll_rad");
+  const std::size_t enabled_roll = csv_column(enabled_trace, "output_roll_rad");
+  double disabled_final_error = 0.0;
+  double enabled_final_error = 0.0;
+  double disabled_recovery_time_s = std::numeric_limits<double>::infinity();
+  double enabled_recovery_time_s = std::numeric_limits<double>::infinity();
+  for (std::size_t i = 0; i < disabled_trace.rows.size(); ++i) {
+    if (disabled_trace.rows[i][trace_time] >= 3.0) {
+      disabled_final_error = std::fabs(disabled_trace.rows[i][disabled_roll] - 0.0379);
+      if (disabled_recovery_time_s == std::numeric_limits<double>::infinity()
+          && disabled_final_error <= 0.10) {
+        disabled_recovery_time_s = disabled_trace.rows[i][trace_time] - 3.0;
+      }
+    }
+    if (enabled_trace.rows[i][trace_time] >= 3.0) {
+      enabled_final_error = std::fabs(enabled_trace.rows[i][enabled_roll] - 0.0379);
+      if (enabled_recovery_time_s == std::numeric_limits<double>::infinity()
+          && enabled_final_error <= 0.10) {
+        enabled_recovery_time_s = enabled_trace.rows[i][trace_time] - 3.0;
+      }
+    }
+  }
+  EXPECT_LT(enabled_final_error, 0.5 * disabled_final_error);
+  EXPECT_LT(enabled_recovery_time_s, disabled_recovery_time_s);
+  EXPECT_TRUE(std::isfinite(disabled_integral_at_release));
+  EXPECT_TRUE(std::isfinite(enabled_integral_at_release));
 }
 
 TEST(ExampleHeliFailures, EngineLossAndActuatorJamHaveStableSidecars) {

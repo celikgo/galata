@@ -75,11 +75,13 @@ stages:
       open_loop: {from: open_gust}
       closed_loop: {from: closed_gust}
       signals: [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s]
+      signal_requirements:
+        roll_rate_rad_s: {peak_tracking_error_rad_s: 0.25, final_tracking_error_rad_s: 0.25, rms_tracking_error_rad_s: 0.25, settling_band_rad_s: 0.25, settling_dwell_s: 0.5, settling_time_s: 6.0}
+        pitch_rate_rad_s: {peak_tracking_error_rad_s: 0.25, final_tracking_error_rad_s: 0.25, rms_tracking_error_rad_s: 0.25, settling_band_rad_s: 0.25, settling_dwell_s: 0.5, settling_time_s: 6.0}
+        yaw_rate_rad_s: {peak_tracking_error_rad_s: 0.25, final_tracking_error_rad_s: 0.25, rms_tracking_error_rad_s: 0.25, settling_band_rad_s: 0.25, settling_dwell_s: 0.5, settling_time_s: 6.0}
       requirements:
-        tracking_error: 0.25
-        settling_time_s: 6.0
-        overshoot: 2.0
-        control_effort_rad: 0.35
+        control_effort_peak_rad: 0.35
+        control_effort_rms_rad: 0.35
         saturation_duration_s: 1.0
         rotor_speed_excursion_rad_s: 2.0
         validity_envelope_departures: 0

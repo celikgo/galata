@@ -49,11 +49,11 @@ stages:
       open_loop: {from: open}
       closed_loop: {from: closed}
       signals: [altitude_m]
+      signal_requirements:
+        altitude_m: {peak_tracking_error_m: 1.5, final_tracking_error_m: 1.5, rms_tracking_error_m: 1.5, settling_band_m: 1.5, settling_dwell_s: 0.5, settling_time_s: 10.0, overshoot_fraction: 1.50}
       requirements:
-        tracking_error: 1.5
-        settling_time_s: 10.0
-        overshoot: 1.50
-        control_effort_rad: 0.35
+        control_effort_peak_rad: 0.35
+        control_effort_rms_rad: 0.35
         saturation_duration_s: 2.0
         rotor_speed_excursion_rad_s: 2.0
         validity_envelope_departures: 0

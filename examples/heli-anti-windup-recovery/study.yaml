@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Matched error-driven integral-windup study. The two controllers are
+# identical except for back-calculation anti-windup; actuator limits,
+# delay, initial condition and reference release are shared.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input: {path: ../../models/souxmar-heli/souxmar-heli.yaml}
+  - id: cruise
+    capability: trim.helicopter
+    input: {helicopter: {from: aircraft}, airspeed_m_s: 40.0, altitude_m: 500.0}
+  - id: open
+    capability: sim.helicopter
+    input:
+      trim: {from: cruise}
+      step_s: 0.004
+      steps: 3000
+      sample_stride: 5
+  - id: anti_windup_disabled
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: cruise}
+      controller_period_s: 0.02
+      step_s: 0.004
+      steps: 3000
+      sample_stride: 5
+      delay_periods: 1
+      reference_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0379]}
+          - {time_s: 1.0, values: [0.20]}
+          - {time_s: 3.0, values: [0.0379]}
+          - {time_s: 12.0, values: [0.0379]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rad, control: lateral_cyclic_command_rad, kp: -1.0, ki: -1.0, kd: -0.12, derivative_filter_s: 0.10, integrator_limit: 2.0, anti_windup_gain: 0.0}
+  - id: anti_windup_enabled
+    capability: sim.helicopter.closed_loop
+    input:
+      trim: {from: cruise}
+      controller_period_s: 0.02
+      step_s: 0.004
+      steps: 3000
+      sample_stride: 5
+      delay_periods: 1
+      reference_schedule:
+        hold: zero_order
+        extrapolation: hold
+        samples:
+          - {time_s: 0.0, values: [0.0379]}
+          - {time_s: 1.0, values: [0.20]}
+          - {time_s: 3.0, values: [0.0379]}
+          - {time_s: 12.0, values: [0.0379]}
+      controller:
+        type: pid
+        missing_measurement: refuse
+        loops:
+          - {measurement: roll_rad, control: lateral_cyclic_command_rad, kp: -1.0, ki: -1.0, kd: -0.12, derivative_filter_s: 0.10, integrator_limit: 2.0, anti_windup_gain: 10.0}
+  - id: response_disabled
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: anti_windup_disabled}
+      signals: [roll_rad]
+      signal_requirements:
+        roll_rad:
+          peak_tracking_error_rad: 0.50
+          final_tracking_error_rad: 0.05
+          rms_tracking_error_rad: 0.20
+          settling_band_rad: 0.03
+          settling_dwell_s: 0.50
+          settling_time_s: 10.0
+          overshoot_fraction: 2.0
+      requirements:
+        requested_minus_limited_peak_rad: 0.30
+        limited_minus_delayed_peak_rad: 0.50
+        delayed_minus_actual_peak_rad: 0.50
+        control_effort_peak_rad: 0.60
+        saturation_duration_s: 4.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 100
+  - id: response_enabled
+    capability: analyze.helicopter_response
+    input:
+      open_loop: {from: open}
+      closed_loop: {from: anti_windup_enabled}
+      signals: [roll_rad]
+      signal_requirements:
+        roll_rad:
+          peak_tracking_error_rad: 0.50
+          final_tracking_error_rad: 0.05
+          rms_tracking_error_rad: 0.20
+          settling_band_rad: 0.03
+          settling_dwell_s: 0.50
+          settling_time_s: 10.0
+          overshoot_fraction: 2.0
+      requirements:
+        requested_minus_limited_peak_rad: 0.30
+        limited_minus_delayed_peak_rad: 0.50
+        delayed_minus_actual_peak_rad: 0.50
+        control_effort_peak_rad: 0.60
+        saturation_duration_s: 4.0
+        rotor_speed_excursion_rad_s: 2.0
+        validity_envelope_departures: 100
+  - id: csv_disabled
+    capability: report.helicopter_csv
+    input: {trajectory: {from: anti_windup_disabled}, path: anti-windup-disabled.csv}
+  - id: csv_enabled
+    capability: report.helicopter_csv
+    input: {trajectory: {from: anti_windup_enabled}, path: anti-windup-enabled.csv}
+  - id: report
+    capability: report.markdown
+    input:
+      title: Souxmar F1 error-driven integral windup and anti-windup recovery
+      sections: [{from: cruise}, {from: anti_windup_disabled}, {from: anti_windup_enabled}, {from: response_disabled}, {from: response_enabled}]
+      path: anti-windup-recovery.md

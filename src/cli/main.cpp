@@ -15,6 +15,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,8 +25,8 @@ int print_usage(std::ostream& out) {
   out << "galata — flight dynamics, control-law design and simulation\n"
          "\n"
          "usage:\n"
-         "  galata run <pipeline.yaml> [--output-dir <dir>] [--overwrite]\n"
-         "  galata capabilities [--markdown]\n"
+         "  galata run <pipeline.yaml> [--output-dir <dir>] [--overwrite] [--json]\n"
+         "  galata capabilities [--markdown|--json]\n"
          "  galata project <create|inspect|save|run> <directory> [options]\n"
          "  galata project import-linear <new-directory> <study.yaml>\n"
          "  galata project revisions <directory>\n"
@@ -45,6 +46,19 @@ int print_usage(std::ostream& out) {
          "run writes an immutable run-<SHA256>.json manifest with input snapshots,\n"
          "output digests and build provenance.\n";
   return 0;
+}
+
+std::string json_quote(const std::string& text) {
+  std::ostringstream result;
+  result << '"';
+  for (const char character : text) {
+    if (character == '\\' || character == '"') {
+      result << '\\';
+    }
+    result << character;
+  }
+  result << '"';
+  return result.str();
 }
 
 int print_version() {
@@ -90,6 +104,25 @@ int list_capabilities() {
   return 0;
 }
 
+int list_capabilities_json() {
+  const auto all = galata::pipeline::builtin_registry().all();
+  std::cout << "{\"capabilities\":[";
+  for (std::size_t i = 0; i < all.size(); ++i) {
+    const auto* capability = all[i];
+    std::cout << (i == 0 ? "" : ",") << "{\"id\":" << json_quote(capability->id)
+              << ",\"summary\":" << json_quote(capability->summary)
+              << ",\"produces\":" << json_quote(capability->produces)
+              << ",\"state\":"
+              << json_quote(galata::pipeline::to_string(capability->state)) << ",\"inputs\":[";
+    for (std::size_t j = 0; j < capability->input_keys.size(); ++j) {
+      std::cout << (j == 0 ? "" : ",") << json_quote(capability->input_keys[j]);
+    }
+    std::cout << "]}";
+  }
+  std::cout << "]}\n";
+  return 0;
+}
+
 int run_pipeline_command(const std::vector<std::string>& arguments) {
   if (arguments.empty()) {
     std::cerr << "galata run: no pipeline file given\n";
@@ -99,6 +132,7 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
   std::string pipeline_path = arguments[0];
   std::string output_directory;
   galata::pipeline::RunOptions options;
+  bool machine_readable = false;
 
   for (std::size_t i = 1; i < arguments.size(); ++i) {
     if (arguments[i] == "--output-dir") {
@@ -109,6 +143,8 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
       output_directory = arguments[++i];
     } else if (arguments[i] == "--overwrite") {
       options.overwrite = true;
+    } else if (arguments[i] == "--json") {
+      machine_readable = true;
     } else {
       std::cerr << "galata run: unrecognised argument '" << arguments[i] << "'\n";
       return 2;
@@ -128,23 +164,27 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
     }
 
     const galata::pipeline::Pipeline pipeline = galata::pipeline::load_pipeline(pipeline_path);
-    std::cout << "galata " << galata::version_string() << " — running " << pipeline_path << " ("
-              << pipeline.stages.size() << " stages)\n\n";
+    if (!machine_readable) {
+      std::cout << "galata " << galata::version_string() << " — running " << pipeline_path << " ("
+                << pipeline.stages.size() << " stages)\n\n";
+    }
 
     // One line per stage, printed when the stage finishes.
     //
     // Not a carriage-return spinner: this output is redirected to a file or a
     // CI log at least as often as it is watched in a terminal, and a \r that
     // nothing consumes leaves both halves of every line in the transcript.
-    const auto progress = [](const std::string& stage_id,
-                             const std::string& capability,
-                             bool finished,
-                             const std::string& summary) {
+    const auto progress = [machine_readable](const std::string& stage_id,
+                                             const std::string& capability,
+                                             bool finished,
+                                             const std::string& summary) {
       if (!finished) {
         return;
       }
-      std::cout << "  " << stage_id << "  [" << capability << "]  " << summary << "\n"
-                << std::flush;
+      if (!machine_readable) {
+        std::cout << "  " << stage_id << "  [" << capability << "]  " << summary << "\n"
+                  << std::flush;
+      }
     };
 
     const galata::pipeline::RunResult result =
@@ -155,8 +195,13 @@ int run_pipeline_command(const std::vector<std::string>& arguments) {
                                        progress,
                                        options);
 
-    std::cout << "\n" << result.stages.size() << " stages completed.\n";
-    if (!result.manifest_path.empty()) {
+    if (machine_readable) {
+      std::cout << "{\"status\":\"completed\",\"stage_count\":" << result.stages.size()
+                << ",\"manifest_path\":" << json_quote(result.manifest_path) << "}\n";
+    } else {
+      std::cout << "\n" << result.stages.size() << " stages completed.\n";
+    }
+    if (!machine_readable && !result.manifest_path.empty()) {
       std::cout << "Run manifest: " << result.manifest_path << "\n";
     }
     return 0;
@@ -187,10 +232,13 @@ int main(int argc, char** argv) {
     if (arguments.size() == 2 && arguments[1] == "--markdown") {
       return list_capabilities_markdown();
     }
+    if (arguments.size() == 2 && arguments[1] == "--json") {
+      return list_capabilities_json();
+    }
     if (arguments.size() == 1) {
       return list_capabilities();
     }
-    std::cerr << "galata capabilities: expected no arguments or --markdown\n";
+    std::cerr << "galata capabilities: expected no arguments, --markdown or --json\n";
     return 2;
   }
   if (command == "run") {
