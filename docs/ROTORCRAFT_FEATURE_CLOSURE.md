@@ -81,11 +81,12 @@ complete by proximity or by a passing unrelated test.
 Fill this section only from executable evidence at the final integrated head. The
 commit and test fields below are intentionally updated after the final checks:
 
-- Baseline commit: `08e1d76`.
-- Final implementation commit: `a72fe30`; the handoff-record update is committed
-  separately so this implementation hash remains unambiguous.
+- Starting commit: `44855a4eb377d71c7f89cd2e932d65ebae9fbb50`.
+- Implementation commit: `cf36d09` (`Add measured helicopter performance and gust studies`).
+  The handoff-record update is committed separately so the implementation hash
+  remains unambiguous.
 - Baseline CTest result: 849-case inventory recorded; focused helicopter, sampled-multirotor and example gates passed before this increment.
-- Final CTest result: `855/855` tests passed, `0` failed; full-suite real time was `696.41 s` on this macOS arm64 host.
-- Final repository gates: `cmake --build --preset dev -j 4`, the six new sampled-loop/helicopter acceptance tests, `scripts/gen-status-table.sh build/dev/src/cli/galata --check`, `scripts/check-doc-links.sh`, and `git diff --check` passed. The generated capability table, six examples, unit tests, and integration tests are part of this increment.
+- Final CTest result: `869/869` tests passed, `0` failed; full-suite real time was `772.86 s` on this macOS arm64 host.
+- Final repository gates: `cmake --build --preset dev -j 4`, the 18 targeted sensor/helicopter acceptance tests, `scripts/gen-status-table.sh build/dev/src/cli/galata --check`, `scripts/gen-verification.sh build/dev/tools/validation/galata-validation-report --check`, `scripts/check-doc-references.sh`, `scripts/check-doc-links.sh`, and `git diff --check` passed. The link gate checked 494 links and reported seven host-refusal warnings, no failures. The generated capability table, seven new acceptance studies plus the extended noisy-feedback study, unit tests, and integration tests are part of this increment.
 - Platform scope: this delivery was executed on macOS arm64; no Linux result is claimed here.
 - Published-reference result: none; C2 remains unvalidated.
