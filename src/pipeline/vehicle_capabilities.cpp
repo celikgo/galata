@@ -709,8 +709,7 @@ Artifact report_vehicle_response(const StageContext& context) {
       throw std::invalid_argument("report.vehicle_response_json: unknown signal '" + signal + "'");
     }
     const bool from_chart = found == names.end();
-    const Eigen::Index column =
-        static_cast<Eigen::Index>(from_chart ? chart_found - chart.begin() : found - names.begin());
+    const Eigen::Index column = from_chart ? chart_found - chart.begin() : found - names.begin();
     const auto value_at = [&](const VehicleRunArtifact& run, std::size_t row) {
       if (!from_chart) {
         return run.result.outputs[row](column);

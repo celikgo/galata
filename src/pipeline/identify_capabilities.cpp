@@ -235,7 +235,8 @@ Eigen::VectorXd initial_vehicle_state_for(const StageContext& context,
         throw std::invalid_argument(capability + ": initial_state_from_record reads channel '"
                                     + channel + "', which is absent or empty");
       }
-      initial(static_cast<Eigen::Index>(found - state_names.begin())) = samples->samples.front();
+      const Eigen::Index index = found - state_names.begin();
+      initial(index) = samples->samples.front();
     }
   }
   model::VehicleModel::project(initial);

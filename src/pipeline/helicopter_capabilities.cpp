@@ -629,7 +629,8 @@ InitialCondition initial_condition_from(const StageContext& context,
             "helicopter simulation initial_state_perturbation must name "
             "finite non-quaternion helicopter states");
       }
-      result.state(static_cast<Eigen::Index>(found - names.begin())) += value->as_number();
+      const Eigen::Index index = found - names.begin();
+      result.state(index) += value->as_number();
       result.provenance.push_back("initial perturbation " + name
                                   + " += " + fixed(value->as_number(), 9));
     }
@@ -1057,11 +1058,13 @@ double trajectory_signal(const HelicopterTrajectoryArtifact& run,
                          const std::string& signal) {
   const auto state = std::find(run.state_names.begin(), run.state_names.end(), signal);
   if (state != run.state_names.end()) {
-    return run.states[sample](static_cast<Eigen::Index>(state - run.state_names.begin()));
+    const Eigen::Index index = state - run.state_names.begin();
+    return run.states[sample](index);
   }
   const auto output = std::find(run.output_names.begin(), run.output_names.end(), signal);
   if (output != run.output_names.end()) {
-    return run.outputs[sample](static_cast<Eigen::Index>(output - run.output_names.begin()));
+    const Eigen::Index index = output - run.output_names.begin();
+    return run.outputs[sample](index);
   }
   const Eigen::VectorXd controls = run.applied_controls.size() == run.states.size()
                                        ? run.applied_controls[sample]
@@ -2691,11 +2694,11 @@ Artifact analyze_helicopter_response_capability(const StageContext& context) {
         const auto actual =
             std::find(closed.state_names.begin(), closed.state_names.end(), state_name);
         if (actual != closed.state_names.end()) {
-          response.delayed_minus_actual_peak = std::max(
-              response.delayed_minus_actual_peak,
-              std::fabs(closed.controller_applied[i](static_cast<Eigen::Index>(control))
-                        - closed.states[trajectory_sample](
-                            static_cast<Eigen::Index>(actual - closed.state_names.begin()))));
+          const Eigen::Index actual_index = actual - closed.state_names.begin();
+          response.delayed_minus_actual_peak =
+              std::max(response.delayed_minus_actual_peak,
+                       std::fabs(closed.controller_applied[i](static_cast<Eigen::Index>(control))
+                                 - closed.states[trajectory_sample](actual_index)));
         }
       }
     }
