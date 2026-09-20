@@ -103,8 +103,7 @@ Eigen::VectorXd theta_step(const DerivativeFunction& derivative,
     throw std::runtime_error("integrate: the derivative is non-finite at the step's start");
   }
   const Eigen::VectorXd anchor =
-      theta < 1.0 ? Eigen::VectorXd(state + step_s * (1.0 - theta) * explicit_part)
-                  : Eigen::VectorXd(state);
+      theta < 1.0 ? Eigen::VectorXd(state + step_s * (1.0 - theta) * explicit_part) : state;
 
   // FIRST GUESS IS ONE EXPLICIT EULER STEP, always, for every method and every
   // step. A guess taken from the previous step's answer would make the result

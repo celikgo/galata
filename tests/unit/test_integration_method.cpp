@@ -178,7 +178,7 @@ TEST(IntegrationMethod, ImplicitMethodsConvergeAtTheirStatedOrders) {
 TEST(StateBounds, ADivergedFiniteTrajectoryIsRefusedAndNamesTheState) {
   // dx/dt = +x diverges smoothly and stays finite for a long time. Before
   // bounds existed this was returned as a completed run.
-  const auto growth = [](double, const Eigen::VectorXd& x) { return Eigen::VectorXd(x); };
+  const auto growth = [](double, const Eigen::VectorXd& x) { return x; };
   Eigen::VectorXd x0(2);
   x0 << 1.0, 1.0;
 

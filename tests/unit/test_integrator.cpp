@@ -107,7 +107,7 @@ TEST(Rk4, TimesAreExactMultiplesOfTheStepAndDoNotDrift) {
   // difference is visible, and it lands in the argument the derivative is
   // evaluated at.
   const DerivativeFunction zero = [](double, const Eigen::VectorXd& x) {
-    return Eigen::VectorXd(Eigen::VectorXd::Zero(x.size()));
+    return Eigen::VectorXd::Zero(x.size());
   };
   const double step = 0.1;
   const int steps = 100000;

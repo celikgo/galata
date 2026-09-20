@@ -1779,7 +1779,7 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
   const Eigen::Vector3d cg_offset_body_m = cg_offset_from(context);
   apply_parameter_variation(simulation_model, mass_scale, cg_offset_body_m);
   const auto derivative = [&](double, const Eigen::VectorXd& x) {
-    return Eigen::VectorXd(simulation_model.derivative(x, commands, subject.environment));
+    return simulation_model.derivative(x, commands, subject.environment);
   };
   const std::vector<FailureEvent> failure_events =
       parse_failure_events(context, heli, step_s, steps);
@@ -1927,7 +1927,7 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
         } else {
           environment.wind_rate_ned_m_s2.setZero();
         }
-        return Eigen::VectorXd(simulation_model.derivative(current, commands, environment));
+        return simulation_model.derivative(current, commands, environment);
       };
       numerics::IntegrationOptions one_step;
       one_step.method = method;
@@ -2176,7 +2176,7 @@ Artifact simulate_helicopter_closed_loop_capability(const StageContext& context)
         } else {
           environment.wind_rate_ned_m_s2.setZero();
         }
-        return Eigen::VectorXd(simulation_model.derivative(state, controls, environment));
+        return simulation_model.derivative(state, controls, environment);
       };
   options.projection = &model::VehicleModel::project;
   options.state_bounds = simulation_model.state_bounds();
