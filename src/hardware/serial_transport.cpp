@@ -206,7 +206,11 @@ void SerialTransport::connect(const InterfaceSpec& specification) {
   ::cfmakeraw(&settings);
   settings.c_cflag |= static_cast<tcflag_t>(CLOCAL | CREAD);
   settings.c_cflag &= static_cast<tcflag_t>(~CSTOPB);
+#if defined(__linux__)
+  settings.c_cflag &= ~CRTSCTS;
+#else
   settings.c_cflag &= static_cast<tcflag_t>(~CRTSCTS);
+#endif
   if (::cfsetispeed(&settings, baud) != 0 || ::cfsetospeed(&settings, baud) != 0
       || ::tcsetattr(descriptor_, TCSANOW, &settings) != 0) {
     close_descriptor(descriptor_);

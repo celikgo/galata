@@ -257,7 +257,11 @@ void UdpTransport::send(const Frame& frame) {
   const ssize_t sent = ::send(socket_, bytes.data(), bytes.size(), 0);
   if (sent < 0) {
     state_ = LinkState::Faulted;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (errno == EWOULDBLOCK
+#if EAGAIN != EWOULDBLOCK
+        || errno == EAGAIN
+#endif
+    ) {
       throw std::runtime_error("hardware: UDP send became unavailable before its bounded timeout");
     }
     throw_socket_error("send");

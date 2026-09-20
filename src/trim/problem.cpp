@@ -451,7 +451,7 @@ TrimResult solve_trim(const model::VehicleModel& model,
         const auto it = std::find_if(problem.unknowns.begin(),
                                      problem.unknowns.end(),
                                      [&](const TrimUnknown& u) { return u.name == name; });
-        const auto index = static_cast<Eigen::Index>(it - problem.unknowns.begin());
+        const Eigen::Index index = it - problem.unknowns.begin();
         message << (i ? ", " : "") << name << " = " << plain(values(index)) << " against ["
                 << plain(it->minimum) << ", " << plain(it->maximum) << "]";
       }
