@@ -165,7 +165,8 @@ TEST(Rotor, TailRotorGeneratesBodyYSideForceAndAYawMoment) {
 
 TEST(Rotor, TailRotorCanBeMountedToPushEitherWay) {
   const auto starboard = solve_at(souxmar_tail(true), 0.18, {}, {}, 162.5);
-  const auto port = solve_at(souxmar_tail(false), 0.18, {}, {}, 162.5);
+  const auto port =
+      solve_at(souxmar_tail(false), 0.18, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), 162.5);
   EXPECT_GT(starboard.wrench.force_body_n.y(), 0.0);
   EXPECT_LT(port.wrench.force_body_n.y(), 0.0);
   EXPECT_NEAR(starboard.wrench.force_body_n.y(), -port.wrench.force_body_n.y(), 1e-9);

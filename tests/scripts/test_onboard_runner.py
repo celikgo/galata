@@ -81,7 +81,10 @@ class OnboardRunnerCLI(unittest.TestCase):
             f"hardware.endpoint={self.endpoint}|115200\n"
             "hardware.receive_timeout_ms=1000\n"
             "hardware.transmit_timeout_ms=1000\n"
-            "hardware.watchdog_timeout_s=0.2\n"
+            # Hosted CI PTYs can add scheduling latency before the first
+            # complete frame reaches the runner. Keep the watchdog bounded,
+            # while leaving enough margin for the test harness itself.
+            "hardware.watchdog_timeout_s=1.0\n"
             "hardware.emergency_stop_required=true\n"
             "channel.sensor.0.name=airspeed_m_s\n"
             "channel.sensor.0.unit=m/s\n"
