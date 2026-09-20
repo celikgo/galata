@@ -14,7 +14,10 @@ set_target_properties(galata_cli PROPERTIES
 target_link_libraries(galata_cli
   PRIVATE
     galata::core
+    galata::identify
+    galata::onboard
     galata::pipeline
+    galata::qualification
     yaml-cpp::yaml-cpp
     galata::warnings
 )

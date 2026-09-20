@@ -1,0 +1,2 @@
+synthetic production-contract fixture
+The record is not tied to a physical aircraft configuration.

@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# UH-60A Black Hawk — transparent Level-1 helicopter study model.
+#
+# This is a native Galata model so the UH-60 reference component can exercise
+# the shared helicopter trim/linearisation path. It is NOT a validated UH-60
+# flight-dynamics model. The published geometry/weight inputs and every
+# assumed parameter are separated in PROVENANCE.md.
+
+description: "UH-60A Black Hawk Level-1 study model, 7438.9 kg, 16.36 m four-blade main rotor"
+citation: "Hilbert, K. B., A Mathematical Model of the UH-60 Helicopter, NASA TM-85890, April 1984, NTRS 19840015585, Table 1 for the transcribed geometry/weight subset; all flight-dynamics parameters not present in that table are assumptions recorded in models/uh60a/PROVENANCE.md."
+
+mass:
+  # 16400 lbf from NASA TM-85890 Table 1, converted exactly to SI.
+  mass_kg: 7438.914868
+  # NASA TM-85890 Table 1, 5629/40000/37200/1670 slug-ft^2 converted to SI.
+  inertia_xx_kg_m2: 7631.899232618388
+  inertia_yy_kg_m2: 54232.71794363751
+  inertia_zz_kg_m2: 50436.42768758288
+  product_of_inertia_xz_kg_m2: 2264.215974146866
+
+main_rotor:
+  # R = 26.83 ft and Omega = 27 rad/s from the reference description.
+  radius_m: 8.177784
+  # Chord recomputed from sigma*pi*R/Nb, sigma = 0.08210 and Nb = 4.
+  chord_m: 0.5273132374628312
+  blade_count: 4
+  lift_curve_slope: 5.73
+  profile_drag_coefficient: 0.011
+  induced_power_factor: 1.15
+  # The Level-1 rotor implementation cannot yet represent the complete
+  # UH-60 flapping/trim convention; this remains an explicit placeholder.
+  blade_twist_rad: -0.12217304763960307
+  tip_loss_factor: 0.97
+  hinge_offset_m: 0.25
+  flap_stiffness_n_m_rad: 120000.0
+  blade_flap_inertia_kg_m2: 1300.0
+  polar_inertia_kg_m2: 5200.0
+  inflow_time_constant_s: 0.12
+  position_cg_to_hub_body_m: [0.0, 0.0, -2.4]
+  spin_about_shaft: 1
+  shaft_tilt_forward_rad: 0.03490658503988659
+  maximum_thrust_coefficient_solidity: 0.11
+  maximum_advance_ratio: 0.35
+
+tail_rotor:
+  # Table 1: 5.5 ft radius and solidity 0.1875; chord is derived from those
+  # controlled values because the table does not print a tail chord.
+  radius_m: 1.6764
+  chord_m: 0.2468702777099029
+  blade_count: 4
+  lift_curve_slope: 5.73
+  profile_drag_coefficient: 0.012
+  induced_power_factor: 1.2
+  tip_loss_factor: 0.95
+  polar_inertia_kg_m2: 8.0
+  inflow_time_constant_s: 0.06
+  position_cg_to_hub_body_m: [-10.5, 0.0, -1.2]
+  spin_about_shaft: 1
+  thrust_towards_starboard: false
+  maximum_thrust_coefficient_solidity: 0.14
+  maximum_advance_ratio: 0.4
+
+airframe:
+  flat_plate_area_m2: 3.5
+  cg_to_fuselage_reference_body_m: [0.0, 0.0, 0.0]
+  # NASA TM-85890 Table 1: 45 ft^2 and slope 1.03 per radian.
+  horizontal_tail_area_m2: 4.1806368
+  horizontal_tail_lift_slope: 1.03
+  horizontal_tail_incidence_rad: -0.0523598775598299
+  cg_to_horizontal_tail_body_m: [-9.5, 0.0, -0.4]
+  horizontal_tail_downwash_factor: 0.4
+  # NASA TM-85890 Table 1: 32.3 ft^2 and slope 0.89 per radian.
+  vertical_tail_area_m2: 3.000768192
+  vertical_tail_side_slope: 0.89
+  vertical_tail_incidence_rad: 0.0
+  cg_to_vertical_tail_body_m: [-10.0, 0.0, -0.9]
+  surface_stall_angle_rad: 0.2617993877991494
+
+drivetrain:
+  reference_rotor_speed_rad_s: 27.0
+  # Table 1 gives 124.62 rad/s for the tail rotor and 27 rad/s for the main rotor.
+  tail_gear_ratio: 4.615555555555556
+  governor_proportional_n_m_s: 8000.0
+  governor_time_constant_s: 0.35
+  maximum_engine_torque_n_m: 100000.0
+  minimum_engine_torque_n_m: 0.0
+  transmission_efficiency: 0.95
+  accessory_torque_n_m: 2500.0
+  minimum_rotor_speed_rad_s: 24.0
+  maximum_rotor_speed_rad_s: 30.0
+
+actuators:
+  collective:
+    minimum_rad: 0.0
+    maximum_rad: 0.3490658503988659
+    rate_limit_rad_s: 0.25
+    time_constant_s: 0.08
+  longitudinal_cyclic:
+    minimum_rad: -0.17453292519943295
+    maximum_rad: 0.17453292519943295
+    rate_limit_rad_s: 0.45
+    time_constant_s: 0.06
+  lateral_cyclic:
+    minimum_rad: -0.13962634015954636
+    maximum_rad: 0.13962634015954636
+    rate_limit_rad_s: 0.45
+    time_constant_s: 0.06
+  pedal:
+    minimum_rad: -0.3490658503988659
+    maximum_rad: 0.3490658503988659
+    rate_limit_rad_s: 0.7
+    time_constant_s: 0.05
+
+tail_rotor_blockage_factor: 0.92
+pedal_to_tail_collective: 1.0

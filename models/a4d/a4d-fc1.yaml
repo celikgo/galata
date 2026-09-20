@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A-4D clean flexible-airplane model, NASA CR-96008, flight condition 1.
+# The source boundary, derivative conversion and limitations are recorded in
+# PROVENANCE.md.
+
+description: >-
+  A-4D, flight condition 1 — sea level, M = 0.4, clean flexible airplane,
+  17,578 lb, 4.7 degree reference angle of attack
+
+citation: >-
+  Gary L. Teper, "Aircraft Stability and Control Data", NASA CR-96008,
+  Systems Technology, Inc. for NASA Ames Research Center, April 1969,
+  Tables III-A through III-C, N69-31783.
+
+geometry:
+  wing_area_m2: 24.1547904000
+  wing_span_m: 8.3820000000
+  mean_aerodynamic_chord_m: 3.2918400000
+
+mass:
+  mass_kg: 7968.2710037147
+  inertia_xx_kg_m2: 11904.0815863497
+  inertia_yy_kg_m2: 35115.6848617833
+  inertia_zz_kg_m2: 38640.8115274449
+  product_of_inertia_xz_kg_m2: -5518.1790497088
+
+thrust_incidence_rad: 0.0
+
+aero:
+  # Table III-A flight condition 1. The coefficient intercepts and slopes are
+  # reconstructed from the dimensional derivatives in Tables III-B and III-C;
+  # the conversion and the explicit trim conventions are in PROVENANCE.md.
+  reference_alpha_rad: 0.0820304748437
+  reference_mach: 0.4
+
+  lift_ref: 0.2952744603
+  drag_ref: 0.0315872087
+  pitching_moment_ref: 0.0038620291
+  lift_alpha: 3.5029546525
+  drag_alpha: 0.3107211023
+  pitching_moment_alpha: -0.3986134407
+  lift_pitch_rate: 0.0
+  pitching_moment_pitch_rate: -3.7080313864
+  pitching_moment_alpha_dot: -1.0987531648
+  lift_elevator: 0.3771335698
+  drag_elevator: -0.0366696448
+  pitching_moment_elevator: -0.5342709798
+
+  # Table III-C is explicitly body-fixed centerline axes. The source's
+  # primed moment rows are converted back through the quoted I_xz coupling.
+  lateral_axes: body
+  side_force_beta: -0.9838526582
+  rolling_moment_beta: -0.1222257177
+  yawing_moment_beta: 0.1506982975
+  rolling_moment_roll_rate: -0.3076458696
+  yawing_moment_roll_rate: -0.1574166709
+  rolling_moment_yaw_rate: 0.1020824591
+  yawing_moment_yaw_rate: -0.2468149539
+  side_force_aileron: -0.0000515696
+  rolling_moment_aileron: 0.0926913487
+  yawing_moment_aileron: 0.0663289664
+  side_force_rudder: 0.0003898734
+  rolling_moment_rudder: 0.0421058033
+  yawing_moment_rudder: 0.0164510578

@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# F-4C power-approach derivative set, NASA CR-2144 Table IV-1.
+# The source boundary, geometry sources, conversions and limitations are
+# recorded in PROVENANCE.md.
+
+description: >-
+  F-4C, power approach — sea level, 230 ft/s (136 kt), 11.7 degree reference
+  angle of attack, full flaps with BLC and gear down
+
+citation: >-
+  Robert K. Heffley and Wayne F. Jewell, "Aircraft Handling Qualities Data",
+  NASA CR-2144, Systems Technology, Inc. for NASA, December 1972, Section IV,
+  Figure IV-1 and Table IV-1, NTRS 19730003312.
+
+geometry:
+  wing_area_m2: 49.2386112000
+  wing_span_m: 11.7957600000
+  mean_aerodynamic_chord_m: 4.8768000000
+
+mass:
+  mass_kg: 15057.4523145200
+  inertia_xx_kg_m2: 32089.4992011076
+  inertia_yy_kg_m2: 159308.6089289395
+  inertia_zz_kg_m2: 181304.0435047198
+  product_of_inertia_xz_kg_m2: 2951.6156735175
+
+thrust_incidence_rad: 0.0
+
+aero:
+  # Table IV-1 is a local derivative set. The stabilator's -9.1 degree
+  # setting is the source trim condition; generic Galata controls represent
+  # perturbations about it, so it is not re-used as a full elevator command.
+  reference_alpha_rad: 0.2042035225
+  reference_mach: 0.2060100972
+
+  lift_ref: 0.915
+  drag_ref: 0.242
+  # Table IV-1 does not print a C_m intercept. Zero is an explicit local-model
+  # convention; the source's static and dynamic moment derivatives remain
+  # transcribed below.
+  pitching_moment_ref: 0.0
+  lift_alpha: 2.8
+  drag_alpha: 0.555
+  pitching_moment_alpha: -0.098
+  lift_pitch_rate: 0.0
+  pitching_moment_pitch_rate: -2.0
+  pitching_moment_alpha_dot: -0.95
+  lift_elevator: 0.24
+  drag_elevator: -0.14
+  pitching_moment_elevator: -0.322
+
+  # Table IV-1 explicitly gives lateral-directional derivatives in stability
+  # axes. The loader rotates them into the body axes at reference alpha.
+  lateral_axes: stability
+  side_force_beta: -0.655
+  rolling_moment_beta: -0.156
+  yawing_moment_beta: 0.199
+  rolling_moment_roll_rate: -0.272
+  yawing_moment_roll_rate: -0.013
+  rolling_moment_yaw_rate: 0.205
+  yawing_moment_yaw_rate: -0.320
+  side_force_aileron: -0.0355
+  rolling_moment_aileron: 0.057
+  yawing_moment_aileron: -0.0041
+  side_force_rudder: 0.124
+  rolling_moment_rudder: -0.0009
+  yawing_moment_rudder: -0.072

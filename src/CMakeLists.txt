@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 add_subdirectory(core)
 add_subdirectory(data)
+add_subdirectory(hardware)
 add_subdirectory(identify)
 add_subdirectory(numerics)
 add_subdirectory(sim)
@@ -10,6 +11,8 @@ add_subdirectory(trim)
 add_subdirectory(linearize)
 add_subdirectory(synth)
 add_subdirectory(modeling)
+add_subdirectory(onboard)
+add_subdirectory(qualification)
 add_subdirectory(pipeline)
 
 if(GALATA_BUILD_CLI)

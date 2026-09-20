@@ -6,7 +6,9 @@
 #include "diagram_editing.hpp"
 #include "diagram_routing.hpp"
 #include "dim_theme.hpp"
+#include "galata/build_config.hpp"
 #import <AppKit/AppKit.h>
+#import <CommonCrypto/CommonDigest.h>
 
 #include <cmath>
 #include <limits>
@@ -25,6 +27,16 @@ static NSMutableDictionary* JSONCopy(NSDictionary* value) {
                                                 options:NSJSONReadingMutableContainers
                                                   error:nil]
               : nil;
+}
+
+static NSString* SHA256Hex(NSString* value) {
+  NSData* data = [value dataUsingEncoding:NSUTF8StringEncoding];
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+  NSMutableString* hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (NSUInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; ++index)
+    [hex appendFormat:@"%02x", digest[index]];
+  return hex;
 }
 
 static NSUInteger BlockInputCount(NSDictionary* block) {
@@ -300,6 +312,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 @property(nonatomic) BOOL simulationDirty;
 @property(nonatomic) BOOL populating;
 @property(nonatomic) BOOL cancelling;
+@property(nonatomic, strong) NSTimer* recoveryTimer;
 - (NSArray*)blocks;
 - (NSArray*)connections;
 - (NSMutableDictionary*)selectedBlock;
@@ -311,6 +324,11 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 - (void)updateDiagramZoom;
 - (void)selectBlock:(NSString*)identifier;
 - (void)checkpoint:(NSString*)name;
+- (NSString*)recoverySnapshotPathForProject:(NSString*)project;
+- (void)scheduleRecoverySnapshot;
+- (void)persistRecoverySnapshot;
+- (void)discardRecoverySnapshotForProject:(NSString*)project;
+- (void)offerRecoverySnapshotForProject:(NSString*)project;
 - (void)refresh;
 - (void)deleteBlock:(id)sender;
 - (void)showRevisions:(id)sender;
@@ -330,6 +348,20 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 - (void)saveRoute:(NSArray<NSValue*>*)points forWire:(NSDictionary*)wire;
 - (void)moveBlock:(NSString*)identifier to:(NSPoint)point;
 - (void)removeManualRouteForWire:(NSDictionary*)wire;
+- (NSString*)promptText:(NSString*)title
+                message:(NSString*)message
+            placeholder:(NSString*)placeholder;
+- (void)verifyQualification:(id)sender;
+- (void)verifyOnboardDeployment:(id)sender;
+- (void)createOnboardTargetEvidence:(id)sender;
+- (void)verifyOnboardTargetEvidence:(id)sender;
+- (void)onboardSelfTest:(id)sender;
+- (void)deployOnboard:(id)sender;
+- (void)createFlightTest:(id)sender;
+- (void)validateFlightTest:(id)sender;
+- (void)createQualification:(id)sender;
+- (void)verifyQualificationChain:(id)sender;
+- (void)runStudy:(id)sender;
 @end
 
 @implementation DiagramView
@@ -1112,11 +1144,12 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 - (BOOL)application:(NSApplication*)application openFile:(NSString*)filename {
   NSString* path = filename.stringByStandardizingPath;
   BOOL directory = NO;
-  if (![path.pathExtension.lowercaseString isEqual:@"galata"]
+  NSString* extension = path.pathExtension.lowercaseString;
+  if ((![extension isEqual:@"galata"] && ![extension isEqual:@"galata-review"])
       || ![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&directory]
       || !directory) {
     if (self.finishedLaunching)
-      [self problem:@"Choose a Galata project package ending in .galata."];
+      [self problem:@"Choose a Galata project package ending in .galata or .galata-review."];
     return NO;
   }
   // Launch Services can deliver the initial document before the editor and
@@ -1798,18 +1831,74 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
     @"New Project…",
     @"Open Project…",
     @"Import Study…",
+    @"Run Study…",
     @"Save Project",
     @"Run Saved Project",
+    @"Export Review Package…",
+    @"Verify Review Package…",
+    @"Verify Onboard Manifest…",
+    @"Stage Onboard Package…",
+    @"Deploy Onboard Runtime…",
+    @"Verify Onboard Deployment…",
+    @"Create Target Evidence Package…",
+    @"Verify Target Evidence…",
+    @"Onboard SIL Self-Test…",
+    @"Create Flight-Test Package…",
+    @"Verify Flight-Test Evidence…",
+    @"Run Flight-Test Validation…",
+    @"Create Qualification Dossier…",
+    @"Verify Qualification Dossier…",
+    @"Verify Qualification Chain…",
     @"Saved Revisions…",
     @"Original Study…"
   ];
-  NSArray* keys = @[@"n", @"o", @"i", @"s", @"r", @"h", @""];
+  NSArray* keys = @[
+    @"n",
+    @"o",
+    @"i",
+    @"t",
+    @"s",
+    @"r",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"",
+    @"h",
+    @""
+  ];
   NSArray* actions = @[
     @"newProject:",
     @"openProject:",
     @"importStudy:",
+    @"runStudy:",
     @"saveProject:",
     @"runProject:",
+    @"exportReview:",
+    @"verifyReview:",
+    @"verifyOnboard:",
+    @"stageOnboard:",
+    @"deployOnboard:",
+    @"verifyOnboardDeployment:",
+    @"createOnboardTargetEvidence:",
+    @"verifyOnboardTargetEvidence:",
+    @"onboardSelfTest:",
+    @"createFlightTest:",
+    @"verifyFlightTest:",
+    @"validateFlightTest:",
+    @"createQualification:",
+    @"verifyQualification:",
+    @"verifyQualificationChain:",
     @"showRevisions:",
     @"showOriginalStudy:"
   ];
@@ -2121,6 +2210,29 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   [alert runModal];
 }
 
+- (NSString*)promptText:(NSString*)title
+                message:(NSString*)message
+            placeholder:(NSString*)placeholder {
+  NSAlert* alert = [[NSAlert alloc] init];
+  alert.messageText = title;
+  alert.informativeText = message;
+  NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 360, 24)];
+  field.placeholderString = placeholder;
+  field.accessibilityLabel = title;
+  alert.accessoryView = field;
+  [alert addButtonWithTitle:@"Continue"];
+  [alert addButtonWithTitle:@"Cancel"];
+  if ([alert runModal] != NSAlertFirstButtonReturn)
+    return nil;
+  NSString* value = [field.stringValue
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (!value.length) {
+    [self problem:[NSString stringWithFormat:@"%@ is required.", title]];
+    return nil;
+  }
+  return value;
+}
+
 - (BOOL)canReplaceProject {
   if (self.task) {
     [self problem:@"Wait for the active command or cancel the run or study import first."];
@@ -2135,6 +2247,132 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   [alert addButtonWithTitle:@"Keep Editing"];
   [alert addButtonWithTitle:@"Discard Changes"];
   return [alert runModal] == NSAlertSecondButtonReturn;
+}
+
+- (NSString*)recoverySnapshotPathForProject:(NSString*)project {
+  if (!project.length)
+    return nil;
+  NSArray* directories = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                                              NSUserDomainMask, YES);
+  if (!directories.count)
+    return nil;
+  NSString* directory = [[directories.firstObject stringByAppendingPathComponent:@"Galata Preview"]
+      stringByAppendingPathComponent:@"Recovery"];
+  [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+  NSString* normalized = project.stringByStandardizingPath;
+  return [directory stringByAppendingPathComponent:
+                       [NSString stringWithFormat:@"%@.json", SHA256Hex(normalized)]];
+}
+
+- (void)scheduleRecoverySnapshot {
+  [self.recoveryTimer invalidate];
+  self.recoveryTimer = [NSTimer scheduledTimerWithTimeInterval:0.35
+                                                        target:self
+                                                      selector:@selector(persistRecoverySnapshot)
+                                                      userInfo:nil
+                                                       repeats:NO];
+}
+
+- (void)persistRecoverySnapshot {
+  [self.recoveryTimer invalidate];
+  self.recoveryTimer = nil;
+  if (!self.project || !self.draft)
+    return;
+  if (!self.dirty && !self.propertyDirty && !self.simulationDirty) {
+    [self discardRecoverySnapshotForProject:self.project];
+    return;
+  }
+  NSString* path = [self recoverySnapshotPathForProject:self.project];
+  if (!path)
+    return;
+  NSMutableDictionary* snapshot = [@{
+    @"schema": @"galata.desktop-recovery.v1",
+    @"project": self.project.stringByStandardizingPath,
+    @"base_revision": self.revision ? self.revision : @"",
+    @"updated_at": @([[NSDate date] timeIntervalSince1970]),
+    @"draft": JSONCopy(self.draft)
+  } mutableCopy];
+  if (self.propertyDirty)
+    snapshot[@"pending_properties"] = self.properties.string ? self.properties.string : @"";
+  if (self.simulationDirty)
+    snapshot[@"pending_simulation"] = self.simulationEditor.string ? self.simulationEditor.string : @"";
+  NSData* data = [NSJSONSerialization dataWithJSONObject:snapshot
+                                                  options:NSJSONWritingPrettyPrinted
+                                                    error:nil];
+  // Keep recovery bounded to one small local draft and never let a malformed or
+  // unexpectedly large editor buffer turn recovery into an unbounded cache.
+  if (!data || data.length > 8 * 1024 * 1024)
+    return;
+  [data writeToFile:path options:NSDataWritingAtomic error:nil];
+}
+
+- (void)discardRecoverySnapshotForProject:(NSString*)project {
+  NSString* path = [self recoverySnapshotPathForProject:project];
+  if (path)
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+}
+
+- (void)offerRecoverySnapshotForProject:(NSString*)project {
+  NSString* path = [self recoverySnapshotPathForProject:project];
+  if (!path)
+    return;
+  NSData* data = [NSData dataWithContentsOfFile:path options:0 error:nil];
+  NSDictionary* snapshot = data
+                               ? [NSJSONSerialization JSONObjectWithData:data
+                                                                  options:NSJSONReadingMutableContainers
+                                                                    error:nil]
+                               : nil;
+  NSString* normalized = project.stringByStandardizingPath;
+  NSDictionary* recoveredDraft = [snapshot isKindOfClass:[NSDictionary class]]
+                                     ? snapshot[@"draft"]
+                                     : nil;
+  BOOL valid = [snapshot isKindOfClass:[NSDictionary class]]
+               && [snapshot[@"schema"] isEqual:@"galata.desktop-recovery.v1"]
+               && [snapshot[@"project"] isEqual:normalized]
+               && [snapshot[@"base_revision"] isEqual:self.revision]
+               && [recoveredDraft isKindOfClass:[NSDictionary class]];
+  if (!valid) {
+    // A snapshot based on another saved revision cannot be merged safely. The
+    // saved project remains authoritative, so retire the stale local journal.
+    [self discardRecoverySnapshotForProject:project];
+    return;
+  }
+  if ([recoveredDraft isEqual:self.draft] && !snapshot[@"pending_properties"]
+      && !snapshot[@"pending_simulation"]) {
+    [self discardRecoverySnapshotForProject:project];
+    return;
+  }
+  NSAlert* alert = [[NSAlert alloc] init];
+  alert.messageText = @"Recover unsaved draft?";
+  alert.informativeText =
+      @"Galata found a local recovery snapshot based on the currently saved revision. Recovering "
+      @"it restores an unsaved draft; Save will validate it and create the next project revision.";
+  [alert addButtonWithTitle:@"Recover Draft"];
+  [alert addButtonWithTitle:@"Discard Snapshot"];
+  if ([alert runModal] != NSAlertFirstButtonReturn) {
+    [self discardRecoverySnapshotForProject:project];
+    self.status.stringValue = @"Recovery snapshot discarded. The saved draft is active.";
+    return;
+  }
+  self.draft = JSONCopy(recoveredDraft);
+  self.dirty = YES;
+  self.propertyDirty = NO;
+  self.simulationDirty = NO;
+  [self.edits removeAllActions];
+  [self populateEditors];
+  if ([snapshot[@"pending_properties"] isKindOfClass:[NSString class]]) {
+    self.properties.string = snapshot[@"pending_properties"];
+    self.propertyDirty = YES;
+  }
+  if ([snapshot[@"pending_simulation"] isKindOfClass:[NSString class]]) {
+    self.simulationEditor.string = snapshot[@"pending_simulation"];
+    self.simulationDirty = YES;
+  }
+  [self refresh];
+  self.status.stringValue = @"Recovered unsaved draft. Save to validate and retain it.";
 }
 
 - (void)checkpoint:(NSString*)name {
@@ -2158,6 +2396,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
     }
   }
   self.dirty = YES;
+  [self scheduleRecoverySnapshot];
 }
 
 - (void)restoreDraft:(NSDictionary*)previous {
@@ -2179,6 +2418,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   [self refresh];
   self.status.stringValue = self.dirty ? @"Edit restored. Save to validate the draft."
                                        : @"Returned to the saved draft. Run Saved is available.";
+  [self scheduleRecoverySnapshot];
 }
 
 - (void)undoEdit:(id)sender {
@@ -2225,6 +2465,18 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
+  if (item.action == @selector(runStudy:) || item.action == @selector(verifyOnboard:)
+      || item.action == @selector(stageOnboard:) || item.action == @selector(deployOnboard:)
+      || item.action == @selector(verifyOnboardDeployment:)
+      || item.action == @selector(createOnboardTargetEvidence:)
+      || item.action == @selector(verifyOnboardTargetEvidence:)
+      || item.action == @selector(onboardSelfTest:) || item.action == @selector(createFlightTest:)
+      || item.action == @selector(verifyFlightTest:)
+      || item.action == @selector(validateFlightTest:)
+      || item.action == @selector(createQualification:)
+      || item.action == @selector(verifyQualification:)
+      || item.action == @selector(verifyQualificationChain:))
+    return !self.task;
   if (item.action == @selector(undoEdit:) || item.action == @selector(redoEdit:)) {
     BOOL undo = item.action == @selector(undoEdit:);
     NSTextView* editor = [self focusedTextEditor];
@@ -2247,6 +2499,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   if (notification.object == self.simulationEditor)
     self.simulationDirty =
         ![self.simulationEditor.string isEqual:JSONText(self.draft[@"simulation"])];
+  if (self.project && (self.propertyDirty || self.simulationDirty))
+    [self scheduleRecoverySnapshot];
   [self refresh];
 }
 
@@ -2901,18 +3155,36 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 }
 
 - (void)loadProject:(NSString*)path {
-  [self command:@[@"project", @"inspect", path]
-      completion:^(NSDictionary* result, NSString* error) {
-        if (![self isProjectView:result]) {
-          [self problem:error ? error : @"Engine returned an invalid project view."];
-          return;
-        }
-        self.project = path;
-        self.diagramFitMode = YES;
-        [self adoptProjectView:result];
-        self.status.stringValue =
-            [NSString stringWithFormat:@"Opened %@ · revision %@", path, self.revision];
-      }];
+  void (^inspectProject)(void) = ^{
+    [self command:@[@"project", @"inspect", path]
+        completion:^(NSDictionary* result, NSString* error) {
+          if (![self isProjectView:result]) {
+            [self problem:error ? error : @"Engine returned an invalid project view."];
+            return;
+          }
+          self.project = path;
+          self.diagramFitMode = YES;
+          [self adoptProjectView:result];
+          self.status.stringValue =
+              [NSString stringWithFormat:@"Opened %@ · revision %@", path, self.revision];
+          [self offerRecoverySnapshotForProject:path];
+        }];
+  };
+  NSString* manifest = [path stringByAppendingPathComponent:@"review.json"];
+  if ([[NSFileManager defaultManager] fileExistsAtPath:manifest]) {
+    [self command:@[@"project", @"verify", path]
+        completion:^(NSDictionary* result, NSString* error) {
+          if (![result[@"schema"] isEqual:@"galata.project-review-verification.v1"]
+              || ![result[@"status"] isEqual:@"verified"]) {
+            [self problem:error ? error : @"The review package failed integrity verification."];
+            return;
+          }
+          self.status.stringValue = @"Review package verified. Loading its saved project view…";
+          inspectProject();
+        }];
+  } else {
+    inspectProject();
+  }
 }
 
 - (void)newProject:(id)sender {
@@ -2937,6 +3209,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
         if ([self isProjectView:result]) {
           self.project = path;
           self.diagramFitMode = YES;
+          [self discardRecoverySnapshotForProject:path];
           [self adoptProjectView:result];
           self.status.stringValue = @"Project created. Edit the diagram or run the saved example.";
         } else
@@ -2996,6 +3269,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
         self.diagramFitMode = YES;
         self.selectedID = nil;
         self.selectedRunID = nil;
+        [self discardRecoverySnapshotForProject:path];
         [self adoptProjectView:result];
         self.status.stringValue = @"Study imported. Original Study retains source context; Run "
                                   @"Saved records new graph execution evidence.";
@@ -3024,6 +3298,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
           [self problem:error ? error : @"Engine refused to save the draft."];
           return;
         }
+        [self discardRecoverySnapshotForProject:self.project];
         [self adoptProjectView:result];
         self.status.stringValue = [NSString
             stringWithFormat:@"Draft saved · revision %@. Run Saved compiles and executes it.",
@@ -3068,6 +3343,1307 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
                 self.evidence.string =
                     [NSString stringWithFormat:@"%@\n\n%@", finalStatus, inspectError];
             }];
+      }];
+}
+
+- (void)runStudy:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* studyChooser = [NSOpenPanel openPanel];
+  studyChooser.title = @"Run Galata Study";
+  studyChooser.message =
+      @"Choose any Galata study YAML, including model validation and flight-test workflows.";
+  studyChooser.canChooseFiles = YES;
+  studyChooser.canChooseDirectories = NO;
+  studyChooser.allowsMultipleSelection = NO;
+  if ([studyChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSString* study = studyChooser.URL.path;
+  NSString* basename = study.lastPathComponent.stringByDeletingPathExtension;
+  NSSavePanel* outputChooser = [NSSavePanel savePanel];
+  outputChooser.title = @"Choose Study Output Directory";
+  outputChooser.message = @"Choose a new or empty directory. The shared CLI writes the run "
+                          @"manifest and artifacts there.";
+  outputChooser.nameFieldStringValue = [NSString stringWithFormat:@"%@-run", basename];
+  outputChooser.canCreateDirectories = YES;
+  if ([outputChooser runModal] != NSModalResponseOK)
+    return;
+  NSString* output = outputChooser.URL.path;
+
+  if (![[NSFileManager defaultManager] isExecutableFileAtPath:self.engine]) {
+    [self problem:[NSString stringWithFormat:@"Cannot launch engine at %@. Build galata_cli or "
+                                             @"launch with --engine /path/to/galata.",
+                                             self.engine]];
+    return;
+  }
+
+  NSTask* task = [[NSTask alloc] init];
+  task.executableURL = [NSURL fileURLWithPath:self.engine];
+  task.arguments = @[@"run", study, @"--output-dir", output];
+  task.currentDirectoryURL = studyChooser.URL.URLByDeletingLastPathComponent;
+  NSPipe* pipe = [NSPipe pipe];
+  task.standardOutput = pipe;
+  task.standardError = pipe;
+  NSError* launchError = nil;
+  if (![task launchAndReturnError:&launchError]) {
+    [self problem:launchError.localizedDescription];
+    return;
+  }
+  self.task = task;
+  self.cancelling = NO;
+  self.status.stringValue =
+      [NSString stringWithFormat:@"Running study: %@…", study.lastPathComponent];
+  [self refresh];
+
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    NSMutableData* outputData = [NSMutableData data];
+    BOOL truncated = NO;
+    while (YES) {
+      NSData* part = [pipe.fileHandleForReading availableData];
+      if (part.length == 0)
+        break;
+      if (outputData.length + part.length <= 8 * 1024 * 1024)
+        [outputData appendData:part];
+      else
+        truncated = YES;
+    }
+    [task waitUntilExit];
+    NSString* log = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
+    if (!log)
+      log = @"Engine returned non-UTF-8 output.";
+    if (truncated)
+      log = [log stringByAppendingString:@"\n\n[Engine log truncated at 8 MiB.]\n"];
+    const int terminationStatus = task.terminationStatus;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      self.task = nil;
+      self.cancelling = NO;
+      self.evidence.string = log;
+      [self refresh];
+      if (terminationStatus == 0) {
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Study completed";
+        alert.informativeText = [NSString
+            stringWithFormat:
+                @"Output directory:\n%@\n\nThe full engine log is available in the Evidence pane. "
+                @"Execution completion is not numerical, flight-test, airworthiness or "
+                @"certification acceptance.",
+                output];
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"Open Output"];
+        [alert addButtonWithTitle:@"Close"];
+        if ([alert runModal] == NSAlertFirstButtonReturn &&
+            [[NSFileManager defaultManager] fileExistsAtPath:output]) {
+          [[NSWorkspace sharedWorkspace]
+              activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:output]]];
+        }
+        self.status.stringValue = [NSString stringWithFormat:@"Study completed · %@", output];
+      } else {
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Study failed or was cancelled";
+        alert.informativeText = [NSString
+            stringWithFormat:@"Exit status: %d\nOutput directory: %@\n\nSee the Evidence pane "
+                             @"for the complete engine log.",
+                             terminationStatus,
+                             output];
+        alert.alertStyle = NSAlertStyleWarning;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Study exited with status %d", terminationStatus];
+      }
+    });
+  });
+}
+
+- (void)exportReview:(id)sender {
+  (void)sender;
+  if (self.task || !self.project)
+    return;
+  if (self.dirty || self.propertyDirty || self.simulationDirty) {
+    [self problem:@"Save the draft before exporting. The review package contains only immutable "
+                  @"saved content."];
+    return;
+  }
+  NSSavePanel* chooser = [NSSavePanel savePanel];
+  chooser.title = @"Export Galata Review Package";
+  chooser.nameFieldStringValue = [self.project.lastPathComponent.stringByDeletingPathExtension
+      stringByAppendingPathExtension:@"galata-review"];
+  chooser.canCreateDirectories = YES;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* project = self.project;
+  NSString* destination = chooser.URL.path;
+  [self command:@[@"project", @"export", project, destination]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.project-review-export.v1"]) {
+          [self problem:error ? error : @"Engine refused to export the review package."];
+          return;
+        }
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Review package exported · %@ · verify before acceptance.",
+                                       result[@"destination"]];
+        [[NSWorkspace sharedWorkspace]
+            activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:destination]]];
+      }];
+}
+
+- (void)verifyReview:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* chooser = [NSOpenPanel openPanel];
+  chooser.title = @"Verify Galata Review Package";
+  chooser.canChooseFiles = NO;
+  chooser.canChooseDirectories = YES;
+  chooser.allowsMultipleSelection = NO;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* package = chooser.URL.path;
+  [self command:@[@"project", @"verify", package]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.project-review-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]) {
+          [self problem:error ? error : @"Engine could not verify the review package."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Directory: %@\nRevision: %@\nFiles: %@\nRetained runs: %@\nManifest SHA-256: "
+                @"%@\n\nContent identity is verified. This does not establish numerical accuracy, "
+                @"flight-test validity, airworthiness, certification or qualification.",
+                package,
+                result[@"revision"],
+                result[@"file_count"],
+                result[@"run_count"],
+                result[@"manifest_sha256"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Review package verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Review package verified · %@", package];
+      }];
+}
+
+- (void)verifyOnboard:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* chooser = [NSOpenPanel openPanel];
+  chooser.title = @"Verify Onboard Manifest";
+  chooser.message =
+      @"Choose the manifest-only handoff received from the reviewed model/controller build.";
+  chooser.canChooseFiles = YES;
+  chooser.canChooseDirectories = NO;
+  chooser.allowsMultipleSelection = NO;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* manifest = chooser.URL.path;
+  [self command:@[@"onboard", @"verify", manifest]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]) {
+          [self problem:error ? error : @"Engine refused to verify the onboard manifest."];
+          return;
+        }
+        NSArray* roles = [result[@"artifact_roles"] isKindOfClass:[NSArray class]]
+                             ? result[@"artifact_roles"]
+                             : @[];
+        NSDictionary* profile = [result[@"transport_profile"] isKindOfClass:[NSDictionary class]]
+                                    ? result[@"transport_profile"]
+                                    : @{};
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Manifest: %@\nSHA-256: %@\nArtifact roles: %@\nController budget: %@ s\n"
+                @"Transport: %@ · endpoint %@ · watchdog %@ s\n\nThis is a manifest-only, "
+                @"not_qualified handoff. Verification checks structure and declared identities; "
+                @"it does not install executable code or establish flight approval.",
+                manifest,
+                result[@"manifest_sha256"],
+                roles.count ? [roles componentsJoinedByString:@", "] : @"none",
+                result[@"max_controller_time_s"],
+                profile[@"transport"],
+                profile[@"endpoint"],
+                profile[@"watchdog_timeout_s"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Onboard manifest verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Onboard manifest verified · %@", manifest];
+      }];
+}
+
+- (void)verifyFlightTest:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* chooser = [NSOpenPanel openPanel];
+  chooser.title = @"Verify Flight-Test Evidence";
+  chooser.message =
+      @"Choose a campaign manifest. Galata checks the controlled files and their SHA-256 "
+       "identities; it does not qualify the aircraft or accept the flight.";
+  chooser.canChooseFiles = YES;
+  chooser.canChooseDirectories = NO;
+  chooser.allowsMultipleSelection = NO;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* manifest = chooser.URL.path;
+  [self command:@[@"flighttest", @"verify", manifest]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.flight-test-evidence-verification.v2"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"file_roles"] isKindOfClass:[NSArray class]]) {
+          [self problem:error ? error
+                              : @"Engine refused to verify the flight-test evidence package."];
+          return;
+        }
+        NSArray* roles = result[@"file_roles"];
+        NSString* details =
+            [NSString stringWithFormat:
+                          @"Manifest: %@\nSHA-256: %@\nAircraft: %@\nConfiguration: %@\nTest plan: "
+                          @"%@\nEvidence class: %@\nReviewer: %@\nFiles: %@ (%@ bytes)\nRoles: %@\n\nControlled "
+                          @"file identities and package completeness are verified. This remains "
+                          @"not_qualified and makes no airworthiness or certification claim.",
+                          manifest,
+                          result[@"manifest_sha256"],
+                          result[@"aircraft_id"],
+                          result[@"aircraft_configuration"],
+                          result[@"test_plan_id"],
+                          result[@"evidence_class"],
+                          result[@"reviewer_id"],
+                          result[@"file_count"],
+                          result[@"total_bytes"],
+                          roles.count ? [roles componentsJoinedByString:@", "] : @"none"];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Flight-test evidence package verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Flight-test evidence verified · %@", manifest];
+      }];
+}
+
+- (void)validateFlightTest:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+
+  NSOpenPanel* campaignChooser = [NSOpenPanel openPanel];
+  campaignChooser.title = @"Choose Flight-Test Campaign Manifest";
+  campaignChooser.message =
+      @"Choose the verified campaign.manifest that the study's acceptance block references.";
+  campaignChooser.canChooseFiles = YES;
+  campaignChooser.canChooseDirectories = NO;
+  campaignChooser.allowsMultipleSelection = NO;
+  if ([campaignChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* studyChooser = [NSOpenPanel openPanel];
+  studyChooser.title = @"Choose Flight-Test Validation Study";
+  studyChooser.message =
+      @"Choose a Galata study containing identify.validate.vehicle and a campaign_manifest binding.";
+  studyChooser.canChooseFiles = YES;
+  studyChooser.canChooseDirectories = NO;
+  studyChooser.allowsMultipleSelection = NO;
+  if ([studyChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSSavePanel* outputChooser = [NSSavePanel savePanel];
+  outputChooser.title = @"Choose Validation Output Directory";
+  outputChooser.message =
+      @"Choose a new or empty directory. The run manifest, report and validation receipt are written here.";
+  outputChooser.nameFieldStringValue =
+      [studyChooser.URL.path.lastPathComponent.stringByDeletingPathExtension
+          stringByAppendingString:@"-flight-validation"];
+  outputChooser.canCreateDirectories = YES;
+  if ([outputChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSString* campaign = campaignChooser.URL.path;
+  NSString* study = studyChooser.URL.path;
+  NSString* output = outputChooser.URL.path;
+  [self command:@[
+    @"flighttest",
+    @"validate",
+    campaign,
+    study,
+    @"--output-dir",
+    output
+  ]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.flight-test-validation-receipt.v1"]
+            || ![result[@"receipt"] isKindOfClass:[NSString class]]) {
+          [self problem:error ? error : @"Engine refused to execute the flight-test validation."];
+          return;
+        }
+        NSString* status = result[@"status"];
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Receipt: %@\nCampaign manifest SHA-256: %@\nNumerical gate: %@\n"
+                 "Flight-test evidence gate: %@\n\n%@\n\nThe receipt is an execution and evidence-"
+                 "traceability result. It remains not_qualified and makes no airworthiness, "
+                 "certification or authority-acceptance claim.",
+                result[@"receipt"],
+                result[@"campaign_manifest_sha256"],
+                result[@"numerical_acceptance_gate"],
+                result[@"flight_test_evidence_gate"],
+                [status isEqual:@"gate_passed"]
+                    ? @"The package-backed validation gate passed. Independent review and external "
+                       "authority acceptance remain required."
+                    : @"The study executed, but the production evidence gate is not ready. Review "
+                       "the receipt's reasons and controlled evidence package."];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = [status isEqual:@"gate_passed"]
+                                ? @"Flight-test validation receipt created"
+                                : @"Flight-test validation is not ready";
+        alert.informativeText = details;
+        alert.alertStyle = [status isEqual:@"gate_passed"]
+                               ? NSAlertStyleInformational
+                               : NSAlertStyleWarning;
+        [alert addButtonWithTitle:@"Open Receipt Folder"];
+        [alert addButtonWithTitle:@"Close"];
+        if ([alert runModal] == NSAlertFirstButtonReturn)
+          [[NSWorkspace sharedWorkspace]
+              activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:output]]];
+        self.status.stringValue = [NSString
+            stringWithFormat:@"Flight-test validation %@ · %@", status, result[@"receipt"]];
+      }];
+}
+
+- (void)verifyQualification:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* chooser = [NSOpenPanel openPanel];
+  chooser.title = @"Verify Qualification Dossier";
+  chooser.message =
+      @"Choose a dossier manifest. Galata checks the controlled evidence files and their "
+       "SHA-256 identities; it does not grant qualification or certification.";
+  chooser.canChooseFiles = YES;
+  chooser.canChooseDirectories = NO;
+  chooser.allowsMultipleSelection = NO;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* manifest = chooser.URL.path;
+  [self command:@[@"qualification", @"verify", manifest]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.qualification-evidence-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"file_roles"] isKindOfClass:[NSArray class]]) {
+          [self problem:error ? error : @"Engine refused to verify the qualification dossier."];
+          return;
+        }
+        NSArray* roles = result[@"file_roles"];
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Manifest: %@\nSHA-256: %@\nProduct: %@ %@\nIntended use: %@\nAircraft: %@\n"
+                 "Configuration: %@\nBasis: %@\nAuthority: %@\nFiles: %@ (%@ bytes)\nRoles: %@\n\n"
+                 "The dossier is byte-complete and reviewable, but remains not_qualified. "
+                 "External independent review and authorized authority acceptance are still "
+                 "required; no airworthiness or certification claim is made.",
+                manifest,
+                result[@"manifest_sha256"],
+                result[@"product_id"],
+                result[@"product_version"],
+                result[@"intended_use"],
+                result[@"aircraft_id"],
+                result[@"aircraft_configuration"],
+                result[@"qualification_basis"],
+                result[@"authority_id"],
+                result[@"file_count"],
+                result[@"total_bytes"],
+                roles.count ? [roles componentsJoinedByString:@", "] : @"none"];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Qualification dossier verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Qualification dossier verified · %@", manifest];
+      }];
+}
+
+- (void)verifyQualificationChain:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+
+  NSOpenPanel* dossierChooser = [NSOpenPanel openPanel];
+  dossierChooser.title = @"Choose Qualification Dossier Manifest";
+  dossierChooser.message =
+      @"Choose the dossier whose flight-test and target-evidence links will be checked.";
+  dossierChooser.canChooseFiles = YES;
+  dossierChooser.canChooseDirectories = NO;
+  dossierChooser.allowsMultipleSelection = NO;
+  if ([dossierChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* flightChooser = [NSOpenPanel openPanel];
+  flightChooser.title = @"Choose Flight-Test Campaign Manifest";
+  flightChooser.message =
+      @"Choose the complete campaign package manifest. Its bytes must be linked by the dossier.";
+  flightChooser.canChooseFiles = YES;
+  flightChooser.canChooseDirectories = NO;
+  flightChooser.allowsMultipleSelection = NO;
+  if ([flightChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* receiptChooser = [NSOpenPanel openPanel];
+  receiptChooser.title = @"Choose Flight-Validation Receipt";
+  receiptChooser.message =
+      @"Choose the gate-passed receipt produced by Run Flight-Test Validation. Its campaign "
+       "digest must match the campaign manifest above.";
+  receiptChooser.canChooseFiles = YES;
+  receiptChooser.canChooseDirectories = NO;
+  receiptChooser.allowsMultipleSelection = NO;
+  if ([receiptChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* deploymentChooser = [NSOpenPanel openPanel];
+  deploymentChooser.title = @"Choose Onboard Deployment Manifest";
+  deploymentChooser.message =
+      @"Choose the exact deployment manifest bound to the target evidence.";
+  deploymentChooser.canChooseFiles = YES;
+  deploymentChooser.canChooseDirectories = NO;
+  deploymentChooser.allowsMultipleSelection = NO;
+  if ([deploymentChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* deploymentDirectoryChooser = [NSOpenPanel openPanel];
+  deploymentDirectoryChooser.title = @"Choose Verified Onboard Runtime Package";
+  deploymentDirectoryChooser.message =
+      @"Choose the complete staged runtime directory containing deployment.receipt and bin/galata.";
+  deploymentDirectoryChooser.canChooseFiles = NO;
+  deploymentDirectoryChooser.canChooseDirectories = YES;
+  deploymentDirectoryChooser.allowsMultipleSelection = NO;
+  if ([deploymentDirectoryChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSOpenPanel* targetChooser = [NSOpenPanel openPanel];
+  targetChooser.title = @"Choose Target-Evidence Manifest";
+  targetChooser.message =
+      @"Choose the target evidence package manifest. Its bytes must be linked by the dossier.";
+  targetChooser.canChooseFiles = YES;
+  targetChooser.canChooseDirectories = NO;
+  targetChooser.allowsMultipleSelection = NO;
+  if ([targetChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSArray* arguments = @[
+    @"qualification",
+    @"verify-chain",
+    dossierChooser.URL.path,
+    @"--flighttest",
+    flightChooser.URL.path,
+    @"--flight-validation-receipt",
+    receiptChooser.URL.path,
+    @"--deployment",
+    deploymentChooser.URL.path,
+    @"--deployment-dir",
+    deploymentDirectoryChooser.URL.path,
+    @"--target-evidence",
+    targetChooser.URL.path
+  ];
+  [self command:arguments
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.qualification-chain-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"dossier_evidence_verified"] boolValue]
+            || ![result[@"flight_test_evidence_verified"] boolValue]
+            || ![result[@"target_evidence_verified"] boolValue]
+            || ![result[@"deployment_runtime_verified"] boolValue]
+            || ![result[@"traceability_links_verified"] boolValue]) {
+          [self problem:error ? error : @"Engine refused to verify the qualification chain."];
+          return;
+        }
+        NSArray* eligibilityReasons =
+            [result[@"qualification_eligibility_reasons"] isKindOfClass:[NSArray class]]
+                ? result[@"qualification_eligibility_reasons"]
+                : @[];
+        NSString* eligibility =
+            [result[@"qualification_eligibility"] isKindOfClass:[NSString class]]
+                ? result[@"qualification_eligibility"]
+                : @"not_ready";
+        NSString* reasons = eligibilityReasons.count
+                                 ? [eligibilityReasons componentsJoinedByString:@"; "]
+                                 : @"none reported";
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Dossier: %@\nFlight-test manifest SHA-256: %@\nValidation receipt SHA-256: %@\n"
+                 "Target-evidence manifest SHA-256: %@\nDeployment manifest SHA-256: %@\nRuntime SHA-256: %@\nAircraft: %@\nConfiguration: "
+                 @"%@\nQualification eligibility: %@\nEligibility reasons: %@\n\nThe dossier, "
+                 @"complete flight campaign, target evidence and deployment binding are "
+                 @"traceability-verified. The chain remains not_qualified and makes no "
+                 @"airworthiness or certification claim.",
+                dossierChooser.URL.path,
+                result[@"flight_test_manifest_sha256"],
+                result[@"flight_validation_receipt_sha256"],
+                result[@"target_evidence_manifest_sha256"],
+                result[@"deployment_manifest_sha256"],
+                result[@"deployment_runtime_sha256"],
+                result[@"aircraft_id"],
+                result[@"aircraft_configuration"],
+                eligibility,
+                reasons];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Qualification chain verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Qualification chain verified · %@ · %@",
+                                       eligibility,
+                                       dossierChooser.URL.path];
+      }];
+}
+
+- (void)createQualification:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+
+  NSString* productID =
+      [self promptText:@"Product Identifier"
+               message:@"Use the controlled product identifier from the release system."
+           placeholder:@"galata"];
+  if (!productID)
+    return;
+  NSString* productVersion =
+      [self promptText:@"Product Version"
+               message:@"Enter the exact software release version under review."
+           placeholder:[NSString stringWithUTF8String:GALATA_VERSION_STRING]];
+  if (!productVersion)
+    return;
+  NSString* intendedUse = [self promptText:@"Intended Use"
+                                   message:@"Describe the bounded intended use for this dossier."
+                               placeholder:@"controlled engineering review"];
+  if (!intendedUse)
+    return;
+  NSString* aircraftID = [self promptText:@"Aircraft Identifier"
+                                  message:@"Use the controlled airframe identifier."
+                              placeholder:@"airframe-01"];
+  if (!aircraftID)
+    return;
+  NSString* configuration =
+      [self promptText:@"Aircraft Configuration"
+               message:@"Use the exact aircraft configuration or baseline identifier."
+           placeholder:@"configuration-2026-09"];
+  if (!configuration)
+    return;
+  NSString* basis = [self promptText:@"Qualification Basis"
+                             message:@"Enter the governing application-specific review basis."
+                         placeholder:@"application-specific review basis"];
+  if (!basis)
+    return;
+  NSString* authorityID =
+      [self promptText:@"Authority Identifier"
+               message:@"Identify the external authority that owns the decision."
+           placeholder:@"external-authority-pending"];
+  if (!authorityID)
+    return;
+
+  const NSArray<NSString*>* roles = @[
+    @"requirements_matrix",
+    @"software_release",
+    @"verification_report",
+    @"flight_test_campaign",
+    @"hardware_hil_report",
+    @"safety_case",
+    @"independent_review",
+    @"authority_decision",
+    @"maintenance_plan"
+  ];
+  NSMutableArray* arguments = [NSMutableArray arrayWithObjects:@"qualification", @"create", nil];
+  [arguments addObjectsFromArray:@[
+    @"--product-id",
+    productID,
+    @"--product-version",
+    productVersion,
+    @"--intended-use",
+    intendedUse,
+    @"--aircraft-id",
+    aircraftID,
+    @"--configuration",
+    configuration,
+    @"--qualification-basis",
+    basis,
+    @"--authority-id",
+    authorityID
+  ]];
+  for (NSString* role in roles) {
+    NSOpenPanel* chooser = [NSOpenPanel openPanel];
+    chooser.title = [NSString stringWithFormat:@"Choose %@ Evidence", role];
+    chooser.message =
+        @"Choose the controlled regular file. The engine will copy it and hash the copied bytes.";
+    chooser.canChooseFiles = YES;
+    chooser.canChooseDirectories = NO;
+    chooser.allowsMultipleSelection = NO;
+    if ([chooser runModal] != NSModalResponseOK)
+      return;
+    [arguments addObject:@"--file"];
+    [arguments addObject:[NSString stringWithFormat:@"%@=%@", role, chooser.URL.path]];
+  }
+
+  NSSavePanel* destinationChooser = [NSSavePanel savePanel];
+  destinationChooser.title = @"Choose New Qualification Dossier Directory";
+  destinationChooser.message =
+      @"Choose a new directory. Existing destinations are refused by the engine.";
+  destinationChooser.nameFieldStringValue = @"qualification-dossier";
+  destinationChooser.canCreateDirectories = YES;
+  if ([destinationChooser runModal] != NSModalResponseOK)
+    return;
+  [arguments insertObject:destinationChooser.URL.path atIndex:2];
+
+  [self command:arguments
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.qualification-evidence-package.v1"]
+            || ![result[@"status"] isEqual:@"staged"]
+            || ![result[@"evidence_references_verified"] boolValue]) {
+          [self problem:error ? error : @"Engine refused to create the qualification dossier."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Directory: %@\nManifest: %@\nManifest SHA-256: %@\nFiles: %@\n\n"
+                @"The evidence files were copied, hashed and verified atomically. This proves "
+                @"package completeness only; it does not establish independent acceptance, "
+                @"airworthiness, certification or qualification.",
+                result[@"destination"],
+                result[@"manifest"],
+                result[@"manifest_sha256"],
+                result[@"file_count"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Qualification dossier created";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue = [NSString
+            stringWithFormat:@"Qualification dossier created · %@", result[@"destination"]];
+        [[NSWorkspace sharedWorkspace]
+            activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:result[@"destination"]]]];
+      }];
+}
+
+- (void)stageOnboard:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* manifestChooser = [NSOpenPanel openPanel];
+  manifestChooser.title = @"Choose Onboard Manifest";
+  manifestChooser.message =
+      @"The manifest is verified first. You will then choose one regular file for each declared "
+      @"artifact role.";
+  manifestChooser.canChooseFiles = YES;
+  manifestChooser.canChooseDirectories = NO;
+  manifestChooser.allowsMultipleSelection = NO;
+  if ([manifestChooser runModal] != NSModalResponseOK)
+    return;
+  NSString* manifest = manifestChooser.URL.path;
+  [self command:@[@"onboard", @"verify", manifest]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"artifact_roles"] isKindOfClass:[NSArray class]]) {
+          [self problem:error ? error : @"Engine refused to verify the onboard manifest."];
+          return;
+        }
+        NSArray* roles = result[@"artifact_roles"];
+        NSDictionary* profile = [result[@"transport_profile"] isKindOfClass:[NSDictionary class]]
+                                    ? result[@"transport_profile"]
+                                    : @{};
+        NSSavePanel* destinationChooser = [NSSavePanel savePanel];
+        destinationChooser.title = @"Choose New Onboard Staging Directory";
+        destinationChooser.message =
+            @"Choose a new directory. Existing destinations are refused by the engine.";
+        destinationChooser.nameFieldStringValue = @"onboard-staged";
+        destinationChooser.canCreateDirectories = YES;
+        if ([destinationChooser runModal] != NSModalResponseOK)
+          return;
+        NSString* destination = destinationChooser.URL.path;
+        NSMutableArray* arguments =
+            [NSMutableArray arrayWithObjects:@"onboard", @"stage", manifest, destination, nil];
+        for (id roleValue in roles) {
+          if (![roleValue isKindOfClass:[NSString class]] || [roleValue length] == 0) {
+            [self problem:@"The verified manifest returned an invalid artifact role."];
+            return;
+          }
+          NSString* role = roleValue;
+          NSOpenPanel* artifactChooser = [NSOpenPanel openPanel];
+          artifactChooser.title = [NSString stringWithFormat:@"Choose %@ Artifact", role];
+          artifactChooser.message =
+              @"Choose the exact regular file whose SHA-256 is declared by the manifest.";
+          artifactChooser.canChooseFiles = YES;
+          artifactChooser.canChooseDirectories = NO;
+          artifactChooser.allowsMultipleSelection = NO;
+          if ([artifactChooser runModal] != NSModalResponseOK)
+            return;
+          [arguments addObject:@"--artifact"];
+          [arguments
+              addObject:[NSString stringWithFormat:@"%@=%@", role, artifactChooser.URL.path]];
+        }
+        [self command:arguments
+            completion:^(NSDictionary* staged, NSString* stageError) {
+              if (![staged[@"schema"] isEqual:@"galata.onboard-stage.v1"]
+                  || ![staged[@"status"] isEqual:@"staged"]) {
+                [self problem:stageError ? stageError
+                                         : @"Engine refused to stage the onboard package."];
+                return;
+              }
+              NSString* details = [NSString
+                  stringWithFormat:
+                      @"Destination: %@\nManifest SHA-256: %@\nArtifacts staged: %@\nController "
+                      @"budget: %@ s\nTransport: %@ · endpoint %@ · watchdog %@ s\n\nThe "
+                      @"directory is atomically published, manifest-only and not qualified. It "
+                      @"is not an installer or a flight release.",
+                      staged[@"destination"],
+                      staged[@"manifest_sha256"],
+                      staged[@"artifact_count"],
+                      staged[@"max_controller_time_s"],
+                      profile[@"transport"],
+                      profile[@"endpoint"],
+                      profile[@"watchdog_timeout_s"]];
+              NSAlert* alert = [[NSAlert alloc] init];
+              alert.messageText = @"Onboard package staged";
+              alert.informativeText = details;
+              alert.alertStyle = NSAlertStyleInformational;
+              [alert addButtonWithTitle:@"OK"];
+              [alert runModal];
+              self.status.stringValue = [NSString
+                  stringWithFormat:@"Onboard package staged · %@", staged[@"destination"]];
+              [[NSWorkspace sharedWorkspace]
+                  activateFileViewerSelectingURLs:@[[NSURL
+                                                      fileURLWithPath:staged[@"destination"]]]];
+            }];
+      }];
+}
+
+- (void)verifyOnboardDeployment:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* chooser = [NSOpenPanel openPanel];
+  chooser.title = @"Verify Onboard Deployment";
+  chooser.message =
+      @"Choose an atomically published runtime directory. Galata checks its manifest, receipt, "
+      @"executable and model/controller hashes.";
+  chooser.canChooseFiles = NO;
+  chooser.canChooseDirectories = YES;
+  chooser.allowsMultipleSelection = NO;
+  if ([chooser runModal] != NSModalResponseOK)
+    return;
+  NSString* directory = chooser.URL.path;
+  [self command:@[@"onboard", @"verify-deployment", directory]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-deployment-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"contains_executable"] boolValue]) {
+          [self problem:error ? error : @"Engine refused to verify the onboard deployment."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Directory: %@\nManifest SHA-256: %@\nRuntime SHA-256: %@\nArtifacts: %@\n\n"
+                @"The POSIX runtime bundle is structurally complete and hash-consistent. It "
+                @"remains not_qualified: target timing, watchdog behavior, signing, HIL, "
+                @"airworthiness and authorized deployment approval are separate gates.",
+                result[@"destination"],
+                result[@"manifest_sha256"],
+                result[@"runtime_sha256"],
+                result[@"artifact_count"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Onboard deployment verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Onboard deployment verified · %@", directory];
+      }];
+}
+
+- (void)onboardSelfTest:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  [self command:@[@"onboard", @"self-test"]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-self-test.v1"]
+            || ![result[@"status"] isEqual:@"passed"]) {
+          [self problem:error ? error : @"Engine refused to complete the onboard SIL self-test."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Transport: %@\nCycles: %@\nQualification state: %@\n\nThe guarded replay "
+                @"supervisor passed on this host. This is not target timing, hardware-in-the-"
+                @"loop, flight-controller compatibility or qualification evidence.",
+                result[@"transport"],
+                result[@"completed_cycles"],
+                result[@"qualification_state"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Onboard SIL self-test passed";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue = @"Onboard SIL self-test passed · not qualified";
+      }];
+}
+
+- (void)createOnboardTargetEvidence:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* deploymentChooser = [NSOpenPanel openPanel];
+  deploymentChooser.title = @"Choose Onboard Deployment Manifest";
+  deploymentChooser.message =
+      @"The target evidence package will be bound to this exact deployment manifest.";
+  deploymentChooser.canChooseFiles = YES;
+  deploymentChooser.canChooseDirectories = NO;
+  deploymentChooser.allowsMultipleSelection = NO;
+  if ([deploymentChooser runModal] != NSModalResponseOK)
+    return;
+
+  NSString* controllerWorstCase =
+      [self promptText:@"Measured Controller Worst Case"
+               message:@"Enter the externally measured worst-case controller time in seconds."
+           placeholder:@"0.001"];
+  if (!controllerWorstCase)
+    return;
+  NSString* cycleWorstCase =
+      [self promptText:@"Measured Cycle Worst Case"
+               message:@"Enter the externally measured complete-cycle time in seconds."
+           placeholder:@"0.004"];
+  if (!cycleWorstCase)
+    return;
+  NSString* watchdogResponse =
+      [self promptText:@"Measured Watchdog Response"
+               message:@"Enter the externally measured watchdog response in seconds."
+           placeholder:@"0.008"];
+  if (!watchdogResponse)
+    return;
+  NSString* evidenceClass = [self promptText:@"Evidence Class"
+                                      message:@"Enter host_sil for host replay/SIL, target_hil for "
+                                              @"the intended flight computer in HIL, or "
+                                              @"flight_target for the installed target."
+                                  placeholder:@"target_hil"];
+  if (!evidenceClass)
+    return;
+  const BOOL physicalTestsApplicable = [evidenceClass isEqual:@"target_hil"]
+                                      || [evidenceClass isEqual:@"flight_target"];
+  if (![evidenceClass isEqual:@"host_sil"] && !physicalTestsApplicable) {
+    [self problem:@"Evidence class must be host_sil, target_hil or flight_target."];
+    return;
+  }
+
+  if (physicalTestsApplicable) {
+    NSAlert* confirmation = [[NSAlert alloc] init];
+    confirmation.messageText = @"Confirm external target results";
+    confirmation.informativeText =
+        @"Confirm only if the responsible integration programme has already produced passing "
+         "emergency-stop, loss-of-link, HIL and signing records. Galata will copy and hash those "
+         "records; it will not perform or certify the tests.";
+    [confirmation addButtonWithTitle:@"Continue"];
+    [confirmation addButtonWithTitle:@"Cancel"];
+    if ([confirmation runModal] != NSAlertFirstButtonReturn)
+      return;
+  }
+
+  const NSArray<NSString*>* roles = @[
+    @"timing_report",
+    @"hardware_hil_report",
+    @"failsafe_report",
+    @"signing_record",
+    @"target_configuration"
+  ];
+  NSMutableArray* arguments = [NSMutableArray arrayWithObjects:
+      @"onboard",
+      @"target",
+      @"create",
+      @"",
+      deploymentChooser.URL.path,
+      @"--evidence-class",
+      evidenceClass,
+      @"--controller-worst-case-s",
+      controllerWorstCase,
+      @"--cycle-worst-case-s",
+      cycleWorstCase,
+      @"--watchdog-response-s",
+      watchdogResponse,
+      nil];
+  if (physicalTestsApplicable) {
+    [arguments addObjectsFromArray:@[
+      @"--emergency-stop-passed",
+      @"true",
+      @"--loss-of-link-passed",
+      @"true",
+      @"--hil-passed",
+      @"true",
+      @"--signing-verified",
+      @"true"
+    ]];
+  }
+  for (NSString* role in roles) {
+    NSOpenPanel* evidenceChooser = [NSOpenPanel openPanel];
+    evidenceChooser.title = [NSString stringWithFormat:@"Choose %@", role];
+    evidenceChooser.message =
+        @"Choose the externally produced regular evidence file. It will be copied and hashed.";
+    evidenceChooser.canChooseFiles = YES;
+    evidenceChooser.canChooseDirectories = NO;
+    evidenceChooser.allowsMultipleSelection = NO;
+    if ([evidenceChooser runModal] != NSModalResponseOK)
+      return;
+    [arguments addObject:@"--file"];
+    [arguments addObject:[NSString stringWithFormat:@"%@=%@", role, evidenceChooser.URL.path]];
+  }
+
+  NSSavePanel* destinationChooser = [NSSavePanel savePanel];
+  destinationChooser.title = @"Choose New Target Evidence Directory";
+  destinationChooser.message =
+      @"Choose a new directory. Existing destinations are refused atomically.";
+  destinationChooser.nameFieldStringValue = @"target-evidence";
+  destinationChooser.canCreateDirectories = YES;
+  if ([destinationChooser runModal] != NSModalResponseOK)
+    return;
+  arguments[3] = destinationChooser.URL.path;
+
+  [self command:arguments
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-target-evidence-package.v2"]
+            || ![result[@"status"] isEqual:@"staged"]
+            || ![result[@"evidence_references_verified"] boolValue]) {
+          [self problem:error ? error : @"Engine refused to create target evidence package."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Directory: %@\nManifest: %@\nManifest SHA-256: %@\nEvidence files: %@\n"
+                @"Evidence class: %@\nBytes: %@\n\nThe records were copied, hashed and contract-checked. This "
+                @"package remains not_qualified; it does not create or certify the underlying "
+                @"hardware results.",
+                result[@"destination"],
+                result[@"manifest"],
+                result[@"manifest_sha256"],
+                result[@"file_count"],
+                result[@"evidence_class"],
+                result[@"total_bytes"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Target evidence package created";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue = @"Target evidence package created · not qualified";
+        [[NSWorkspace sharedWorkspace]
+            activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:result[@"destination"]]]];
+      }];
+}
+
+- (void)verifyOnboardTargetEvidence:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* deploymentChooser = [NSOpenPanel openPanel];
+  deploymentChooser.title = @"Choose Onboard Deployment Manifest";
+  deploymentChooser.message =
+      @"Choose the exact onboard.manifest that the target-integration evidence tested.";
+  deploymentChooser.canChooseFiles = YES;
+  deploymentChooser.canChooseDirectories = NO;
+  deploymentChooser.allowsMultipleSelection = NO;
+  if ([deploymentChooser runModal] != NSModalResponseOK)
+    return;
+  NSOpenPanel* evidenceChooser = [NSOpenPanel openPanel];
+  evidenceChooser.title = @"Choose Target Evidence Manifest";
+  evidenceChooser.message =
+      @"Choose target-evidence.manifest and keep its evidence directory beside it.";
+  evidenceChooser.canChooseFiles = YES;
+  evidenceChooser.canChooseDirectories = NO;
+  evidenceChooser.allowsMultipleSelection = NO;
+  if ([evidenceChooser runModal] != NSModalResponseOK)
+    return;
+  NSString* deployment = deploymentChooser.URL.path;
+  NSString* evidence = evidenceChooser.URL.path;
+  [self command:@[@"onboard", @"target", @"verify", deployment, evidence]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-target-evidence-verification.v2"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"target_acceptance_state"] isEqual:@"passed"]) {
+          [self problem:error ? error : @"Engine refused to verify target-integration evidence."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Target: %@\nFlight computer: %@\nFirmware: %@\nController worst case: %@ s\n"
+                @"Cycle worst case: %@ s\nWatchdog response: %@ s\nEvidence class: %@\nEvidence files: %@\n\n"
+                @"The supplied records are byte-verified and bound to the deployment contract. "
+                @"The package remains not_qualified and does not establish certification or "
+                @"airworthiness.",
+                result[@"target_hardware_id"],
+                result[@"flight_computer_id"],
+                result[@"firmware_id"],
+                result[@"controller_worst_case_s"],
+                result[@"cycle_worst_case_s"],
+                result[@"watchdog_response_s"],
+                result[@"evidence_class"],
+                result[@"file_count"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Target evidence verified";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue = @"Target evidence verified · not qualified";
+      }];
+}
+
+- (void)deployOnboard:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+  NSOpenPanel* manifestChooser = [NSOpenPanel openPanel];
+  manifestChooser.title = @"Choose Onboard Manifest";
+  manifestChooser.message =
+      @"The manifest is verified first. You will then select the executable runtime and one "
+      @"regular source file for every declared artifact role.";
+  manifestChooser.canChooseFiles = YES;
+  manifestChooser.canChooseDirectories = NO;
+  manifestChooser.allowsMultipleSelection = NO;
+  if ([manifestChooser runModal] != NSModalResponseOK)
+    return;
+  NSString* manifest = manifestChooser.URL.path;
+  [self command:@[@"onboard", @"verify", manifest]
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.onboard-verification.v1"]
+            || ![result[@"status"] isEqual:@"verified"]
+            || ![result[@"artifact_roles"] isKindOfClass:[NSArray class]]) {
+          [self problem:error ? error : @"Engine refused to verify the onboard manifest."];
+          return;
+        }
+
+        NSOpenPanel* runtimeChooser = [NSOpenPanel openPanel];
+        runtimeChooser.title = @"Choose Onboard Runtime Executable";
+        runtimeChooser.message = [NSString
+            stringWithFormat:
+                @"Choose an executable POSIX runner. The packaged desktop engine is %@; use a "
+                @"target-specific build only after its own review.",
+                self.engine];
+        runtimeChooser.canChooseFiles = YES;
+        runtimeChooser.canChooseDirectories = NO;
+        runtimeChooser.allowsMultipleSelection = NO;
+        if ([runtimeChooser runModal] != NSModalResponseOK)
+          return;
+        NSString* runtime = runtimeChooser.URL.path;
+        if (![[NSFileManager defaultManager] isExecutableFileAtPath:runtime]) {
+          [self problem:@"The selected runtime is not executable."];
+          return;
+        }
+
+        NSSavePanel* destinationChooser = [NSSavePanel savePanel];
+        destinationChooser.title = @"Choose New Onboard Runtime Directory";
+        destinationChooser.message =
+            @"Choose a new directory. Existing destinations are refused by the engine.";
+        destinationChooser.nameFieldStringValue = @"onboard-runtime";
+        destinationChooser.canCreateDirectories = YES;
+        if ([destinationChooser runModal] != NSModalResponseOK)
+          return;
+        NSString* destination = destinationChooser.URL.path;
+
+        NSArray* roles = result[@"artifact_roles"];
+        NSMutableArray* arguments = [NSMutableArray arrayWithObjects:@"onboard",
+                                                                     @"deploy",
+                                                                     manifest,
+                                                                     destination,
+                                                                     @"--runtime",
+                                                                     runtime,
+                                                                     nil];
+        for (id roleValue in roles) {
+          if (![roleValue isKindOfClass:[NSString class]] || [roleValue length] == 0) {
+            [self problem:@"The verified manifest returned an invalid artifact role."];
+            return;
+          }
+          NSString* role = roleValue;
+          NSOpenPanel* artifactChooser = [NSOpenPanel openPanel];
+          artifactChooser.title = [NSString stringWithFormat:@"Choose %@ Artifact", role];
+          artifactChooser.message =
+              @"Choose the exact regular file whose SHA-256 is declared by the manifest.";
+          artifactChooser.canChooseFiles = YES;
+          artifactChooser.canChooseDirectories = NO;
+          artifactChooser.allowsMultipleSelection = NO;
+          if ([artifactChooser runModal] != NSModalResponseOK)
+            return;
+          [arguments addObject:@"--artifact"];
+          [arguments
+              addObject:[NSString stringWithFormat:@"%@=%@", role, artifactChooser.URL.path]];
+        }
+
+        [self command:arguments
+            completion:^(NSDictionary* deployed, NSString* deployError) {
+              if (![deployed[@"schema"] isEqual:@"galata.onboard-deployment.v1"]
+                  || ![deployed[@"status"] isEqual:@"staged"]
+                  || ![deployed[@"contains_executable"] boolValue]) {
+                [self problem:deployError ? deployError
+                                          : @"Engine refused to deploy the onboard runtime."];
+                return;
+              }
+              NSString* details = [NSString
+                  stringWithFormat:
+                      @"Directory: %@\nManifest SHA-256: %@\nRuntime SHA-256: %@\nArtifacts: %@\n\n"
+                      @"The executable POSIX runtime bundle was published atomically and can be "
+                      @"verified or transferred for bench integration. It remains "
+                      @"not_qualified and is not a flight release.",
+                      deployed[@"destination"],
+                      deployed[@"manifest_sha256"],
+                      deployed[@"runtime_sha256"],
+                      deployed[@"artifact_count"]];
+              NSAlert* alert = [[NSAlert alloc] init];
+              alert.messageText = @"Onboard runtime deployed";
+              alert.informativeText = details;
+              alert.alertStyle = NSAlertStyleInformational;
+              [alert addButtonWithTitle:@"OK"];
+              [alert runModal];
+              self.status.stringValue = [NSString
+                  stringWithFormat:@"Onboard runtime deployed · %@", deployed[@"destination"]];
+              [[NSWorkspace sharedWorkspace]
+                  activateFileViewerSelectingURLs:@[[NSURL
+                                                      fileURLWithPath:deployed[@"destination"]]]];
+            }];
+      }];
+}
+
+- (void)createFlightTest:(id)sender {
+  (void)sender;
+  if (self.task)
+    return;
+
+  NSString* aircraftID = [self promptText:@"Aircraft Identifier"
+                                  message:@"Use the controlled airframe identifier from the "
+                                          @"configuration system."
+                              placeholder:@"airframe-01"];
+  if (!aircraftID)
+    return;
+  NSString* configuration = [self promptText:@"Aircraft Configuration"
+                                     message:@"Use the exact configuration/baseline identifier "
+                                             @"for this campaign."
+                                 placeholder:@"configuration-2026-09"];
+  if (!configuration)
+    return;
+  NSString* evidenceClass = [self promptText:@"Evidence Class"
+                                      message:@"Enter measured_flight for controlled aircraft data, "
+                                              @"public_deidentified for public data, or "
+                                              @"synthetic_contract for software-only data."
+                                  placeholder:@"measured_flight"];
+  if (!evidenceClass)
+    return;
+  NSString* testPlan = [self promptText:@"Test Plan Identifier"
+                                message:@"Enter the approved flight-test plan identifier."
+                            placeholder:@"FT-001"];
+  if (!testPlan)
+    return;
+  NSString* reviewer = [self promptText:@"Reviewer Identifier"
+                                message:@"Enter the independent reviewer or organization "
+                                        @"identifier."
+                            placeholder:@"independent-reviewer"];
+  if (!reviewer)
+    return;
+
+  NSAlert* safety = [[NSAlert alloc] init];
+  safety.messageText = @"Confirm safety review";
+  safety.informativeText =
+      @"Continue only if the required safety review for this campaign is complete. "
+      @"Galata records this explicit confirmation in the package manifest.";
+  safety.alertStyle = NSAlertStyleWarning;
+  [safety addButtonWithTitle:@"Safety Review Complete"];
+  [safety addButtonWithTitle:@"Cancel"];
+  if ([safety runModal] != NSAlertFirstButtonReturn)
+    return;
+
+  const NSArray<NSString*>* roles = @[
+    @"test_plan",
+    @"flight_record",
+    @"calibration_manifest",
+    @"configuration_manifest",
+    @"reviewer_attestation"
+  ];
+  NSMutableArray* arguments = [NSMutableArray arrayWithObjects:@"flighttest", @"create", nil];
+  [arguments addObjectsFromArray:@[
+    @"--aircraft-id",
+    aircraftID,
+    @"--configuration",
+    configuration,
+    @"--evidence-class",
+    evidenceClass,
+    @"--test-plan-id",
+    testPlan,
+    @"--reviewer-id",
+    reviewer,
+    @"--safety-review-complete",
+    @"true"
+  ]];
+
+  for (NSString* role in roles) {
+    NSOpenPanel* chooser = [NSOpenPanel openPanel];
+    chooser.title = [NSString stringWithFormat:@"Choose %@ Evidence", role];
+    chooser.message =
+        @"Choose the controlled regular file. The engine will copy it and hash the copied bytes.";
+    chooser.canChooseFiles = YES;
+    chooser.canChooseDirectories = NO;
+    chooser.allowsMultipleSelection = NO;
+    if ([chooser runModal] != NSModalResponseOK)
+      return;
+    [arguments addObject:@"--file"];
+    [arguments addObject:[NSString stringWithFormat:@"%@=%@", role, chooser.URL.path]];
+  }
+
+  NSSavePanel* destinationChooser = [NSSavePanel savePanel];
+  destinationChooser.title = @"Choose New Flight-Test Package Directory";
+  destinationChooser.message =
+      @"Choose a new directory. Existing destinations are refused by the engine.";
+  destinationChooser.nameFieldStringValue = @"flight-test-package";
+  destinationChooser.canCreateDirectories = YES;
+  if ([destinationChooser runModal] != NSModalResponseOK)
+    return;
+  [arguments insertObject:destinationChooser.URL.path atIndex:2];
+
+  [self command:arguments
+      completion:^(NSDictionary* result, NSString* error) {
+        if (![result[@"schema"] isEqual:@"galata.flight-test-evidence-package.v2"]
+            || ![result[@"status"] isEqual:@"staged"]
+            || ![result[@"evidence_references_verified"] boolValue]) {
+          [self problem:error ? error : @"Engine refused to create the flight-test package."];
+          return;
+        }
+        NSString* details = [NSString
+            stringWithFormat:
+                @"Directory: %@\nManifest: %@\nManifest SHA-256: %@\nFiles: %@\n\n"
+                @"The evidence files were copied, hashed and verified atomically. This proves "
+                @"package completeness only; it does not establish flight validity, "
+                @"airworthiness, certification or qualification.",
+                result[@"destination"],
+                result[@"manifest"],
+                result[@"manifest_sha256"],
+                result[@"file_count"]];
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = @"Flight-test package created";
+        alert.informativeText = details;
+        alert.alertStyle = NSAlertStyleInformational;
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        self.status.stringValue =
+            [NSString stringWithFormat:@"Flight-test package created · %@", result[@"destination"]];
+        [[NSWorkspace sharedWorkspace]
+            activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:result[@"destination"]]]];
       }];
 }
 
@@ -3188,7 +4764,11 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
   (void)sender;
-  return [self canReplaceProject] ? NSTerminateNow : NSTerminateCancel;
+  [self persistRecoverySnapshot];
+  if (![self canReplaceProject])
+    return NSTerminateCancel;
+  [self discardRecoverySnapshotForProject:self.project];
+  return NSTerminateNow;
 }
 
 @end

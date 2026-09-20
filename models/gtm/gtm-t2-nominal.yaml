@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NASA Generic Transport Model, T2 nominal derivative slice.
+#
+# This is a first-order slice derived from NASA's public GTM_DesignSim
+# polynomial database. The complete nonlinear database is not copied here;
+# the derivation and the precise source revision are in PROVENANCE.md.
+
+description: >-
+  NASA Generic Transport Model T2 — 5.5% scale generic transport aircraft,
+  alpha = 4 degrees, beta = 0, clean nominal derivative slice
+
+citation: >-
+  NASA Langley Research Center, GTM_DesignSim, LAR-17625-1, public NASA
+  GitHub release; Cunningham, Cox, Murri and Riddick, AIAA-2011-6451.
+  See models/gtm/PROVENANCE.md for the exact revision and derivation.
+
+geometry:
+  # AC_baseparams_T2.m, original units ft^2 / ft / ft.
+  wing_area_m2: 0.548295161472
+  wing_span_m: 2.087514240000
+  mean_aerodynamic_chord_m: 0.278983440000
+
+mass:
+  # AC_baseparams_T2.m, initial gross weight 57.75 lbf and inertia in
+  # slug-ft^2. The quoted I_xz is stored as a positive product; the loader
+  # applies the aerospace off-diagonal sign convention.
+  mass_kg: 26.1949593675
+  inertia_xx_kg_m2: 1.655453714913
+  inertia_yy_kg_m2: 6.311332549483
+  inertia_zz_kg_m2: 7.574954877328
+  product_of_inertia_xz_kg_m2: 0.371494117843
+
+thrust_incidence_rad: 0.0
+
+aero:
+  # The reference is the exact alpha grid point 4 degrees, beta 0. The
+  # database is a coefficient table, not a trim claim.
+  reference_alpha_rad: 0.06981317007977318
+  reference_mach: 0.1134
+
+  # Derived from body-axis [CX, CZ, Cm] after rotating forces to stability
+  # axes at the reference alpha. All derivatives are per radian or per the
+  # ADR-0002 nondimensional rate defined by Galata.
+  lift_ref: 0.375391554095
+  drag_ref: 0.0359494512169
+  pitching_moment_ref: 0.0459604307702
+  lift_alpha: 4.83931406271
+  drag_alpha: 0.391205118205
+  pitching_moment_alpha: -1.63314320749
+  lift_pitch_rate: 24.9651125763
+  pitching_moment_pitch_rate: -41.6279433805
+  pitching_moment_alpha_dot: 0.0
+  lift_elevator: 0.477883832402
+  drag_elevator: 0.0301052441295
+  pitching_moment_elevator: -1.84507735878
+
+  # The GTM database publishes these coefficient increments in body axes.
+  lateral_axes: body
+  side_force_beta: -1.01072249692
+  rolling_moment_beta: -0.141981195641
+  yawing_moment_beta: 0.217580867031
+  rolling_moment_roll_rate: -0.363726825389
+  yawing_moment_roll_rate: -0.0351040560444
+  rolling_moment_yaw_rate: 0.124003056506
+  yawing_moment_yaw_rate: -0.382958012501
+  side_force_aileron: -0.00938108322602
+  rolling_moment_aileron: -0.0389801490659
+  yawing_moment_aileron: -0.000964693886691
+  side_force_rudder: 0.337831228449
+  rolling_moment_rudder: 0.0293854553463
+  yawing_moment_rudder: -0.169351934760

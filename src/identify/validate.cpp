@@ -9,6 +9,7 @@
 #include "galata/numerics/integrator.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -108,6 +109,15 @@ std::string interval_text(const data::Record& record) {
   return out.str();
 }
 
+bool is_sha256(const std::string& value) {
+  if (value.size() != 64) {
+    return false;
+  }
+  return std::all_of(value.begin(), value.end(), [](unsigned char character) {
+    return std::isxdigit(character) != 0;
+  });
+}
+
 }  // namespace
 
 std::string to_string(RecordSeparation separation) {
@@ -124,13 +134,235 @@ std::string to_string(RecordSeparation separation) {
   return "unknown";
 }
 
+std::string to_string(ValidationGateStatus status) {
+  switch (status) {
+    case ValidationGateStatus::Pass:
+      return "pass";
+    case ValidationGateStatus::Fail:
+      return "fail";
+    case ValidationGateStatus::Unresolved:
+      return "unresolved";
+  }
+  return "unresolved";
+}
+
+ValidationGate evaluate_validation_gate(const ValidationResult& result,
+                                        const std::vector<ValidationCriterion>& criteria) {
+  ValidationGate gate;
+  gate.criteria_count = static_cast<int>(criteria.size());
+  if (criteria.empty()) {
+    gate.reasons.push_back("no numerical acceptance criteria were declared");
+    return gate;
+  }
+
+  bool has_failure = false;
+  bool has_unresolved = false;
+  if (result.separation == RecordSeparation::NotHeldOut) {
+    has_failure = true;
+    gate.reasons.push_back(
+        "the estimation and validation records share observations or overlap, so the data is "
+        "not held out");
+  } else if (result.separation != RecordSeparation::VerifiedDisjoint) {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "sample separation is not verified disjoint; caller-declared different flight files "
+        "are not sufficient for an automatic pass");
+  }
+
+  for (const ValidationCriterion& criterion : criteria) {
+    const auto found = std::find_if(
+        result.outputs.begin(), result.outputs.end(), [&](const ValidationOutput& output) {
+          return output.channel == criterion.channel && output.state_name == criterion.state_name;
+        });
+    if (found == result.outputs.end()) {
+      has_unresolved = true;
+      gate.reasons.push_back("no validation output matched channel '" + criterion.channel
+                             + "' and state '" + criterion.state_name + "'");
+      continue;
+    }
+
+    bool criterion_passed = true;
+    if (criterion.max_rmse_is_defined) {
+      if (!std::isfinite(criterion.max_rmse) || criterion.max_rmse < 0.0
+          || !std::isfinite(found->rmse)) {
+        has_unresolved = true;
+        criterion_passed = false;
+        gate.reasons.push_back("RMSE budget for '" + criterion.channel
+                               + "' is not finite and usable");
+      } else if (found->rmse > criterion.max_rmse) {
+        has_failure = true;
+        criterion_passed = false;
+        gate.reasons.push_back("RMSE for '" + criterion.channel + "' exceeds its declared budget");
+      }
+    }
+    if (criterion.max_absolute_error_is_defined) {
+      if (!std::isfinite(criterion.max_absolute_error) || criterion.max_absolute_error < 0.0
+          || !std::isfinite(found->max_absolute_error)) {
+        has_unresolved = true;
+        criterion_passed = false;
+        gate.reasons.push_back("maximum-error budget for '" + criterion.channel
+                               + "' is not finite and usable");
+      } else if (found->max_absolute_error > criterion.max_absolute_error) {
+        has_failure = true;
+        criterion_passed = false;
+        gate.reasons.push_back("maximum absolute error for '" + criterion.channel
+                               + "' exceeds its declared budget");
+      }
+    }
+    if (criterion.minimum_fit_fraction_is_defined) {
+      if (!std::isfinite(criterion.minimum_fit_fraction) || !found->fit_fraction_is_defined
+          || !std::isfinite(found->fit_fraction)) {
+        has_unresolved = true;
+        criterion_passed = false;
+        gate.reasons.push_back("fit-fraction budget for '" + criterion.channel
+                               + "' is undefined or not finite");
+      } else if (found->fit_fraction < criterion.minimum_fit_fraction) {
+        has_failure = true;
+        criterion_passed = false;
+        gate.reasons.push_back("fit fraction for '" + criterion.channel
+                               + "' is below its declared minimum");
+      }
+    }
+    if (criterion_passed) {
+      ++gate.passed_count;
+    }
+  }
+
+  if (has_failure) {
+    gate.status = ValidationGateStatus::Fail;
+  } else if (has_unresolved) {
+    gate.status = ValidationGateStatus::Unresolved;
+  } else {
+    gate.status = ValidationGateStatus::Pass;
+    gate.reasons.push_back(
+        "all declared numerical budgets passed on verified disjoint sample windows; this is "
+        "not airworthiness, certification or tool qualification evidence");
+  }
+  return gate;
+}
+
+FlightTestGate evaluate_flight_test_gate(const ValidationResult& result,
+                                         const std::vector<ValidationCriterion>& criteria,
+                                         const FlightTestEvidence& evidence) {
+  FlightTestGate gate;
+  gate.numerical_gate = evaluate_validation_gate(result, criteria);
+  if (evidence.campaign_package_verified) {
+    gate.campaign_manifest_sha256 = evidence.campaign_manifest_sha256;
+  }
+  gate.reasons = gate.numerical_gate.reasons;
+
+  if (gate.numerical_gate.status == ValidationGateStatus::Fail) {
+    gate.status = ValidationGateStatus::Fail;
+    gate.reasons.push_back(
+        "the flight-test evidence gate cannot pass because the numerical acceptance gate failed");
+    return gate;
+  }
+  if (gate.numerical_gate.status == ValidationGateStatus::Unresolved) {
+    gate.status = ValidationGateStatus::Unresolved;
+    gate.reasons.push_back(
+        "the flight-test evidence gate is not evaluated as complete while the numerical gate is "
+        "unresolved");
+    return gate;
+  }
+
+  bool has_failure = false;
+  bool has_unresolved = false;
+  const auto require_text = [&](const std::string& value, const char* name) {
+    if (value.empty()) {
+      has_unresolved = true;
+      gate.reasons.push_back(std::string("flight-test evidence is missing ") + name);
+    }
+  };
+  const auto require_sha256 = [&](const std::string& value, const char* name) {
+    if (value.empty()) {
+      has_unresolved = true;
+      gate.reasons.push_back(std::string("flight-test evidence is missing ") + name);
+    } else if (!is_sha256(value)) {
+      has_failure = true;
+      gate.reasons.push_back(std::string("flight-test evidence ") + name
+                             + " is not a 64-character hexadecimal SHA-256 digest");
+    }
+  };
+
+  if (evidence.evidence_class.empty()) {
+    has_unresolved = true;
+    gate.reasons.push_back("flight-test evidence is missing evidence_class");
+  } else if (evidence.evidence_class != "measured_flight"
+             && evidence.evidence_class != "public_deidentified"
+             && evidence.evidence_class != "synthetic_contract") {
+    has_failure = true;
+    gate.reasons.push_back(
+        "flight-test evidence evidence_class is unsupported; expected measured_flight, "
+        "public_deidentified or synthetic_contract");
+  } else if (evidence.evidence_class != "measured_flight") {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "flight-test evidence is " + evidence.evidence_class
+        + "; only measured_flight provenance can satisfy the flight-test evidence gate");
+  }
+
+  require_text(evidence.aircraft_id, "aircraft_id");
+  require_text(evidence.aircraft_configuration, "aircraft_configuration");
+  require_text(evidence.test_plan_id, "test_plan_id");
+  require_sha256(evidence.calibration_manifest_sha256, "calibration_manifest_sha256");
+  require_sha256(evidence.configuration_manifest_sha256, "configuration_manifest_sha256");
+  require_text(evidence.reviewer_id, "reviewer_id");
+  require_sha256(evidence.reviewer_attestation_sha256, "reviewer_attestation_sha256");
+  if (evidence.campaign_package_verified) {
+    require_sha256(evidence.campaign_manifest_sha256, "campaign_manifest_sha256");
+    gate.reasons.push_back(
+        "the flight-test campaign package was verified and its flight-record bytes are bound to "
+        "the validation record");
+  } else {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "the flight-test evidence package was not verified; manual references cannot satisfy "
+        "the production campaign gate");
+  }
+  if (!evidence.safety_review_complete) {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "flight-test evidence does not attest that the required safety review is complete");
+  }
+
+  require_sha256(result.estimation_record_sha256, "the estimation record sha256");
+  require_sha256(result.validation_record_sha256, "the validation record sha256");
+  if (!result.estimation_lineage_is_known || result.estimation_lineage.source_sha256.empty()
+      || result.estimation_lineage.sample_count <= 0) {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "the estimation record lineage is not complete; the campaign must retain the supplied "
+        "training record identity and sample count");
+  }
+  if (result.validation_lineage.source_sha256.empty() || result.validation_lineage.sample_count <= 0
+      || result.sample_count <= 0) {
+    has_unresolved = true;
+    gate.reasons.push_back(
+        "the validation record lineage is not complete; the campaign must retain its source "
+        "identity and a positive sample count");
+  }
+
+  if (has_failure) {
+    gate.status = ValidationGateStatus::Fail;
+  } else if (has_unresolved) {
+    gate.status = ValidationGateStatus::Unresolved;
+  } else {
+    gate.status = ValidationGateStatus::Pass;
+    gate.reasons.push_back(
+        "numerical budgets passed and a verified measured_flight evidence package is complete; "
+        "this is not airworthiness, certification or tool-qualification evidence");
+  }
+  return gate;
+}
+
 namespace {
 
 // THE CLASSIFICATION. Ordered so that a proof of overlap always beats a claim
 // of independence: every branch that can establish NotHeldOut is taken before
 // any branch that can grant it.
+template <typename Request>
 void classify_separation(const data::Record& record,
-                         const ValidationRequest& request,
+                         const Request& request,
                          ValidationResult& result) {
   const std::string& estimation_digest = result.estimation_record_sha256;
 
@@ -428,6 +660,183 @@ ValidationResult validate_model(const model::Quadrotor& model,
       out.autocorrelation_is_defined = true;
     }
     result.outputs.push_back(std::move(out));
+  }
+  return result;
+}
+
+ValidationResult validate_vehicle_model(const model::VehicleModel& model,
+                                        const data::Record& record,
+                                        const VehicleValidationRequest& request) {
+  constexpr const char* kCapability = "identify.validate.vehicle";
+  if (request.estimation_record_sha256.empty() && request.estimation_record == nullptr) {
+    throw std::invalid_argument(
+        std::string(kCapability) + ": the estimation record's identity is required — either the "
+        "record itself, or its digest. A caller who cannot say which record trained the model "
+        "cannot claim anything was held out from it");
+  }
+  if (request.estimation_record != nullptr && !request.estimation_record_sha256.empty()
+      && request.estimation_record->source_sha256 != request.estimation_record_sha256) {
+    throw std::invalid_argument(
+        std::string(kCapability) + ": the declared estimation digest does not match the supplied "
+        "estimation record; refusing to choose which one was the training data");
+  }
+  if (request.outputs.empty()) {
+    throw std::invalid_argument(std::string(kCapability)
+                                + ": at least one output must be declared");
+  }
+  if (!(request.step_s > 0.0) || !std::isfinite(request.step_s)) {
+    throw std::invalid_argument(std::string(kCapability) + ": step_s must be positive and finite");
+  }
+  request.environment.validate();
+  model.validate_vocabulary();
+  if (static_cast<int>(request.command_channels.size()) != model.control_count()) {
+    throw std::invalid_argument(
+        std::string(kCapability)
+        + ": one command channel per model control is required, in model order");
+  }
+  if (request.initial_extended_state.size() != model.extended_state_size()) {
+    throw std::invalid_argument(std::string(kCapability)
+                                + ": the declared initial state does not match the model's width");
+  }
+  const int samples = static_cast<int>(record.times_s.size());
+  if (samples < 2) {
+    throw std::invalid_argument(std::string(kCapability) + ": the record has too few samples");
+  }
+
+  std::vector<const std::vector<double>*> commands;
+  commands.reserve(request.command_channels.size());
+  for (const std::string& name : request.command_channels) {
+    commands.push_back(&channel_of(record, name));
+  }
+  const std::vector<std::string> state_names = model.state_names();
+  std::vector<const std::vector<double>*> measured;
+  std::vector<int> state_index;
+  measured.reserve(request.outputs.size());
+  state_index.reserve(request.outputs.size());
+  for (const auto& match : request.outputs) {
+    measured.push_back(&channel_of(record, match.channel));
+    const auto found = std::find(state_names.begin(), state_names.end(), match.state_name);
+    if (found == state_names.end()) {
+      throw std::invalid_argument(std::string(kCapability) + ": '" + match.state_name
+                                  + "' is not a state of this model");
+    }
+    state_index.push_back(static_cast<int>(found - state_names.begin()));
+  }
+
+  std::vector<std::vector<double>> predicted(request.outputs.size());
+  Eigen::VectorXd state = request.initial_extended_state;
+  Eigen::VectorXd command = Eigen::VectorXd::Zero(model.control_count());
+  for (int k = 0; k < samples; ++k) {
+    for (std::size_t output = 0; output < request.outputs.size(); ++output) {
+      predicted[output].push_back(state(state_index[output]));
+    }
+    if (k + 1 < samples) {
+      for (int control = 0; control < model.control_count(); ++control) {
+        const auto& values = *commands[static_cast<std::size_t>(control)];
+        if (values.size() != record.times_s.size()) {
+          throw std::invalid_argument(std::string(kCapability) + ": command channel '"
+                                      + request.command_channels[static_cast<std::size_t>(control)]
+                                      + "' has a different length from the record's timebase");
+        }
+        command(control) = values[static_cast<std::size_t>(k)];
+      }
+      const double span = record.times_s[static_cast<std::size_t>(k) + 1]
+                          - record.times_s[static_cast<std::size_t>(k)];
+      const auto steps = std::max(1, static_cast<int>(std::llround(span / request.step_s)));
+      const double represented = static_cast<double>(steps) * request.step_s;
+      const double timing_error = std::fabs(represented - span);
+      const double timing_tolerance = 1.0e-9 * std::max(1.0, std::fabs(span));
+      if (timing_error > timing_tolerance) {
+        std::ostringstream message;
+        message << kCapability << ": record interval " << span
+                << " s is not an integer multiple of step_s " << request.step_s
+                << " s; refusing to silently move the prediction onto another time lattice";
+        throw std::invalid_argument(message.str());
+      }
+      const numerics::DerivativeFunction derivative = [&](double, const Eigen::VectorXd& x) {
+        return model.derivative(x, command, request.environment);
+      };
+      state =
+          numerics::integrate_fixed_step(
+              derivative, state, 0.0, request.step_s, steps, steps, &model::VehicleModel::project)
+              .states.back();
+    }
+  }
+
+  ValidationResult result;
+  result.sample_count = samples;
+  result.estimation_record_sha256 = request.estimation_record != nullptr
+                                        ? request.estimation_record->source_sha256
+                                        : request.estimation_record_sha256;
+  result.validation_record_sha256 = record.source_sha256;
+  result.validation_lineage = lineage_of(record);
+  classify_separation(record, request, result);
+  result.assumptions =
+      "the vehicle model is simulated with the caller-declared constant environment and "
+      "zero-order-held command channels; record intervals must lie on the declared fixed-step "
+      "lattice; the separation label bounds what the fit could have seen and is not a claim of "
+      "statistical independence; this result is numerical model comparison, not flight-test "
+      "approval, airworthiness evidence or tool qualification";
+
+  for (std::size_t output = 0; output < request.outputs.size(); ++output) {
+    ValidationOutput scored;
+    scored.channel = request.outputs[output].channel;
+    scored.state_name = request.outputs[output].state_name;
+    const std::vector<double>& observed = *measured[output];
+    if (static_cast<int>(observed.size()) != samples) {
+      throw std::invalid_argument(std::string(kCapability) + ": channel '" + scored.channel
+                                  + "' has a different length from the record's timebase");
+    }
+    double sum_squared = 0.0;
+    double sum_error = 0.0;
+    double observed_mean = 0.0;
+    for (const double value : observed) {
+      observed_mean += value;
+    }
+    observed_mean /= static_cast<double>(samples);
+
+    std::vector<double> residual(static_cast<std::size_t>(samples));
+    double observed_variation = 0.0;
+    for (int k = 0; k < samples; ++k) {
+      const double error =
+          predicted[output][static_cast<std::size_t>(k)] - observed[static_cast<std::size_t>(k)];
+      residual[static_cast<std::size_t>(k)] = error;
+      sum_squared += error * error;
+      sum_error += error;
+      scored.max_absolute_error = std::fmax(scored.max_absolute_error, std::fabs(error));
+      const double spread = observed[static_cast<std::size_t>(k)] - observed_mean;
+      observed_variation += spread * spread;
+    }
+    scored.rmse = std::sqrt(sum_squared / static_cast<double>(samples));
+    scored.mean_error = sum_error / static_cast<double>(samples);
+    if (observed_variation > 0.0) {
+      scored.fit_fraction = 1.0 - std::sqrt(sum_squared) / std::sqrt(observed_variation);
+      scored.fit_fraction_is_defined = true;
+    } else {
+      scored.undefined_reason =
+          "the observed channel does not vary, so there is no variation for a prediction to "
+          "explain and no fit fraction to report";
+    }
+
+    double residual_mean = 0.0;
+    for (const double value : residual) {
+      residual_mean += value;
+    }
+    residual_mean /= static_cast<double>(samples);
+    double numerator = 0.0;
+    double denominator = 0.0;
+    for (int k = 0; k < samples; ++k) {
+      const double centred = residual[static_cast<std::size_t>(k)] - residual_mean;
+      denominator += centred * centred;
+      if (k + 1 < samples) {
+        numerator += centred * (residual[static_cast<std::size_t>(k) + 1] - residual_mean);
+      }
+    }
+    if (denominator > 0.0) {
+      scored.residual_lag_one_autocorrelation = numerator / denominator;
+      scored.autocorrelation_is_defined = true;
+    }
+    result.outputs.push_back(std::move(scored));
   }
   return result;
 }

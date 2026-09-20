@@ -105,6 +105,50 @@ continues with its submitted revision. A later restore can select any compatible
 retained draft again. The history view validates each entry's own content and
 origin; restore additionally checks its compatibility with the current project.
 
+### Export and verify a review package
+
+Export a locked, self-contained copy of a project for another reviewer or
+installation:
+
+```text
+galata project export <project-directory> <new-review-directory>
+galata project verify <review-directory>
+```
+
+Export refuses an existing destination, a destination inside the project, a
+running worker, symlinks and files beyond the bounded package budget. It first
+captures every regular project file except cooperating lock files, copies the
+bytes into a temporary sibling directory, writes `REVIEW.md` and
+`review.json`, verifies the complete inventory, then publishes the destination
+with an atomic directory rename. A source mutation during the copy refuses the
+operation and removes the unpublished temporary directory.
+
+The package manifest has schema `galata.project-review.v1`. Its file inventory
+contains relative paths, byte counts and SHA-256 digests for the project head,
+all retained revisions, original imported-source attachments, retained runs and
+the review instructions. `review.json` is deliberately described separately so
+its digest can bind the manifest itself. `galata project verify` checks the
+manifest, every listed byte and the complete on-disk inventory, then re-runs the
+project's own head/history/run validation. It returns
+`galata.project-review-verification.v1` with status `verified`, but this proves
+content identity and reproducibility only; it is not authorship, numerical
+accuracy, flight-test, airworthiness, certification or qualification evidence.
+
+## Qualification evidence dossier
+
+The shared CLI can verify an application-specific evidence dossier after a
+review programme has assembled it:
+
+```text
+galata qualification verify <dossier.manifest>
+```
+
+The dossier contract and required roles are documented in
+[QUALIFICATION_EVIDENCE.md](QUALIFICATION_EVIDENCE.md). Verification proves
+that the complete set of declared files is present and byte-consistent. The
+result is deliberately `not_qualified`; it does not turn a manifest into an
+authority decision or an airworthiness claim.
+
 ## Draft versus executable model
 
 A save input is a closed JSON object with these required fields:
@@ -318,10 +362,14 @@ value and 10^12 seconds. Step count is at most 1,000,000 and sample stride is
 in [1, 1,000,000]. The runtime additionally checks representable time arithmetic
 and execution/storage budgets. Artifact review reads at most 128 MiB per file.
 
-This preview has no automatic migration, autosave, checkpoint resume, compiled
-cache, shared-drive editing or long-term compatibility guarantee. OS locks and
-atomic publication are a local process-recovery contract, not proof of every
-filesystem's power-loss durability. The worker is a separate process without
+This preview has no automatic migration, checkpoint resume, compiled cache,
+shared-drive editing or long-term compatibility guarantee. The native desktop
+keeps one bounded, user-local recovery snapshot for an unsaved draft, keyed by
+project path and saved revision; it is offered only when that revision still
+matches and is never merged over a newer saved head. Recovery is not a saved
+project revision and does not provide power-loss durability. OS locks and atomic
+publication are a local process-recovery contract, not proof of every filesystem's
+power-loss durability. The worker is a separate process without
 an operating-system sandbox or accepted hard wall-time/resource budget.
 The linear adapter reconstructs a local perturbation plant/controller graph;
 it adds no nonlinear aircraft block, sampled/hybrid behavior or validity

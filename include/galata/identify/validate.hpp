@@ -57,6 +57,7 @@
 #pragma once
 
 #include "galata/model/quadrotor.hpp"
+#include "galata/model/vehicle.hpp"
 
 #include <Eigen/Core>
 
@@ -171,6 +172,90 @@ struct ValidationResult {
   std::string assumptions;
 };
 
+enum class ValidationGateStatus {
+  Pass,
+  Fail,
+  Unresolved,
+};
+
+// A predeclared numerical acceptance budget for one measured output. The
+// fields are optional so a study can gate on only the quantities justified by
+// its measurement plan; an omitted budget is never silently invented.
+struct ValidationCriterion {
+  std::string channel;
+  std::string state_name;
+  bool max_rmse_is_defined = false;
+  double max_rmse = 0.0;
+  bool max_absolute_error_is_defined = false;
+  double max_absolute_error = 0.0;
+  bool minimum_fit_fraction_is_defined = false;
+  double minimum_fit_fraction = 0.0;
+};
+
+// The gate is deliberately stricter than a numerical comparison. It can pass
+// only when every declared criterion is met AND the code proved that the
+// estimation and validation samples are disjoint windows of one imported
+// record. Different flight files remain caller-declared/unresolved here: a
+// digest or a filename cannot prove that they contain different observations.
+struct ValidationGate {
+  ValidationGateStatus status = ValidationGateStatus::Unresolved;
+  int criteria_count = 0;
+  int passed_count = 0;
+  std::vector<std::string> reasons;
+};
+
+[[nodiscard]] std::string to_string(ValidationGateStatus status);
+
+[[nodiscard]] ValidationGate evaluate_validation_gate(
+    const ValidationResult& result,
+    const std::vector<ValidationCriterion>& criteria);
+
+// Evidence references supplied by the flight-test campaign owner. The hashes
+// identify the controlled records; they do not make the records trustworthy by
+// themselves, and this structure does not assert that any authority accepted
+// them. Empty fields deliberately leave the campaign gate unresolved.
+struct FlightTestEvidence {
+  // The provenance class is a required declaration for a package-backed
+  // campaign. Only measured_flight is eligible for the flight-test evidence
+  // gate; public_deidentified and synthetic_contract are useful engineering
+  // inputs but must never be mistaken for aircraft flight evidence.
+  std::string evidence_class;
+  std::string aircraft_id;
+  std::string aircraft_configuration;
+  std::string test_plan_id;
+  std::string calibration_manifest_sha256;
+  std::string configuration_manifest_sha256;
+  std::string reviewer_id;
+  std::string reviewer_attestation_sha256;
+  // When a pipeline supplied a verified flight-test package, retain the
+  // package manifest identity beside the derived evidence references. A
+  // package hash is a traceability identity, not an approval decision.
+  std::string campaign_manifest_sha256;
+  bool campaign_package_verified = false;
+  bool safety_review_complete = false;
+};
+
+// A campaign-completeness gate layered on top of the numerical gate. Passing
+// means that a verified package declares measured_flight provenance, the
+// numerical budgets passed and the package supplies references for aircraft
+// identity, configuration, test plan, calibration, configuration control,
+// safety review and independent review. Public or synthetic records remain
+// unresolved even when their bytes and numerical budgets are valid. It is
+// still not airworthiness, certification, or tool-qualification evidence:
+// those require external procedures, authorities and evidence this library
+// cannot create or inspect.
+struct FlightTestGate {
+  ValidationGateStatus status = ValidationGateStatus::Unresolved;
+  ValidationGate numerical_gate;
+  std::string campaign_manifest_sha256;
+  std::vector<std::string> reasons;
+};
+
+[[nodiscard]] FlightTestGate evaluate_flight_test_gate(
+    const ValidationResult& result,
+    const std::vector<ValidationCriterion>& criteria,
+    const FlightTestEvidence& evidence);
+
 struct ValidationRequest {
   // The digest of the record the model was FITTED to. Required unless
   // `estimation_record` is supplied, in which case it is read from that record
@@ -205,8 +290,37 @@ struct ValidationRequest {
   double step_s = 0.0;
 };
 
+// The vehicle-neutral form of held-out validation.  The original
+// `ValidationRequest` is retained for the established multirotor fitting path;
+// this request is the flight-test path and accepts every built-in VehicleModel
+// adapter (fixed-wing, multirotor and helicopter).
+struct VehicleValidationRequest {
+  std::string estimation_record_sha256;
+  const data::Record* estimation_record = nullptr;
+  bool caller_declares_different_data = false;
+
+  struct Match {
+    std::string channel;
+    std::string state_name;
+  };
+
+  std::vector<std::string> command_channels;
+  std::vector<Match> outputs;
+  Eigen::VectorXd initial_extended_state;
+  double step_s = 0.0;
+  model::Environment environment = model::Environment::sea_level_still_air();
+};
+
 [[nodiscard]] ValidationResult validate_model(const model::Quadrotor& model,
                                               const data::Record& record,
                                               const ValidationRequest& request);
+
+// Run a built-in vehicle model against a measured record.  The result reports
+// numerical prediction error, but never turns that error into an aircraft
+// validity or certification claim.  The caller must provide the environment,
+// command mapping, initial state, and the record identity used for estimation.
+[[nodiscard]] ValidationResult validate_vehicle_model(const model::VehicleModel& model,
+                                                      const data::Record& record,
+                                                      const VehicleValidationRequest& request);
 
 }  // namespace galata::identify

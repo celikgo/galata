@@ -1236,6 +1236,7 @@ Registry build_registry() {
   register_data_capabilities(registry);
   register_design_capabilities(registry);
   register_identify_capabilities(registry);
+  register_onboard_capabilities(registry);
   register_model_capabilities(registry);
   register_quadrotor_capabilities(registry);
   register_helicopter_capabilities(registry);

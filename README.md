@@ -120,6 +120,29 @@ Every number and every mark on it comes from a run: `tools/report/` emits the ru
 against the code and the page byte for byte against the record. The page names the routine that
 produced each figure.
 
+The same fixed-wing workflow also carries published derivative sets for the
+nominal Navion condition, the clean flexible-airplane A-7A condition 1, the
+A-4D condition 1 and the F-4C power-approach condition from NASA CR-96008
+and NASA CR-2144. Run
+[`examples/navion-trim-and-modes/study.yaml`](examples/navion-trim-and-modes/study.yaml)
+to exercise its trim, linearisation and modal classification; the comparison is
+bounded to that one source condition and is not a global aircraft model. The
+A-7A source transcription and its validation limits are recorded in
+[`models/a7a/PROVENANCE.md`](models/a7a/PROVENANCE.md); its matching workflow is
+[`examples/a7a-trim-and-modes/study.yaml`](examples/a7a-trim-and-modes/study.yaml).
+The A-4D source transcription and its validation limits are recorded in
+[`models/a4d/PROVENANCE.md`](models/a4d/PROVENANCE.md); its matching workflow is
+[`examples/a4d-trim-and-modes/study.yaml`](examples/a4d-trim-and-modes/study.yaml).
+The F-4C source transcription and its validation limits are recorded in
+[`models/f4c/PROVENANCE.md`](models/f4c/PROVENANCE.md); its matching workflow is
+[`examples/f4c-power-approach/study.yaml`](examples/f4c-power-approach/study.yaml).
+The NASA Generic Transport Model T2 derivative slice is recorded in
+[`models/gtm/PROVENANCE.md`](models/gtm/PROVENANCE.md); its matching workflow is
+[`examples/gtm-trim-and-modes/study.yaml`](examples/gtm-trim-and-modes/study.yaml).
+The NASA simupy-flight F-16 derivative slice is recorded in
+[`models/f16/PROVENANCE.md`](models/f16/PROVENANCE.md); its matching workflow is
+[`examples/f16-trim-and-modes/study.yaml`](examples/f16-trim-and-modes/study.yaml).
+
 ### What does NOT reproduce
 
 One published quantity does not, and it stays published rather than being
@@ -151,16 +174,20 @@ complete the broader desktop, hardware or v1.0 plans in the
 | CLI, strict YAML inputs, contained report outputs and input-snapshot manifests | implemented; integration-tested |
 | Installable C++20 libraries and CMake package | implemented; installed-consumer check |
 | Frames, ISA atmosphere, fixed-step RK4 and general-inertia rigid-body dynamics | implemented; see the V&V report for evidence and scope |
-| Local derivative aircraft, straight-line trim, finite-difference linearisation and mode classification | implemented; published NT-33A flight-condition comparison |
+| Local derivative aircraft, straight-line trim, finite-difference linearisation and mode classification | implemented; published/source-derived NT-33A, Navion, A-7A, A-4D, F-4C, NASA GTM T2 and NASA F-16 nominal-condition comparisons |
 | Frequency response and sampled margins, sensitivity and principal gains | implemented; reference comparisons retain their frequency-search limitations |
 | CARE, continuous LQR, explicit-gain filtered PID and linear interconnections | implemented; solver evidence and controller assumptions reported separately |
 | Hamiltonian H-infinity, S/T norm and SISO disk-size brackets | implemented; analytic checks, numerical reliability limits, no interval proof |
 | Linear and local nonlinear simulation, with four bounded first-order actuators | implemented; analytic and convergence tests, no flight-test validation |
 | Markdown and self-contained HTML tables, trajectory CSV and run provenance | implemented; integration-tested |
 | Continuous scalar/linear project drafts, retained revision review/restore and isolated CLI jobs | experimental M2 preview; local verification record in the implementation guide |
-| Native macOS block editor, block/sample tables, trajectory plot and evidence viewer | optional Dim-themed feasibility preview; full desktop and installation acceptance pending |
+| Native macOS block editor, block/sample tables, trajectory plot, evidence viewer, arbitrary study runner and evidence-package workflows | local Dim-themed candidate; verified candidate carries all shipped examples/models; Developer ID signing, notarization, accessibility and clean-machine acceptance pending |
 | Typed linear-system/LQR graph adapter and NT-33A study import | experimental; retains original diagnostics, no new aircraft validation |
-| Plugin ABI, hardware interfaces and onboard deployment | not implemented |
+| Vehicle-neutral held-out flight-test comparison | implemented, with numerical and campaign-evidence gates; the [synthetic fixed-wing contract](examples/fixed-wing-validation-contract/README.md) and [NASA DASHlink public-data import reference](examples/nasa-dashlink-flight-data-reference/README.md) exercise the software path, while [the validation workflow](docs/FLIGHT_TEST_VALIDATION.md) defines the external evidence still required |
+| Hardware transport contract, versioned frame codec, replay, POSIX serial/UDP and Linux SocketCAN CAN-FD transports, guarded arming gate, fail-closed runtime supervisor and reviewed transport-profile contract | implemented, unvalidated; live target bus/flight-controller evidence remains open |
+| Onboard handoff and runtime boundary | deterministic target-bound manifest, atomic POSIX runtime deployment, versioned controller ABI, serial/UDP/CAN-FD runner, software watchdog and byte-verified target-evidence package; target approval remains external |
+| Qualification evidence boundary | nine-role hash-checked dossier, deployment-bound flight/target evidence chain with complete staged runtime and executable-hash binding, creator/verifier shared by CLI and desktop; remains `not_qualified` until external authority acceptance |
+| Plugin ABI | not implemented |
 
 The table above is maintained by hand and checked in review. The capability
 table below is not: it is generated from the registry the CLI dispatches
@@ -189,8 +216,10 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `identify.greybox` | Fit a declared subset of a multirotor's parameters to a measured record by simulating the nonlinear plant, refusing a parameter the data does not constrain | `quadrotor` | implemented, unvalidated |
 | `identify.static_fit` | Fit a response that is linear in declared terms — a bench map — reporting the range it was measured over and an uncertainty only where the data supports one | `static_fit` | implemented, unvalidated |
 | `identify.validate` | Run an identified model on another record and report per-output error, fit fraction and residual structure, with separation from the training data classified on stated grounds rather than inferred from a digest | `validation` | implemented, unvalidated |
+| `identify.validate.vehicle` | Run a built-in fixed-wing, multirotor or helicopter model against a measured record with explicit state, environment, timing and held-out-data declarations; report numerical prediction error without making an airworthiness claim | `validation` | implemented, unvalidated |
 | `linearize.extended` | Linearise a multirotor about a hover trim on a local attitude-error chart, with named wind disturbance columns and a declared observation model | `linear_system` | implemented, unvalidated |
 | `linearize.finitediff` | Linearise about a trim point by central differences, with a Richardson truncation-error estimate per entry | `linear_system` | implemented and validated |
+| `linearize.shared` | Linearise any built-in vehicle adapter through the common named VehicleModel service | `linear_system` | implemented, unvalidated |
 | `linearize.vehicle` | Linearise any vehicle model about a declared trim by central differences in Euler coordinates, refusing a point whose dynamic residual exceeds its budget and naming any control that was at a stop | `linear_system` | implemented, unvalidated |
 | `model.aircraft.derivatives` | Load a nonlinear aircraft model built from a non-dimensional derivative set | `aircraft` | implemented and validated |
 | `model.channels` | Select named inputs and outputs while retaining all internal states | `linear_system` | implemented, unvalidated |
@@ -205,6 +234,8 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `model.quadrotor` | Load a nonlinear multirotor plant — rotors with first-order speed lag, per-axis drag and an optional battery | `quadrotor` | implemented, unvalidated |
 | `model.quadrotor.export` | Write a multirotor as the YAML model.quadrotor reads, with a required record of where its numbers came from — which parameters were fitted, from what, and which were carried over untouched | `quadrotor` | implemented, unvalidated |
 | `model.series` | Cascade two state-space systems in declared channel order | `linear_system` | implemented, unvalidated |
+| `model.vehicle` | Load a fixed-wing, multirotor or helicopter through the shared VehicleModel seam | `vehicle_model` | implemented, unvalidated |
+| `onboard.manifest` | Write a deterministic target-neutral onboard interface manifest and checksum | `onboard_manifest` | implemented, unvalidated |
 | `report.control_law_json` | Write a versioned machine-readable supported controller artifact and Riccati diagnostics | `report` | implemented, unvalidated |
 | `report.csv` | Export a computed linear or nonlinear time history with named columns | `report` | implemented, unvalidated |
 | `report.helicopter_csv` | Export a helicopter trajectory as CSV with every state and output named, carrying the run's termination reason so a refused run cannot be read as a completed one | `report` | implemented, unvalidated |
@@ -215,6 +246,10 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `report.linear_system_json` | Write a versioned machine-readable linear system with named matrices and diagnostics inputs | `report` | implemented, unvalidated |
 | `report.markdown` | Write a Markdown report from upstream results | `report` | implemented, unvalidated |
 | `report.record` | Write an imported record as CSV, with each channel's unit, frame and applied conversion in a required evidence file beside it | `report` | implemented, unvalidated |
+| `report.vehicle_csv` | Write a shared trajectory with named state, control and output channels | `report` | implemented, unvalidated |
+| `report.vehicle_response_json` | Write structured open/closed response metrics on a shared vehicle trajectory | `report` | implemented, unvalidated |
+| `report.vehicle_schema_json` | Write versioned shared model metadata, units, frames, bounds and supported operations | `report` | implemented, unvalidated |
+| `report.vehicle_trim_json` | Write a structured shared trim result with state, controls and residual diagnostics | `report` | implemented, unvalidated |
 | `sim.helicopter` | Integrate the nonlinear helicopter from a trim under a declared control step, with a declared integration method and per-state magnitude bounds that refuse a divergence instead of reporting it as a completed run | `helicopter_trajectory` | implemented, unvalidated |
 | `sim.helicopter.closed_loop` | Execute a nonlinear helicopter VehicleModel with deterministic sampled measurements, controller updates, zero-order hold, whole-period delay, actuator saturation and scheduled failures | `helicopter_trajectory` | implemented, unvalidated |
 | `sim.linear` | Integrate a continuous linear model with fixed-step RK4 under a constant input or a declared input history with a stated hold and extrapolation | `linear_trajectory` | implemented, unvalidated |
@@ -222,6 +257,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `sim.nonlinear` | Simulate a local aircraft model with bounded actuators and optional full-state feedback | `nonlinear_trajectory` | implemented, unvalidated |
 | `sim.plant` | Integrate a nonlinear plant model with fixed-step RK4 from a declared state or a trim, carrying its appended rotor and battery states | `plant_trajectory` | implemented, unvalidated |
 | `sim.sampled` | Execute a state-feedback law against the nonlinear plant — a continuous design at a declared rate, or a discrete design only at its own period — with zero-order hold, whole-period delay and per-rotor saturation | `sampled_trajectory` | implemented, unvalidated |
+| `sim.vehicle` | Execute fixed-step RK4, projection, envelope and named outputs through the shared vehicle service | `vehicle_trajectory` | implemented, unvalidated |
 | `study.helicopter_ensemble` | Execute independent helicopter parameter members with seeded disturbances, per-member manifests, deterministic declaration order and optional parallel execution | `helicopter_ensemble` | implemented, unvalidated |
 | `synth.care` | Solve a continuous-time algebraic Riccati equation with residual and stability checks | `care_solution` | implemented and validated |
 | `synth.dare` | Solve a discrete-time algebraic Riccati equation, cross term included, refusing a residual over budget or a closed loop not strictly inside the unit circle | `dare_solution` | implemented, unvalidated |
@@ -231,6 +267,7 @@ disagrees. Run `galata capabilities` to get the same list from your own build.
 | `trim.helicopter` | Solve helicopter equilibrium for attitude, collective, both cyclics and pedal — and for the rotor inflow states, which have their own equilibrium — reporting the Jacobian's rank and condition number | `helicopter_trim` | implemented, unvalidated |
 | `trim.hover` | Solve multirotor equilibrium — still-air hover, hover in a crosswind, or cruise as a relative equilibrium — for attitude and rotor speeds, reporting each rotor's margin | `hover_trim` | implemented, unvalidated |
 | `trim.level` | Solve straight-line trim — wings level, no sideslip — for angle of attack, elevator and thrust, by Newton on a square residual | `trim_point` | implemented and validated |
+| `trim.vehicle` | Execute the declared family-specific trim problem and return a shared operating point | `vehicle_trim` | implemented, unvalidated |
 <!-- END GENERATED CAPABILITY TABLE -->
 
 *implemented and validated* means the output has been compared against a
@@ -240,20 +277,22 @@ reference has been compared against.
 
 ## Scope and limitations
 
-- **No qualification or airworthiness claim.** The repository provides no tool
-  qualification package or approved certification evidence. Using a result in
-  an assurance process requires application-specific review and independently
-  established evidence.
+- **No qualification or airworthiness claim.** The repository provides a
+  bounded, hash-checked qualification-evidence dossier format, but no approved
+  certification evidence. Using a result in an assurance process still
+  requires application-specific review and independently established evidence.
 - **Local aircraft dynamics.** The derivative model has no stall, Mach schedule,
   engine map, structural flexibility or validated full flight envelope. The
   nonlinear driver stops outside its advisory angle-of-attack/Mach guards;
   staying inside them does not establish model validity.
 - **Continuous control studies.** LQR assumes exact state feedback. PID accepts
-  supplied gains; it does not tune them. Sensors, sampled control, estimator
-  design and flight-code generation are outside this release.
-- **Bounded desktop preview.** The optional macOS editor uses the synthetic
-  continuous scalar profile. Aircraft block adaptation, a supported installer,
-  complete accessibility acceptance, 3-D views and hardware links remain open.
+  supplied gains; it does not tune them. Target adapters and onboard deployment
+  are implemented as guarded integration contracts; target-specific acceptance,
+  flight-code approval and qualification remain outside this release.
+- **Bounded desktop candidate.** The macOS editor runs saved projects and
+  arbitrary study YAMLs, including flight-test, onboard and qualification
+  workflows. Developer ID/notarized distribution, complete accessibility
+  acceptance, clean-machine installation and hardware links remain open.
 
 The [operating guide](docs/WORKBENCH.md) distinguishes numerical convergence,
 published-reference agreement and aircraft-specific validation.

@@ -9,15 +9,17 @@
 #include "galata/model/quadrotor.hpp"
 #include "galata/model/vehicle_adapters.hpp"
 #include "galata/numerics/integrator.hpp"
+#include "galata/onboard/deployment.hpp"
 #include "galata/pipeline/registry.hpp"
+#include "galata/sim/vehicle_execution.hpp"
 #include "galata/synth/discrete_control.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/trim/level.hpp"
-#include "galata/sim/vehicle_execution.hpp"
 
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -198,6 +200,7 @@ struct FittedModelProvenance {
 
 void register_data_capabilities(Registry& registry);
 void register_identify_capabilities(Registry& registry);
+void register_onboard_capabilities(Registry& registry);
 
 // What `identify.validate` produces. The model's identity travels with the
 // verdict so a report can say WHICH plant was scored, and whether that plant was
@@ -205,6 +208,8 @@ void register_identify_capabilities(Registry& registry);
 struct ValidationArtifact {
   identify::ValidationResult result;
   ModelIdentity model_identity;
+  std::optional<identify::ValidationGate> gate;
+  std::optional<identify::FlightTestGate> flight_test_gate;
 };
 
 // What `sim.plant` produces. The state NAMES travel with the samples because the

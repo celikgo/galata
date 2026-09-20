@@ -329,6 +329,34 @@ TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
   }
 }
 
+TEST(ExampleFixedWingValidationContract,
+     ProvesNumericalWindowSeparationWithoutClaimingFlightEvidence) {
+  const auto result = run_example("fixed-wing-validation-contract", "study.yaml");
+  ASSERT_EQ(result.stages.size(), 6U);
+  EXPECT_EQ(result.stages[0].capability, "model.vehicle");
+  EXPECT_EQ(result.stages[1].capability, "data.import.csv");
+  EXPECT_EQ(result.stages[2].capability, "data.window");
+  EXPECT_EQ(result.stages[3].capability, "data.window");
+  EXPECT_EQ(result.stages[4].capability, "identify.validate.vehicle");
+
+  const auto* check = result.find("check");
+  ASSERT_NE(check, nullptr);
+  const auto& validation = check->payload_as<galata::pipeline::ValidationArtifact>("validation");
+  EXPECT_EQ(validation.result.separation, galata::identify::RecordSeparation::VerifiedDisjoint);
+  ASSERT_TRUE(validation.gate.has_value());
+  EXPECT_EQ(validation.gate->status, galata::identify::ValidationGateStatus::Pass);
+  ASSERT_TRUE(validation.flight_test_gate.has_value());
+  EXPECT_EQ(validation.flight_test_gate->status,
+            galata::identify::ValidationGateStatus::Unresolved);
+
+  const auto* report = result.find("report");
+  ASSERT_NE(report, nullptr);
+  const std::string text = read_file(std::any_cast<const std::string&>(report->payload));
+  EXPECT_NE(text.find("Record separation: verified disjoint"), std::string::npos);
+  EXPECT_NE(text.find("Numerical acceptance gate: pass"), std::string::npos);
+  EXPECT_NE(text.find("Flight-test evidence gate: unresolved"), std::string::npos);
+}
+
 // ===========================================================================
 // The quadrotor programme's two end-to-end examples
 // ===========================================================================

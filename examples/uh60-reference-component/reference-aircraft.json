@@ -16,6 +16,115 @@
     "main_rotor_solidity": 0.08210,
     "aircraft_weight_lbf": 16400.0
   },
+  "table1_source_record": {
+    "main_rotor": {
+      "radius_ft": 26.83,
+      "chord_ft": 1.73,
+      "omega_rad_s": 27.0,
+      "blade_count": 4,
+      "lock_number": 8.1936,
+      "hinge_offset_ratio": 0.04659,
+      "flap_spring_nondimensional": 0.0,
+      "pitch_flap_coupling": 0.0,
+      "blade_twist_rad": -0.3142,
+      "precone_rad": 0.0,
+      "solidity": 0.08210,
+      "lift_curve_slope": 5.73,
+      "maximum_thrust_coefficient_solidity": 0.1846,
+      "shaft_tilt_rad": 0.05236,
+      "hub_station_in": 341.2,
+      "hub_waterline_in": 315.0
+    },
+    "tail_rotor": {
+      "radius_ft": 5.5,
+      "omega_rad_s": 124.62,
+      "lock_number": 3.3783,
+      "solidity": 0.1875,
+      "pitch_flap_coupling": 0.7002,
+      "precone_rad": 0.01309,
+      "blade_twist_rad": -0.3142,
+      "lift_curve_slope": 5.73,
+      "hub_station_in": 732.0,
+      "hub_waterline_in": 324.7
+    },
+    "mass_properties": {
+      "weight_lbf": 16400.0,
+      "inertia_xx_slug_ft2": 5629.0,
+      "inertia_yy_slug_ft2": 40000.0,
+      "inertia_zz_slug_ft2": 37200.0,
+      "product_of_inertia_xz_slug_ft2": 1670.0,
+      "cg_station_in": 360.4,
+      "cg_waterline_in": 247.2
+    },
+    "empennage": {
+      "horizontal_stabilizer": {
+        "station_in": 700.4,
+        "waterline_in": 244.0,
+        "area_ft2": 45.0,
+        "aspect_ratio": 4.6,
+        "lift_curve_slope": 1.03,
+        "dynamic_pressure_ratio": 0.4,
+        "rotor_wake_velocity_factor": 1.8
+      },
+      "vertical_fin": {
+        "station_in": 695.0,
+        "waterline_in": 273.0,
+        "area_ft2": 32.3,
+        "aspect_ratio": 1.92,
+        "sweep_rad": 0.7156,
+        "side_force_slope": 0.89,
+        "dynamic_pressure_ratio": 0.651,
+        "tail_rotor_wake_velocity_factor": 1.0
+      }
+    }
+  },
+  "promotion_status": {
+    "promoted_into_level1_yaml": [
+      "main_rotor.radius_ft",
+      "main_rotor.blade_count",
+      "main_rotor.solidity",
+      "main_rotor.omega_rad_s",
+      "tail_rotor.radius_ft",
+      "tail_rotor.solidity",
+      "mass_properties.weight_lbf",
+      "mass_properties.inertia_xx_slug_ft2",
+      "mass_properties.inertia_yy_slug_ft2",
+      "mass_properties.inertia_zz_slug_ft2",
+      "mass_properties.product_of_inertia_xz_slug_ft2",
+      "empennage.horizontal_stabilizer.area_ft2",
+      "empennage.horizontal_stabilizer.lift_curve_slope",
+      "empennage.vertical_fin.area_ft2",
+      "empennage.vertical_fin.side_force_slope"
+    ],
+    "recorded_but_not_promoted": [
+      "main_rotor.blade_twist_rad",
+      "main_rotor.hinge_offset_ratio",
+      "main_rotor.shaft_tilt_rad",
+      "main_rotor.maximum_thrust_coefficient_solidity",
+      "main_rotor.flap_spring_nondimensional",
+      "main_rotor.pitch_flap_coupling",
+      "tail_rotor.pitch_flap_coupling",
+      "tail_rotor.precone_rad",
+      "tail_rotor.blade_twist_rad",
+      "main_rotor.hub_station_in",
+      "main_rotor.hub_waterline_in",
+      "tail_rotor.hub_station_in",
+      "tail_rotor.hub_waterline_in",
+      "mass_properties.cg_station_in",
+      "mass_properties.cg_waterline_in",
+      "empennage.horizontal_stabilizer.station_in",
+      "empennage.horizontal_stabilizer.waterline_in",
+      "empennage.horizontal_stabilizer.aspect_ratio",
+      "empennage.horizontal_stabilizer.dynamic_pressure_ratio",
+      "empennage.horizontal_stabilizer.rotor_wake_velocity_factor",
+      "empennage.vertical_fin.station_in",
+      "empennage.vertical_fin.waterline_in",
+      "empennage.vertical_fin.aspect_ratio",
+      "empennage.vertical_fin.sweep_rad",
+      "empennage.vertical_fin.dynamic_pressure_ratio",
+      "empennage.vertical_fin.tail_rotor_wake_velocity_factor"
+    ]
+  },
   "acceptance": {
     "solidity_absolute_tolerance": 0.00001,
     "conversion_relative_tolerance": 1e-12

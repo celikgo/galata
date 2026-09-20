@@ -962,6 +962,30 @@ bool write_design_section(std::ostream& out, const Artifact& artifact) {
     out << "Scored over " << result.sample_count << " sample(s). Validation record sha256 "
         << result.validation_record_sha256 << "; estimation record sha256 "
         << result.estimation_record_sha256 << ".\n\n";
+    if (validation.gate) {
+      out << "**Numerical acceptance gate: " << identify::to_string(validation.gate->status)
+          << "** — " << validation.gate->passed_count << "/" << validation.gate->criteria_count
+          << " declared criterion/criteria passed.\n\n";
+      for (const std::string& reason : validation.gate->reasons) {
+        out << "- " << reason << "\n";
+      }
+      out << "\nThis gate is a predeclared numerical review aid. It is not airworthiness, "
+             "certification or tool-qualification evidence.\n\n";
+    }
+    if (validation.flight_test_gate) {
+      out << "**Flight-test evidence gate: "
+          << identify::to_string(validation.flight_test_gate->status)
+          << "** — campaign evidence completeness review.\n\n";
+      if (!validation.flight_test_gate->campaign_manifest_sha256.empty()) {
+        out << "Campaign package manifest SHA-256: `"
+            << validation.flight_test_gate->campaign_manifest_sha256 << "`.\n\n";
+      }
+      for (const std::string& reason : validation.flight_test_gate->reasons) {
+        out << "- " << reason << "\n";
+      }
+      out << "\nThis gate checks that controlled evidence is referenced; it does not establish "
+             "airworthiness, certification, authority approval or tool qualification.\n\n";
+    }
     out << "_Assumptions:_ " << result.assumptions << "\n\n";
     return true;
   }

@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# F-4C, power approach derivative condition.
+# PRIMARY SOURCE: Robert K. Heffley and Wayne F. Jewell, Aircraft Handling
+# Qualities Data, NASA CR-2144, Section IV, Figure IV-1 and Table IV-1,
+# NTRS 19730003312.
+# https://ntrs.nasa.gov/citations/19730003312
+# Geometry cross-reference: NASA-published F-4C MASCOT example,
+# https://ntrs.nasa.gov/api/citations/19950004810/downloads/19950004810.pdf
+# Values were read from rendered NASA tables; conversions and limitations are
+# documented in models/f4c/PROVENANCE.md.
+#
+quantity,value,units,location
+altitude,0,ft,Figure IV-1 / Table IV-1 h
+true_airspeed,230,ft/s,Table IV-1 VT0
+mach,0.2060100972,-,derived from 230 ft/s and sea-level speed of sound
+reference_alpha,11.7,deg,Table IV-1 alpha0
+stabilator,-9.1,deg,Table IV-1 delta_s
+weight,33196,lbf,Figure IV-1 power approach configuration
+inertia_xx,23668,slug-ft2,Figure IV-1 power approach configuration
+inertia_yy,117500,slug-ft2,Figure IV-1 power approach configuration
+inertia_zz,133723,slug-ft2,Figure IV-1 power approach configuration
+inertia_xz,2177,slug-ft2,Figure IV-1 power approach configuration
+wing_area,530,ft2,NASA F-4C MASCOT geometry example
+wing_span,38.7,ft,NASA F-4C MASCOT geometry example
+mean_aerodynamic_chord,16,ft,NASA F-4C MASCOT geometry example
+lift_ref,0.915,-,Table IV-1 CL
+drag_ref,0.242,-,Table IV-1 CD
+lift_alpha,2.8,1/rad,Table IV-1 CL_alpha
+drag_alpha,0.555,1/rad,Table IV-1 CD_alpha
+pitching_moment_alpha,-0.098,1/rad,Table IV-1 Cm_alpha
+pitching_moment_alpha_dot,-0.95,1/rad,Table IV-1 Cm_alpha_dot
+pitching_moment_pitch_rate,-2.0,1/rad,Table IV-1 Cm_q
+lift_elevator,0.24,1/rad,Table IV-1 CL_delta_s
+pitching_moment_elevator,-0.322,1/rad,Table IV-1 Cm_delta_s
+drag_elevator,-0.14,1/rad,Table IV-1 CD_delta_s
+side_force_beta,-0.655,1/rad,Table IV-1 CY_beta
+yawing_moment_beta,0.199,1/rad,Table IV-1 Cn_beta
+rolling_moment_beta,-0.156,1/rad,Table IV-1 Cl_beta
+rolling_moment_roll_rate,-0.272,1/rad,Table IV-1 Cl_p
+yawing_moment_roll_rate,-0.013,1/rad,Table IV-1 Cn_p
+rolling_moment_yaw_rate,0.205,1/rad,Table IV-1 Cl_r
+yawing_moment_yaw_rate,-0.320,1/rad,Table IV-1 Cn_r
+side_force_aileron,-0.0355,1/rad,Table IV-1 CY_delta_a
+yawing_moment_aileron,-0.0041,1/rad,Table IV-1 Cn_delta_a
+rolling_moment_aileron,0.057,1/rad,Table IV-1 Cl_delta_a
+side_force_rudder,0.124,1/rad,Table IV-1 CY_delta_r
+yawing_moment_rudder,-0.072,1/rad,Table IV-1 Cn_delta_r
+rolling_moment_rudder,-0.0009,1/rad,Table IV-1 Cl_delta_r

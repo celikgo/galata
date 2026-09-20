@@ -4,7 +4,9 @@ galata v0.3.0 supports a complete local aircraft-control study through its CLI
 and C++ library: trim, linearise, design, analyse, simulate and report. It can
 support supervised offline aviation and defence engineering work, including
 method exploration, model review and controller prototyping. It supplies no
-onboard controller, tool qualification package or aircraft-specific approval.
+onboard controller or aircraft-specific approval. It does provide a bounded
+[qualification-evidence dossier format](QUALIFICATION_EVIDENCE.md), but no
+approved tool qualification evidence or authority decision.
 
 The [verification report](VERIFICATION.md) states what has been compared with
 published references. A solver residual, a completed trajectory or a passing
@@ -168,10 +170,11 @@ for a successful default run, but insufficient evidence for a real aircraft.
 Straight-line trim rejects unsupported lateral asymmetry and checks all six
 dynamic acceleration residuals; it is not a turning or asymmetric trim solver.
 
-Published NT-33A comparisons concern the documented reference condition. The
-known dimensional-matrix phugoid discrepancy and associated regression locks
-remain in the [investigation note](notes/phugoid-damping.md). A regression lock
-records behaviour; it does not resolve a disagreement with a published source.
+Published NT-33A, Navion, A-7A, A-4D, F-4C, NASA GTM T2 and NASA F-16 comparisons concern their documented single
+reference conditions or derivative slice. The known dimensional-matrix phugoid discrepancy and
+associated regression locks remain in the [investigation note](notes/phugoid-damping.md).
+A regression lock records behaviour; it does not resolve a disagreement with a
+published source.
 
 For an aircraft-specific study, establish the aerodynamic data's applicable
 condition/configuration, hardware limits and controller assumptions, then
@@ -299,11 +302,12 @@ aircraft-validation claim: a reconstructed graph agrees with the existing
 engine, and execution completion still leaves numerical accuracy, model validity
 and engineering acceptance separately unassessed.
 
-Sampled controllers remain a later increment, and the desktop toolkit is still
-unselected — the native shell is a feasibility candidate, not the product's
-chosen stack. Product delivery targets macOS first and Linux next. The bounded
-scope actually implemented, and what it does not close, is recorded in the
-[M2 implementation guide](product/M2_IMPLEMENTATION.md).
+Sampled controllers remain a later increment. The native macOS shell is now the
+local candidate and exposes saved projects, arbitrary study execution and the
+evidence-package workflows; its distribution signing, accessibility and
+clean-machine acceptance gates remain open. Product delivery still targets
+macOS first and Linux next. The bounded scope actually implemented, and what it
+does not close, is recorded in the [M2 implementation guide](product/M2_IMPLEMENTATION.md).
 
 The new `galata::modeling` CMake target is installed alongside the existing
 libraries. Model/source/evidence formats are experimental and the resolved IR

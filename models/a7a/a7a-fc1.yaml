@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A-7A clean flexible-airplane model, NASA CR-96008, flight condition 1.
+# The source boundary, derivative conversion and limitations are recorded in
+# PROVENANCE.md.
+
+description: >-
+  A-7A, flight condition 1 — sea level, M = 0.25, clean flexible airplane,
+  21,889 lb, 11.2 degree reference angle of attack
+
+citation: >-
+  Gary L. Teper, "Aircraft Stability and Control Data", NASA CR-96008,
+  Systems Technology, Inc. for NASA Ames Research Center, April 1969,
+  Tables II-A through II-F, N69-31783.
+
+geometry:
+  wing_area_m2: 34.8387000000
+  wing_span_m: 11.7957600000
+  mean_aerodynamic_chord_m: 3.2918400000
+
+mass:
+  mass_kg: 9923.8540000000
+  inertia_xx_kg_m2: 18486.5777254986
+  inertia_yy_kg_m2: 79947.1611413094
+  inertia_zz_kg_m2: 91599.0605892694
+  product_of_inertia_xz_kg_m2: 3976.6140424560
+
+thrust_incidence_rad: 0.0
+
+aero:
+  # The source's Table II-A reference condition. The coefficients below are
+  # the local trim coefficients and derivatives reconstructed from Tables
+  # II-B and II-C, with elevator treated as a perturbation about that trim.
+  reference_alpha_rad: 0.1954768762
+  reference_mach: 0.25
+
+  # Longitudinal coefficient set in stability axes. See PROVENANCE.md for the
+  # exact inversion from X_u, X_w, Z_u and Z_w.
+  lift_ref: 0.6339082607
+  drag_ref: 0.0886682071
+  # Reconstructed from the printed M_u and M_w pair; the source does not print
+  # a standalone C_m intercept.
+  pitching_moment_ref: 0.0014281404
+  lift_alpha: 3.9516541329
+  drag_alpha: 1.5318226182
+  pitching_moment_alpha: -0.4449840166
+  lift_pitch_rate: 0.0
+  pitching_moment_pitch_rate: -3.8310860869
+  pitching_moment_alpha_dot: -0.6560036121
+  lift_elevator: 0.5859057771
+  drag_elevator: -0.0001525173
+  pitching_moment_elevator: -0.8656143561
+
+  # Table II-C explicitly says body-fixed centerline axes. The prime marks
+  # denote the I_xz-eliminated angular-acceleration derivatives, not stability
+  # axes, so no alpha rotation is applied here.
+  lateral_axes: body
+  side_force_beta: -0.8957272131
+  rolling_moment_beta: -0.1250180897
+  yawing_moment_beta: 0.0914075392
+  rolling_moment_roll_rate: -0.2933338146
+  yawing_moment_roll_rate: -0.0001272587
+  rolling_moment_yaw_rate: 0.1864533062
+  yawing_moment_yaw_rate: -0.3082720653
+  side_force_aileron: -0.0000543091
+  rolling_moment_aileron: 0.0539439500
+  yawing_moment_aileron: 0.0086579969
+  side_force_rudder: 0.0008521676
+  rolling_moment_rudder: 0.0270581814
+  yawing_moment_rudder: -0.1030971492

@@ -1,0 +1,2 @@
+synthetic production-contract fixture
+No application safety case or operational approval is supplied.

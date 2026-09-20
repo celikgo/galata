@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A-4D, clean flexible airplane, flight condition 1.
+# PRIMARY SOURCE: Gary L. Teper, Aircraft Stability and Control Data,
+# NASA CR-96008, Section III, Tables III-A through III-C, N69-31783.
+# https://ntrs.nasa.gov/citations/19690022405
+# The source is a US Government NASA report, distributed without restriction.
+# Values were read from the rendered table pages; the conversion and
+# limitations are documented in models/a4d/PROVENANCE.md.
+#
+quantity,value,units,location
+altitude,0,ft,Table III-A row h PDF p.48
+mach,0.4,-,Table III-A row M PDF p.48
+true_airspeed,447,ft/s,Table III-A row V_T0 PDF p.48
+dynamic_pressure,237,lbf/ft2,Table III-A row qbar PDF p.48
+reference_alpha,4.7,deg,Table III-A row alpha0 PDF p.48
+weight,17578,lbf,Table III-A header PDF p.48
+inertia_xx,8780,slug-ft2,Table III-A header PDF p.48
+inertia_yy,25900,slug-ft2,Table III-A header PDF p.48
+inertia_zz,28500,slug-ft2,Table III-A header PDF p.48
+inertia_xz,-4070,slug-ft2,Table III-A header PDF p.48
+X_u,-0.00934,1/s,Table III-B PDF p.49
+X_w,0.0687,1/s,Table III-B PDF p.49
+X_delta_e,7.612,1/s2,Table III-B PDF p.49
+Z_u,-0.0765,1/s,Table III-B PDF p.49
+Z_w,-0.899,1/s,Table III-B PDF p.49
+Z_delta_e,-42.08,1/s2,Table III-B PDF p.49
+M_u,0.00232,1/(s-ft),Table III-B PDF p.49
+M_w,-0.0228,1/(s-ft),Table III-B PDF p.49
+M_w_dot,-0.000763,1/ft,Table III-B PDF p.49
+M_q,-1.151,1/s,Table III-B PDF p.49
+M_delta_e,-13.728,1/s2,Table III-B PDF p.49
+Y_v,-0.2484,1/s,Table III-C PDF p.50
+Y_delta_a,-0.00582,1/s2,Table III-C PDF p.50
+Y_delta_r,0.044,1/s2,Table III-C PDF p.50
+L_beta_prime,-29.71,1/s2,Table III-C PDF p.50
+L_p_prime,-1.813,1/s,Table III-C PDF p.50
+L_r_prime,0.8731,1/s,Table III-C PDF p.50
+L_delta_a_prime,17.2,1/s2,Table III-C PDF p.50
+L_delta_r_prime,8.217,1/s2,Table III-C PDF p.50
+N_beta_prime,13.203,1/s2,Table III-C PDF p.50
+N_p_prime,-0.029,1/s,Table III-C PDF p.50
+N_r_prime,-0.5761,1/s,Table III-C PDF p.50
+N_delta_a_prime,1.4875,1/s2,Table III-C PDF p.50
+N_delta_r_prime,-0.1953,1/s2,Table III-C PDF p.50

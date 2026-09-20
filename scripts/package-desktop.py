@@ -49,6 +49,18 @@ def copy_file(source, destination):
         raise ValueError(f"package input changed while copying: {source}")
 
 
+def copy_tree_files(source, destination):
+    """Copy a complete regular-file tree without carrying links into a package."""
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError(f"missing or linked package directory: {source}")
+    for path in sorted(source.rglob("*")):
+        if path.is_dir():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"missing or linked package input: {path}")
+        copy_file(path, destination / path.relative_to(source))
+
+
 def stamp_build(build, app, destination):
     """Called by the desktop POST_BUILD only after the worker copy completes."""
     cache = read_cache(build / "CMakeCache.txt")
@@ -154,9 +166,9 @@ Option or turn Snap Off for free movement. Click a line to select it. Round
 middle handles reshape segments; square endpoint handles reconnect ports.
 Reset Route restores automatic routing. Edit gestures support Undo/Redo.
 
-The examples folder contains scalar feedback and NT-33A graph-study inputs.
-Keep examples and models together. Example values illustrate workflows and
-do not establish engineering acceptance of a design.
+The examples and models folders contain the complete shipped offline workflow
+inputs. Keep them together. Example values illustrate workflows and do not
+establish engineering acceptance of a design.
 
 For a terminal workflow, the same engine is at:
   "Galata Preview.app/Contents/MacOS/galata" --help
@@ -218,10 +230,8 @@ def package(build, output):
             copy_file(build / filename, stage / "build-evidence" / filename)
         copy_file(build / "src/desktop/galata-desktop-build.json",
                   stage / "build-evidence/galata-desktop-build.json")
-        for filename in ("examples/continuous-feedback/model.yaml", "examples/continuous-feedback/study.yaml",
-                         "examples/nt33a-graph-design/study.yaml", "models/nt33a/nt33a-fc1.yaml",
-                         "models/nt33a/PROVENANCE.md"):
-            copy_file(source / filename, stage / filename)
+        copy_tree_files(source / "examples", stage / "examples")
+        copy_tree_files(source / "models", stage / "models")
         help_text = start_here(version, platform_name, minimum)
         (stage / "START_HERE.txt").write_text(help_text, encoding="utf-8")
         (resources / "START_HERE.txt").write_text(help_text, encoding="utf-8")

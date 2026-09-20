@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# Target-neutral deployment handoff. This is a manifest, not flight software.
+version: 1
+
+stages:
+  - id: manifest
+    capability: onboard.manifest
+    input:
+      target_platform: example-flight-computer
+      target_identity:
+        hardware_id: example-airframe-01
+        flight_computer_id: example-fcu-v1
+        firmware_id: example-firmware-build-001
+        emergency_stop_id: example-estop-chain-01
+      model_description: "model artifact sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      controller_description: "controller artifact sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      failsafe_action: "disarm on link loss after bounded timeout"
+      max_controller_time_s: 0.005
+      interface:
+        id: galata-example-link-v1
+        sample_period_s: 0.01
+        external_arming_required: true
+        sensor_channels:
+          - {name: airspeed_m_s, unit: "m/s", frame: body}
+          - {name: altitude_m, unit: "m", frame: ned}
+        actuator_channels:
+          - {name: elevator_rad, unit: rad, frame: body}
+      transport_profile:
+        id: example-sil-link-profile-v1
+        transport: replay
+        endpoint: reviewed-sil-replay
+        receive_timeout_ms: 20
+        transmit_timeout_ms: 20
+        watchdog_timeout_s: 0.02
+        emergency_stop_required: true
+      artifacts:
+        - {role: model, sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+        - {role: controller, sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+      manifest_path: onboard.manifest
+      checksum_path: onboard.manifest.sha256

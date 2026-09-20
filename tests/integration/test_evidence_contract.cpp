@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Evidence is a public capability boundary: source identity, finite values and
 // matrix meaning must survive extension registration and downstream execution.
+#include "galata/core/sha256.hpp"
 #include "galata/linearize/finite_difference.hpp"
+#include "galata/onboard/deployment.hpp"
 #include "galata/pipeline/files.hpp"
 #include "galata/pipeline/pipeline.hpp"
 
@@ -136,6 +138,63 @@ stages:
     EXPECT_EQ(stage.artifact.linearization_evidence.at("source"), evidence);
     EXPECT_DOUBLE_EQ(stage.artifact.linearization_evidence.at("source")->a(0, 0), -2.0);
   }
+}
+
+TEST_F(EvidenceContract, OnboardManifestCapabilityWritesAHashedNonQualifiedHandoff) {
+  const auto result = run(R"(
+version: 1
+stages:
+  - id: manifest
+    capability: onboard.manifest
+    input:
+      target_platform: example-flight-computer
+      target_identity:
+        hardware_id: airframe-01
+        flight_computer_id: fcu-example-v1
+        firmware_id: firmware-build-001
+        emergency_stop_id: estop-chain-01
+      model_description: model-sha
+      controller_description: controller-sha
+      failsafe_action: disarm-on-link-loss
+      max_controller_time_s: 0.005
+      interface:
+        id: replay-bench-v1
+        sample_period_s: 0.01
+        external_arming_required: true
+        sensor_channels:
+          - {name: airspeed_m_s, unit: m/s, frame: body}
+        actuator_channels:
+          - {name: elevator_rad, unit: rad, frame: body}
+      transport_profile:
+        id: evidence-sil-profile-v1
+        transport: replay
+        endpoint: evidence-replay
+        receive_timeout_ms: 20
+        transmit_timeout_ms: 20
+        watchdog_timeout_s: 0.02
+        emergency_stop_required: true
+      artifacts:
+        - {role: model, sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
+        - {role: controller, sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
+      manifest_path: onboard.manifest
+      checksum_path: onboard.manifest.sha256
+)",
+                          builtin_registry(),
+                          nullptr,
+                          true);
+
+  ASSERT_EQ(result.stages.size(), 1U);
+  const auto& artifact = result.stages.front().artifact;
+  const auto& package = artifact.payload_as<galata::onboard::DeploymentPackage>("onboard_manifest");
+  EXPECT_FALSE(package.contains_executable);
+  EXPECT_EQ(package.qualification_state, "not_qualified");
+  EXPECT_EQ(package.manifest_sha256, galata::core::sha256(package.manifest));
+  EXPECT_EQ(package.transport_profile.transport, "replay");
+  EXPECT_EQ(package.transport_profile.endpoint, "evidence-replay");
+  EXPECT_DOUBLE_EQ(package.transport_profile.watchdog_timeout_s, 0.02);
+  EXPECT_NE(package.manifest.find("hardware.emergency_stop_required=true"), std::string::npos);
+  EXPECT_TRUE(fs::exists(root / "run-0" / "onboard.manifest"));
+  EXPECT_TRUE(fs::exists(root / "run-0" / "onboard.manifest.sha256"));
 }
 
 TEST_F(EvidenceContract, RejectsAnOriginForgedByAnIndependentStageBeforeCompletion) {

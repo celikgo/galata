@@ -13,7 +13,10 @@
 #include "galata/data/record.hpp"
 #include "galata/data/window.hpp"
 #include "galata/identify/validate.hpp"
+#include "galata/model/aircraft.hpp"
+#include "galata/model/helicopter.hpp"
 #include "galata/model/quadrotor.hpp"
+#include "galata/model/vehicle_adapters.hpp"
 #include "galata/numerics/integrator.hpp"
 
 #include <gtest/gtest.h>
@@ -28,8 +31,17 @@ using galata::data::Channel;
 using galata::data::Record;
 using galata::identify::RecordSeparation;
 using galata::identify::validate_model;
+using galata::identify::validate_vehicle_model;
 using galata::identify::ValidationRequest;
+using galata::identify::VehicleValidationRequest;
+using galata::model::Environment;
+using galata::model::FixedWingVehicleModel;
+using galata::model::HelicopterVehicleAdapter;
+using galata::model::load_aircraft;
+using galata::model::load_helicopter;
+using galata::model::MultirotorVehicleModel;
 using galata::model::Quadrotor;
+using galata::model::VehicleModel;
 
 Quadrotor shipped() {
   Quadrotor model;
@@ -118,8 +130,215 @@ ValidationRequest request_for(const Quadrotor& model, const std::string& estimat
   return request;
 }
 
+Eigen::VectorXd vehicle_start(const VehicleModel& model, double rotor_speed) {
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(model.extended_state_size());
+  state(galata::core::kQuaternionW) = 1.0;
+  for (Eigen::Index index = galata::core::kStateSize; index < state.size(); ++index) {
+    state(index) = rotor_speed;
+  }
+  return state;
+}
+
+Record synthesise_vehicle(const VehicleModel& truth,
+                          const Environment& environment,
+                          const std::string& digest,
+                          double excitation) {
+  const double hover = shipped().hover_speed_rad_s(galata::core::kStandardGravity);
+  Record record;
+  record.source_path = "synthetic-vehicle";
+  record.source_sha256 = digest;
+  Channel down{"down_m", "d", "m", "ned", "", 1.0, 0.0, {}};
+  std::vector<Channel> command;
+  for (const std::string& name : truth.control_names()) {
+    command.push_back({name, "c", "rad/s", "none", "", 1.0, 0.0, {}});
+  }
+  Eigen::VectorXd state = vehicle_start(truth, hover);
+  Eigen::VectorXd controls = Eigen::VectorXd::Constant(truth.control_count(), hover + excitation);
+  for (int sample = 0; sample < 50; ++sample) {
+    for (std::size_t control = 0; control < command.size(); ++control) {
+      command[control].samples.push_back(controls(static_cast<Eigen::Index>(control)));
+    }
+    record.times_s.push_back(0.02 * static_cast<double>(sample));
+    down.samples.push_back(state(galata::core::kPositionDown));
+    const galata::numerics::DerivativeFunction derivative = [&](double, const Eigen::VectorXd& x) {
+      return truth.derivative(x, controls, environment);
+    };
+    state = galata::numerics::integrate_fixed_step(
+                derivative, state, 0.0, 0.002, 10, 10, &VehicleModel::project)
+                .states.back();
+  }
+  record.channels.push_back(down);
+  for (const Channel& channel : command) {
+    record.channels.push_back(channel);
+  }
+  return record;
+}
+
+Eigen::VectorXd family_start(const VehicleModel& model, const Environment& environment) {
+  Eigen::VectorXd state = Eigen::VectorXd::Zero(model.extended_state_size());
+  state(galata::core::kQuaternionW) = 1.0;
+  state(galata::core::kVelocityU) = 40.0;
+  if (const auto* helicopter = dynamic_cast<const HelicopterVehicleAdapter*>(&model)) {
+    const Eigen::VectorXd controls = Eigen::VectorXd::Zero(model.control_count());
+    return model.join(galata::core::State::from_vector(state.head<galata::core::kStateSize>()),
+                      helicopter->source_model().initial_auxiliary(controls, environment));
+  }
+  return state;
+}
+
+Record synthesise_family(const VehicleModel& truth,
+                         const Environment& environment,
+                         const Eigen::VectorXd& initial_state,
+                         const Eigen::VectorXd& controls,
+                         const std::string& digest) {
+  Record record;
+  record.source_path = "synthetic-family-vehicle";
+  record.source_sha256 = digest;
+  Channel down{"down_m", "d", "m", "ned", "", 1.0, 0.0, {}};
+  std::vector<Channel> command;
+  for (const std::string& name : truth.control_names()) {
+    command.push_back({name, "c", "SI", "none", "", 1.0, 0.0, {}});
+  }
+  Eigen::VectorXd state = initial_state;
+  for (int sample = 0; sample < 20; ++sample) {
+    for (std::size_t control = 0; control < command.size(); ++control) {
+      command[control].samples.push_back(controls(static_cast<Eigen::Index>(control)));
+    }
+    record.times_s.push_back(0.02 * static_cast<double>(sample));
+    down.samples.push_back(state(galata::core::kPositionDown));
+    const galata::numerics::DerivativeFunction derivative = [&](double, const Eigen::VectorXd& x) {
+      return truth.derivative(x, controls, environment);
+    };
+    state = galata::numerics::integrate_fixed_step(
+                derivative, state, 0.0, 0.002, 10, 10, &VehicleModel::project)
+                .states.back();
+  }
+  record.channels.push_back(down);
+  for (const Channel& channel : command) {
+    record.channels.push_back(channel);
+  }
+  return record;
+}
+
 const std::string kEstimation(64, 'a');
 const std::string kValidation(64, 'b');
+
+TEST(ValidateVehicle, TheGenericPathPredictsAFullVehicleModelRecord) {
+  const MultirotorVehicleModel truth(shipped());
+  const Environment environment = Environment::sea_level_still_air();
+  const Record held_out = synthesise_vehicle(truth, environment, kValidation, 30.0);
+
+  VehicleValidationRequest request;
+  request.estimation_record_sha256 = kEstimation;
+  request.outputs = {{"down_m", "position_down_m"}};
+  request.command_channels = truth.control_names();
+  request.initial_extended_state =
+      vehicle_start(truth, shipped().hover_speed_rad_s(galata::core::kStandardGravity));
+  request.step_s = 0.002;
+  request.environment = environment;
+
+  const auto result = validate_vehicle_model(truth, held_out, request);
+  EXPECT_EQ(result.separation, RecordSeparation::Unknown);
+  ASSERT_EQ(result.outputs.size(), 1u);
+  EXPECT_LT(result.outputs.front().rmse, 1e-9);
+  EXPECT_TRUE(result.assumptions.find("not flight-test approval") != std::string::npos);
+}
+
+TEST(ValidateVehicle, TheGenericPathAlsoPredictsFixedWingAndHelicopterRecords) {
+  const Environment environment = Environment::sea_level_still_air();
+  const FixedWingVehicleModel fixed_wing(
+      load_aircraft(std::string(GALATA_SOURCE_DIR) + "/models/nt33a/nt33a-fc1.yaml"));
+  const HelicopterVehicleAdapter helicopter(
+      load_helicopter(std::string(GALATA_SOURCE_DIR) + "/models/souxmar-heli/souxmar-heli.yaml"));
+
+  for (const VehicleModel* model : {static_cast<const VehicleModel*>(&fixed_wing),
+                                    static_cast<const VehicleModel*>(&helicopter)}) {
+    const Eigen::VectorXd initial = family_start(*model, environment);
+    const Eigen::VectorXd controls = Eigen::VectorXd::Zero(model->control_count());
+    const Record record = synthesise_family(*model, environment, initial, controls, kValidation);
+    VehicleValidationRequest request;
+    request.estimation_record_sha256 = kEstimation;
+    request.outputs = {{"down_m", "position_down_m"}};
+    request.command_channels = model->control_names();
+    request.initial_extended_state = initial;
+    request.step_s = 0.002;
+    request.environment = environment;
+
+    const auto result = validate_vehicle_model(*model, record, request);
+    ASSERT_EQ(result.outputs.size(), 1u);
+    EXPECT_LT(result.outputs.front().rmse, 1e-9) << model->description();
+  }
+}
+
+TEST(ValidationGate, OnlyVerifiedDisjointDataCanPassDeclaredBudgets) {
+  galata::identify::ValidationResult result;
+  result.separation = RecordSeparation::VerifiedDisjoint;
+  result.outputs = {galata::identify::ValidationOutput{
+      "down_m", "position_down_m", 0.02, 0.05, 0.0, 0.98, true, "", 0.0, false}};
+
+  const galata::identify::ValidationCriterion criterion{
+      "down_m", "position_down_m", true, 0.1, true, 0.1, true, 0.9};
+  const auto passed = galata::identify::evaluate_validation_gate(result, {criterion});
+  EXPECT_EQ(passed.status, galata::identify::ValidationGateStatus::Pass);
+  EXPECT_EQ(passed.passed_count, 1);
+
+  result.outputs.front().rmse = 0.2;
+  const auto failed = galata::identify::evaluate_validation_gate(result, {criterion});
+  EXPECT_EQ(failed.status, galata::identify::ValidationGateStatus::Fail);
+  EXPECT_FALSE(failed.reasons.empty());
+
+  result.outputs.front().rmse = 0.02;
+  result.separation = RecordSeparation::CallerDeclared;
+  const auto unresolved = galata::identify::evaluate_validation_gate(result, {criterion});
+  EXPECT_EQ(unresolved.status, galata::identify::ValidationGateStatus::Unresolved);
+}
+
+TEST(ValidationGate, FlightTestEvidenceMustBeCompleteBeforeCampaignCanPass) {
+  galata::identify::ValidationResult result;
+  result.separation = RecordSeparation::VerifiedDisjoint;
+  result.sample_count = 12;
+  result.estimation_record_sha256 = std::string(64, 'a');
+  result.validation_record_sha256 = std::string(64, 'b');
+  result.estimation_lineage_is_known = true;
+  result.estimation_lineage.source_sha256 = result.estimation_record_sha256;
+  result.estimation_lineage.sample_count = 12;
+  result.validation_lineage.source_sha256 = result.validation_record_sha256;
+  result.validation_lineage.sample_count = 12;
+  result.outputs = {galata::identify::ValidationOutput{
+      "down_m", "position_down_m", 0.02, 0.05, 0.0, 0.98, true, "", 0.0, false}};
+  const galata::identify::ValidationCriterion criterion{
+      "down_m", "position_down_m", true, 0.1, true, 0.1, true, 0.9};
+
+  galata::identify::FlightTestEvidence evidence;
+  evidence.evidence_class = "measured_flight";
+  evidence.aircraft_id = "test-aircraft-01";
+  evidence.aircraft_configuration = "configuration-2026-09";
+  evidence.test_plan_id = "FT-001";
+  evidence.calibration_manifest_sha256 = std::string(64, 'c');
+  evidence.configuration_manifest_sha256 = std::string(64, 'd');
+  evidence.reviewer_id = "reviewer-01";
+  evidence.reviewer_attestation_sha256 = std::string(64, 'e');
+  evidence.campaign_manifest_sha256 = std::string(64, 'f');
+  evidence.campaign_package_verified = true;
+  evidence.safety_review_complete = true;
+
+  const auto passed = galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
+  EXPECT_EQ(passed.status, galata::identify::ValidationGateStatus::Pass);
+
+  evidence.evidence_class = "synthetic_contract";
+  const auto synthetic =
+      galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
+  EXPECT_EQ(synthetic.status, galata::identify::ValidationGateStatus::Unresolved);
+
+  evidence = {};
+  const auto incomplete =
+      galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
+  EXPECT_EQ(incomplete.status, galata::identify::ValidationGateStatus::Unresolved);
+
+  evidence.calibration_manifest_sha256 = "not-a-sha256";
+  const auto malformed = galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
+  EXPECT_EQ(malformed.status, galata::identify::ValidationGateStatus::Fail);
+}
 
 }  // namespace
 

@@ -303,15 +303,16 @@ TEST(ExampleHeliGusts, WindStepIsGroundVelocityContinuousAndTurbulenceIsReproduc
   const std::size_t wn = csv_column(step, "wind_north_m_s");
   const std::size_t we = csv_column(step, "wind_east_m_s");
   const std::size_t wd = csv_column(step, "wind_down_m_s");
-  const auto ground_velocity = [&](const std::vector<double>& row) {
+  const auto ground_velocity = [&](const std::vector<double>& row) -> Eigen::Vector3d {
     const double qw_value = row[qw];
     const double qx_value = row[qx];
     const double qy_value = row[qy];
     const double qz_value = row[qz];
     const Eigen::Matrix3d rotation = galata::core::dcm_ned_from_body(
         galata::core::Quaternion(qw_value, qx_value, qy_value, qz_value));
-    return rotation * Eigen::Vector3d(row[u], row[v], row[w])
-           + Eigen::Vector3d(row[wn], row[we], row[wd]);
+    return (rotation * Eigen::Vector3d(row[u], row[v], row[w])
+            + Eigen::Vector3d(row[wn], row[we], row[wd]))
+        .eval();
   };
   std::size_t before = 0;
   std::size_t after = 0;
@@ -324,7 +325,21 @@ TEST(ExampleHeliGusts, WindStepIsGroundVelocityContinuousAndTurbulenceIsReproduc
     }
   }
   ASSERT_GT(after, before);
-  EXPECT_LT((ground_velocity(step.rows[after]) - ground_velocity(step.rows[before])).norm(), 0.03);
+  for (const std::size_t column : {u, v, w, qw, qx, qy, qz, wn, we, wd}) {
+    ASSERT_TRUE(std::isfinite(step.rows[before][column]))
+        << "non-finite wind-step input at column " << column << " before=" << before;
+    ASSERT_TRUE(std::isfinite(step.rows[after][column]))
+        << "non-finite wind-step input at column " << column << " after=" << after;
+  }
+  const Eigen::Vector3d ground_before = ground_velocity(step.rows[before]);
+  const Eigen::Vector3d ground_after = ground_velocity(step.rows[after]);
+  ASSERT_TRUE(ground_before.allFinite())
+      << "ground velocity before wind step: " << ground_before.transpose();
+  ASSERT_TRUE(ground_after.allFinite())
+      << "ground velocity after wind step: " << ground_after.transpose();
+  EXPECT_LT((ground_after - ground_before).norm(), 0.03)
+      << "ground velocity changed from " << ground_before.transpose() << " to "
+      << ground_after.transpose();
   const auto gust = read_csv(directory / "open-gust.csv");
   const auto refined = read_csv(directory / "open-gust-refined.csv");
   ASSERT_EQ(gust.rows.size(), refined.rows.size());
@@ -400,6 +415,7 @@ TEST(ExampleHeliEnsemble, SerialAndParallelPreserveDeclarationOrderAndMembers) {
             std::string::npos);
   EXPECT_NE(read_text(directory / "serial/member-1.json").find("\"seed\": 102"), std::string::npos);
 }
+
 TEST(ExampleHeliEnsemble, CompletedMemberWithPoorTrackingFailsControllerRequirements) {
   const std::string document =
       "version: 1\n"
@@ -419,17 +435,21 @@ TEST(ExampleHeliEnsemble, CompletedMemberWithPoorTrackingFailsControllerRequirem
       "      sample_stride: 10\n"
       "      aggregate_path: bad.json\n"
       "      manifest_prefix: bad/member\n"
-      "      members: [{id: poor-tracking, seed: 17, mass_scale: 1.0, initial_state_perturbation: {roll_rate_rad_s: 0.08}}]\n"
+      "      members: [{id: poor-tracking, seed: 17, mass_scale: 1.0, initial_state_perturbation: "
+      "{roll_rate_rad_s: 0.08}}]\n"
       "      closed_loop:\n"
       "        controller_period_s: 0.01\n"
       "        delay_periods: 0\n"
       "        controller:\n"
       "          type: pid\n"
       "          missing_measurement: refuse\n"
-      "          loops: [{measurement: roll_rad, control: lateral_cyclic_command_rad, kp: 1.0, ki: 0.0, kd: 0.0, derivative_filter_s: 0.05}]\n"
+      "          loops: [{measurement: roll_rad, control: lateral_cyclic_command_rad, kp: 1.0, ki: "
+      "0.0, kd: 0.0, derivative_filter_s: 0.05}]\n"
       "      response:\n"
       "        signals: [roll_rad]\n"
-      "        signal_requirements: {roll_rad: {peak_tracking_error_rad: 0.001, final_tracking_error_rad: 0.001, rms_tracking_error_rad: 0.001, settling_band_rad: 0.001, settling_dwell_s: 0.2, settling_time_s: 0.5}}\n";
+      "        signal_requirements: {roll_rad: {peak_tracking_error_rad: 0.001, "
+      "final_tracking_error_rad: 0.001, rms_tracking_error_rad: 0.001, settling_band_rad: 0.001, "
+      "settling_dwell_s: 0.2, settling_time_s: 0.5}}\n";
   const auto result = run_heli_document("heli-ensemble-poor-tracking", document);
   const std::string summary = stage_named(result, "ensemble").summary;
   EXPECT_NE(summary.find("0 engineering criteria passed"), std::string::npos) << summary;
@@ -560,8 +580,8 @@ TEST(ExampleHeliSaturation, IntegralWindupReleaseShowsMeasuredAntiWindupBenefit)
   const auto enabled_controller = read_csv(directory / "anti-windup-enabled.csv.controller.csv");
   const auto disabled_trace = read_csv(directory / "anti-windup-disabled.csv");
   const auto enabled_trace = read_csv(directory / "anti-windup-enabled.csv");
-  const std::size_t integrator = csv_column(
-      disabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
+  const std::size_t integrator =
+      csv_column(disabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
   const std::size_t time = csv_column(disabled_controller, "time_s");
   const std::size_t requested =
       csv_column(disabled_controller, "requested_lateral_cyclic_command_rad");
@@ -574,21 +594,24 @@ TEST(ExampleHeliSaturation, IntegralWindupReleaseShowsMeasuredAntiWindupBenefit)
   double enabled_integral_at_release = 0.0;
   for (std::size_t i = 0; i < disabled_controller.rows.size(); ++i) {
     const double t = disabled_controller.rows[i][time];
-    disabled_wound = disabled_wound || (t >= 1.0 && t < 3.0
-                                        && std::fabs(disabled_controller.rows[i][integrator]) > 1.0e-3);
+    disabled_wound =
+        disabled_wound
+        || (t >= 1.0 && t < 3.0 && std::fabs(disabled_controller.rows[i][integrator]) > 1.0e-3);
     both_saturated = both_saturated
                      || (std::fabs(disabled_controller.rows[i][requested]
-                                   - disabled_controller.rows[i][saturated]) > 1.0e-6);
+                                   - disabled_controller.rows[i][saturated])
+                         > 1.0e-6);
     if (std::fabs(t - 3.0) < 0.021) {
       disabled_integral_at_release = disabled_controller.rows[i][integrator];
     }
   }
-  const std::size_t enabled_integral = csv_column(
-      enabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
+  const std::size_t enabled_integral =
+      csv_column(enabled_controller, "controller_state_lateral_cyclic_command_rad.integrator");
   for (std::size_t i = 0; i < enabled_controller.rows.size(); ++i) {
     const double t = enabled_controller.rows[i][csv_column(enabled_controller, "time_s")];
-    enabled_wound = enabled_wound || (t >= 1.0 && t < 3.0
-                                      && std::fabs(enabled_controller.rows[i][enabled_integral]) > 1.0e-3);
+    enabled_wound = enabled_wound
+                    || (t >= 1.0 && t < 3.0
+                        && std::fabs(enabled_controller.rows[i][enabled_integral]) > 1.0e-3);
     if (std::fabs(t - 3.0) < 0.021) {
       enabled_integral_at_release = enabled_controller.rows[i][enabled_integral];
     }

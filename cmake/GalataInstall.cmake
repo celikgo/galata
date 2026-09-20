@@ -5,7 +5,7 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 set(_galata_install_targets galata_public_headers galata_warnings)
-foreach(_part core data identify numerics sim simulation analyze model trim linearize pipeline synth modeling)
+foreach(_part core data hardware identify numerics sim simulation analyze model trim linearize pipeline synth modeling onboard qualification)
   if(TARGET galata_${_part})
     set_target_properties(galata_${_part} PROPERTIES EXPORT_NAME ${_part})
     target_compile_features(galata_${_part} PUBLIC cxx_std_20)
@@ -64,7 +64,7 @@ install(FILES "${GALATA_YAML_CPP_LICENSE_FILE}"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/galata/third_party/licenses" RENAME yaml-cpp.txt)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/examples" "${PROJECT_SOURCE_DIR}/models"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/galata" FILES_MATCHING
-  PATTERN "*.yaml" PATTERN "README.md" PATTERN "PROVENANCE.md")
+  PATTERN "*.yaml" PATTERN "*.csv" PATTERN "README.md" PATTERN "PROVENANCE.md")
 install(FILES "${PROJECT_SOURCE_DIR}/vcpkg.json" DESTINATION "${CMAKE_INSTALL_DATADIR}/galata")
 install(FILES "${PROJECT_SOURCE_DIR}/cmake/GalataInstall.cmake"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/galata/cmake")

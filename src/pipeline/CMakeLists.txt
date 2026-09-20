@@ -13,6 +13,7 @@ add_library(galata_pipeline
   capabilities.cpp
   data_capabilities.cpp
   identify_capabilities.cpp
+  onboard_capabilities.cpp
   design_capabilities.cpp
   model_capabilities.cpp
   quadrotor_capabilities.cpp
@@ -42,6 +43,7 @@ target_link_libraries(galata_pipeline
     galata::data
     galata::identify
     galata::simulation
+    galata::onboard
     Eigen3::Eigen
   PRIVATE
     galata::core

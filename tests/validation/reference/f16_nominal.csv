@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# NASA simupy-flight source boundary; see models/f16/PROVENANCE.md.
+# Local derivative slice at alpha=5 deg, beta=0, V=300 ft/s, zero controls/rates.
+quantity,value,units,location
+reference_alpha,5,deg,F16_aero.py nominal evaluation point
+reference_mach,0.2687088223712437,-,300 ft/s divided by 340.294 m/s
+lift_ref,0.4140683714351755,-,body CX/CZ rotated at alpha=5 deg
+drag_ref,0.040241567775392784,-,body CX/CZ rotated at alpha=5 deg
+pitching_moment_ref,-0.005,-,F16_aero.py zero-control nominal point
+lift_alpha,3.587831056001134,1/rad,central alpha difference h=1e-6 rad
+drag_alpha,0.426655998281289,1/rad,central alpha difference h=1e-6 rad
+pitching_moment_alpha,0.01718873385379155,1/rad,central alpha difference h=1e-6 rad
+lift_pitch_rate,31.39730221536267,1/rad,source qhat derivative
+pitching_moment_pitch_rate,-5.26,1/rad,source qhat derivative
+lift_elevator,0.4329586374407291,1/rad,central elevator difference h=1e-4 deg
+drag_elevator,0.04746474589996047,1/rad,central elevator difference h=1e-4 deg
+pitching_moment_elevator,-0.565795822691558,1/rad,central elevator difference h=1e-4 deg
+side_force_beta,-1.1459155902616467,1/rad,central beta difference h=1e-4 deg
+rolling_moment_beta,-0.1375098708313976,1/rad,central beta difference h=1e-4 deg
+yawing_moment_beta,0.21772396214971282,1/rad,central beta difference h=1e-4 deg
+rolling_moment_roll_rate,-0.42000000000000004,1/rad,source phat derivative
+yawing_moment_roll_rate,-0.012,1/rad,source phat derivative
+rolling_moment_yaw_rate,0.113,1/rad,source rhat derivative
+yawing_moment_yaw_rate,-0.38600000000000007,1/rad,source rhat derivative
+side_force_aileron,0.060160568488736445,1/rad,central aileron difference h=1e-4 deg
+rolling_moment_aileron,-0.14896902673401402,1/rad,central aileron difference h=1e-4 deg
+yawing_moment_aileron,-0.025783100780887042,1/rad,central aileron difference h=1e-4 deg
+side_force_rudder,0.16424790127083583,1/rad,central rudder difference h=1e-4 deg
+rolling_moment_rudder,0.02673803043943839,1/rad,central rudder difference h=1e-4 deg
+yawing_moment_rudder,-0.08594366926962338,1/rad,central rudder difference h=1e-4 deg

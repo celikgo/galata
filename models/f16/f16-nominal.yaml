@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# F-16 nominal derivative slice derived from NASA simupy-flight.
+# The source boundary and limitations are recorded in PROVENANCE.md.
+
+description: >-
+  F-16 — clean nominal local derivative slice, alpha = 5 degrees, beta = 0,
+  V = 300 ft/s
+
+citation: >-
+  NASA, simupy-flight, NESC Case 11 F-16 model, public repository revision
+  70754e6916afc206e8c0abb386d1a9c98bf8f561. See models/f16/PROVENANCE.md.
+
+geometry:
+  # F16_aero.py, original units ft^2 / ft / ft.
+  wing_area_m2: 27.870912
+  wing_span_m: 9.144
+  mean_aerodynamic_chord_m: 3.450336
+
+mass:
+  # F16_model.py reports 637.26 slug; F16_inertia.py is evaluated at 25% MAC.
+  # The positive source Ixz product is converted by the loader's aerospace
+  # off-diagonal convention.
+  mass_kg: 9300.108714
+  inertia_xx_kg_m2: 12874.84464613
+  inertia_yy_kg_m2: 75673.60773790
+  inertia_zz_kg_m2: 85552.09532127
+  product_of_inertia_xz_kg_m2: 1331.41295730
+
+thrust_incidence_rad: 0.0
+
+aero:
+  # Source condition: alpha=5 deg, beta=0, V=300 ft/s, zero controls/rates.
+  reference_alpha_rad: 0.08726646259971647
+  reference_mach: 0.2687088223712437
+
+  # Source body-axis CX/CZ converted to stability-axis CD/CL at alpha=5 deg.
+  lift_ref: 0.4140683714351755
+  drag_ref: 0.04024156777539278
+  pitching_moment_ref: -0.005
+  lift_alpha: 3.587831056001134
+  drag_alpha: 0.426655998281289
+  pitching_moment_alpha: 0.01718873385379155
+  lift_pitch_rate: 31.39730221536267
+  pitching_moment_pitch_rate: -5.26
+  pitching_moment_alpha_dot: 0.0
+  lift_elevator: 0.4329586374407291
+  drag_elevator: 0.04746474589996047
+  pitching_moment_elevator: -0.565795822691558
+
+  lateral_axes: body
+  side_force_beta: -1.145915590261647
+  rolling_moment_beta: -0.1375098708313976
+  yawing_moment_beta: 0.2177239621497128
+  rolling_moment_roll_rate: -0.4200000000000000
+  yawing_moment_roll_rate: -0.0120000000000000
+  rolling_moment_yaw_rate: 0.1130000000000000
+  yawing_moment_yaw_rate: -0.3860000000000001
+  side_force_aileron: 0.06016056848873645
+  rolling_moment_aileron: -0.1489690267340140
+  yawing_moment_aileron: -0.02578310078088704
+  side_force_rudder: 0.1642479012708358
+  rolling_moment_rudder: 0.02673803043943839
+  yawing_moment_rudder: -0.08594366926962338

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NASA GTM_DesignSim T2 coefficient slice derived at alpha=4 deg, beta=0.
+# Source, derivation and rights boundary: models/gtm/PROVENANCE.md.
+# These are Galata adapter values, not an independent flight-validation set.
+quantity,value,units,location
+reference_alpha,4,deg,C6_bas alpha grid point
+reference_mach,0.1134,-,75 kt nominal setup / sea-level speed-of-sound approximation
+lift_ref,0.375391554095,-,C6_bas alpha=4 beta=0 converted from CX CZ
+drag_ref,0.0359494512169,-,C6_bas alpha=4 beta=0 converted from CX CZ
+pitching_moment_ref,0.0459604307702,-,C6_bas alpha=4 beta=0 Cm
+lift_alpha,4.83931406271,1/rad,central difference alpha=2..6 deg
+drag_alpha,0.391205118205,1/rad,central difference alpha=2..6 deg
+pitching_moment_alpha,-1.63314320749,1/rad,central difference alpha=2..6 deg
+lift_pitch_rate,24.9651125763,1/rad,near-zero dC3_q
+pitching_moment_pitch_rate,-41.6279433805,1/rad,near-zero dC3_q
+lift_elevator,0.477883832402,1/rad,zero-centred dC3_ele
+drag_elevator,0.0301052441295,1/rad,zero-centred dC3_ele
+pitching_moment_elevator,-1.84507735878,1/rad,zero-centred dC3_ele
+side_force_beta,-1.01072249692,1/rad,central difference beta=-2..+2 deg
+rolling_moment_beta,-0.141981195641,1/rad,central difference beta=-2..+2 deg
+yawing_moment_beta,0.217580867031,1/rad,central difference beta=-2..+2 deg
+rolling_moment_roll_rate,-0.363726825389,1/rad,near-zero dC3_p
+yawing_moment_roll_rate,-0.0351040560444,1/rad,near-zero dC3_p
+rolling_moment_yaw_rate,0.124003056506,1/rad,near-zero dC3_r
+yawing_moment_yaw_rate,-0.382958012501,1/rad,near-zero dC3_r
+side_force_aileron,-0.00938108322602,1/rad,zero-centred dC6_ail
+rolling_moment_aileron,-0.0389801490659,1/rad,zero-centred dC6_ail
+yawing_moment_aileron,-0.000964693886691,1/rad,zero-centred dC6_ail
+side_force_rudder,0.337831228449,1/rad,dC6_rud -10..0 deg branch
+rolling_moment_rudder,0.0293854553463,1/rad,dC6_rud -10..0 deg branch
+yawing_moment_rudder,-0.169351934760,1/rad,dC6_rud -10..0 deg branch

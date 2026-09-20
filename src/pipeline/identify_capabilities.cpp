@@ -21,6 +21,7 @@
 //     implies it. ADR-0008 requires the three to be separable in the evidence;
 //     this file is where that separation is built rather than asserted.
 
+#include "galata/identify/flight_test_campaign.hpp"
 #include "galata/identify/greybox.hpp"
 #include "galata/identify/static_fit.hpp"
 #include "galata/identify/validate.hpp"
@@ -28,6 +29,7 @@
 #include "galata/version.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -184,6 +186,76 @@ Eigen::VectorXd initial_state_for(const StageContext& context,
   return initial;
 }
 
+Eigen::VectorXd initial_vehicle_state_for(const StageContext& context,
+                                          const VehicleArtifact& subject,
+                                          const data::Record& record,
+                                          const std::string& capability) {
+  const model::VehicleModel& model = *subject.model;
+  const bool from_trim = context.input->get("trim") != nullptr;
+  const bool declared = context.input->get("initial_extended_state") != nullptr;
+  if (from_trim == declared) {
+    throw std::invalid_argument(
+        capability
+        + ": give exactly one of trim or initial_extended_state; the starting state must "
+          "be explicit and unambiguous");
+  }
+
+  Eigen::VectorXd initial;
+  if (from_trim) {
+    const auto& trimmed =
+        context.upstream_at("trim").payload_as<VehicleTrimArtifact>("vehicle_trim");
+    if (trimmed.model.get() != subject.model.get()) {
+      throw std::invalid_argument(capability
+                                  + ": the trim belongs to a different vehicle artifact");
+    }
+    if (trimmed.extended_state.size() != model.extended_state_size()) {
+      throw std::invalid_argument(capability
+                                  + ": the trim state width does not match the vehicle model");
+    }
+    initial = trimmed.extended_state;
+  } else {
+    initial = numbers_at(context.input->get("initial_extended_state"),
+                         capability + ": initial_extended_state",
+                         model.extended_state_size());
+  }
+
+  const ValuePtr from_record = context.input->get("initial_state_from_record");
+  if (from_record) {
+    const std::vector<std::string> state_names = model.state_names();
+    for (const ValuePtr& entry : from_record->as_list()) {
+      const std::string state = entry->string_at("state");
+      const std::string channel = entry->string_at("channel");
+      const auto found = std::find(state_names.begin(), state_names.end(), state);
+      if (found == state_names.end()) {
+        throw std::invalid_argument(capability + ": initial_state_from_record names '" + state
+                                    + "', which is not a state of this model");
+      }
+      const data::Channel* samples = record.find(channel);
+      if (samples == nullptr || samples->samples.empty()) {
+        throw std::invalid_argument(capability + ": initial_state_from_record reads channel '"
+                                    + channel + "', which is absent or empty");
+      }
+      initial(static_cast<Eigen::Index>(found - state_names.begin())) = samples->samples.front();
+    }
+  }
+  model::VehicleModel::project(initial);
+  return initial;
+}
+
+model::Environment validation_environment_for(const StageContext& context) {
+  if (context.input->get("trim")) {
+    const auto& trimmed =
+        context.upstream_at("trim").payload_as<VehicleTrimArtifact>("vehicle_trim");
+    return trimmed.environment;
+  }
+  model::Environment environment = model::Environment::at_geometric_altitude(
+      context.input->number_at("altitude_m", 0.0), context.input->number_at("delta_isa_k", 0.0));
+  if (const ValuePtr wind = context.input->get("wind_ned_m_s")) {
+    environment.wind_ned_m_s = numbers_at(wind, "identify.validate.vehicle: wind_ned_m_s", 3);
+  }
+  return environment;
+}
+
 const QuadrotorArtifact& quadrotor_input(const StageContext& context, const char* key) {
   return context.upstream_at(key).payload_as<QuadrotorArtifact>("quadrotor");
 }
@@ -192,6 +264,84 @@ std::string scientific(double value, int digits = 3) {
   std::ostringstream out;
   out << std::scientific << std::setprecision(digits) << value;
   return out.str();
+}
+
+struct ValidationAcceptance {
+  std::vector<identify::ValidationCriterion> criteria;
+  identify::FlightTestEvidence flight_test_evidence;
+  std::string campaign_manifest_path;
+};
+
+std::optional<ValidationAcceptance> validation_acceptance_from_input(const StageContext& context) {
+  const ValuePtr acceptance = context.input->get("acceptance");
+  if (!acceptance) {
+    return std::nullopt;
+  }
+  if (acceptance->kind() != Value::Kind::Map) {
+    throw std::invalid_argument("identify.validate.vehicle: acceptance must be a map");
+  }
+  const ValuePtr criteria = acceptance->get("outputs");
+  if (!criteria) {
+    throw std::invalid_argument(
+        "identify.validate.vehicle: acceptance.outputs is required when acceptance is given");
+  }
+  ValidationAcceptance parsed;
+  for (const ValuePtr& entry : criteria->as_list()) {
+    if (!entry || entry->kind() != Value::Kind::Map) {
+      throw std::invalid_argument(
+          "identify.validate.vehicle: acceptance.outputs entries must be maps");
+    }
+    identify::ValidationCriterion criterion;
+    criterion.channel = entry->string_at("channel");
+    criterion.state_name = entry->string_at("state");
+    criterion.max_rmse_is_defined = entry->get("max_rmse") != nullptr;
+    if (criterion.max_rmse_is_defined) {
+      criterion.max_rmse = entry->number_at("max_rmse");
+    }
+    criterion.max_absolute_error_is_defined = entry->get("max_absolute_error") != nullptr;
+    if (criterion.max_absolute_error_is_defined) {
+      criterion.max_absolute_error = entry->number_at("max_absolute_error");
+    }
+    criterion.minimum_fit_fraction_is_defined = entry->get("min_fit_fraction") != nullptr;
+    if (criterion.minimum_fit_fraction_is_defined) {
+      criterion.minimum_fit_fraction = entry->number_at("min_fit_fraction");
+    }
+    if (!criterion.max_rmse_is_defined && !criterion.max_absolute_error_is_defined
+        && !criterion.minimum_fit_fraction_is_defined) {
+      throw std::invalid_argument(
+          "identify.validate.vehicle: every acceptance output needs at least one numerical budget");
+    }
+    parsed.criteria.push_back(std::move(criterion));
+  }
+
+  const ValuePtr evidence = acceptance->get("evidence");
+  if (evidence) {
+    if (evidence->kind() != Value::Kind::Map) {
+      throw std::invalid_argument("identify.validate.vehicle: acceptance.evidence must be a map");
+    }
+    parsed.flight_test_evidence.evidence_class = evidence->string_at("evidence_class", "");
+    parsed.flight_test_evidence.aircraft_id = evidence->string_at("aircraft_id", "");
+    parsed.flight_test_evidence.aircraft_configuration =
+        evidence->string_at("aircraft_configuration", "");
+    parsed.flight_test_evidence.test_plan_id = evidence->string_at("test_plan_id", "");
+    parsed.flight_test_evidence.calibration_manifest_sha256 =
+        evidence->string_at("calibration_manifest_sha256", "");
+    parsed.flight_test_evidence.configuration_manifest_sha256 =
+        evidence->string_at("configuration_manifest_sha256", "");
+    parsed.flight_test_evidence.reviewer_id = evidence->string_at("reviewer_id", "");
+    parsed.flight_test_evidence.reviewer_attestation_sha256 =
+        evidence->string_at("reviewer_attestation_sha256", "");
+    parsed.flight_test_evidence.safety_review_complete =
+        evidence->bool_at("safety_review_complete", false);
+  }
+  if (const ValuePtr campaign_manifest = acceptance->get("campaign_manifest")) {
+    parsed.campaign_manifest_path = campaign_manifest->as_string();
+    if (parsed.campaign_manifest_path.empty()) {
+      throw std::invalid_argument(
+          "identify.validate.vehicle: acceptance.campaign_manifest must not be empty");
+    }
+  }
+  return parsed;
 }
 
 // --- identify.greybox ------------------------------------------------------
@@ -479,7 +629,120 @@ Artifact validate_capability(const StageContext& context) {
   Artifact artifact;
   artifact.kind = "validation";
   artifact.summary = summary.str();
-  artifact.payload = ValidationArtifact{result, subject.identity};
+  artifact.payload = ValidationArtifact{result, subject.identity, std::nullopt, std::nullopt};
+  return artifact;
+}
+
+Artifact validate_vehicle_capability(const StageContext& context) {
+  const auto& subject = context.upstream_at("model").payload_as<VehicleArtifact>("vehicle_model");
+  if (!subject.model) {
+    throw std::invalid_argument(
+        "identify.validate.vehicle: the vehicle artifact does not carry a model");
+  }
+  const auto& record = context.upstream_at("record").payload_as<data::Record>("measured_record");
+
+  identify::VehicleValidationRequest request;
+  request.step_s = context.input->number_at("step_s");
+  request.initial_extended_state =
+      initial_vehicle_state_for(context, subject, record, "identify.validate.vehicle");
+  request.environment = validation_environment_for(context);
+  request.caller_declares_different_data = context.input->bool_at("declare_different_data", false);
+
+  const ValuePtr outputs = context.input->get("outputs");
+  if (!outputs) {
+    throw std::invalid_argument("identify.validate.vehicle: outputs is required");
+  }
+  for (const ValuePtr& entry : outputs->as_list()) {
+    request.outputs.push_back({entry->string_at("channel"), entry->string_at("state")});
+  }
+
+  const ValuePtr commands = context.input->get("command_channels");
+  if (!commands) {
+    throw std::invalid_argument("identify.validate.vehicle: command_channels is required");
+  }
+  for (const ValuePtr& entry : commands->as_list()) {
+    request.command_channels.push_back(entry->as_string());
+  }
+
+  const std::string declared_digest = context.input->string_at("estimation_record_sha256", "");
+  if (context.input->get("estimation_record") != nullptr) {
+    request.estimation_record =
+        &context.upstream_at("estimation_record").payload_as<data::Record>("measured_record");
+  }
+  request.estimation_record_sha256 = declared_digest;
+
+  const identify::ValidationResult result =
+      identify::validate_vehicle_model(*subject.model, record, request);
+  std::optional<ValidationAcceptance> acceptance = validation_acceptance_from_input(context);
+  if (acceptance && !acceptance->campaign_manifest_path.empty()) {
+    const std::string manifest_path =
+        context.resolve_input_path(acceptance->campaign_manifest_path);
+    const std::string manifest =
+        context.read_input(acceptance->campaign_manifest_path, 2U * 1024U * 1024U);
+    const identify::FlightTestCampaign campaign = identify::parse_flight_test_campaign(manifest);
+    const std::filesystem::path manifest_file(manifest_path);
+    const std::filesystem::path package_root =
+        manifest_file.has_parent_path() ? manifest_file.parent_path() : std::filesystem::path(".");
+    (void)identify::verify_flight_test_campaign(campaign, package_root);
+    // The campaign verifier reads directly from its package root so it can
+    // enforce the package's own symlink and containment rules. Read the same
+    // verified bytes through the run-scoped file ledger as well, so the run
+    // manifest retains every controlled evidence input rather than only the
+    // campaign manifest and flight record.
+    constexpr std::size_t kMaximumCampaignFileBytes = 256U * 1024U * 1024U;
+    for (const identify::FlightTestCampaignFile& file : campaign.files) {
+      (void)context.read_input((package_root / file.relative_path).string(),
+                               kMaximumCampaignFileBytes);
+    }
+    const auto flight_record = std::find_if(
+        campaign.files.begin(),
+        campaign.files.end(),
+        [](const identify::FlightTestCampaignFile& file) { return file.role == "flight_record"; });
+    if (flight_record == campaign.files.end() || record.source_sha256 != flight_record->sha256) {
+      throw std::invalid_argument(
+          "identify.validate.vehicle: acceptance.campaign_manifest flight_record does not "
+          "match the validation record bytes");
+    }
+    acceptance->flight_test_evidence = campaign.evidence;
+    acceptance->flight_test_evidence.campaign_manifest_sha256 = campaign.manifest_sha256;
+    acceptance->flight_test_evidence.campaign_package_verified = true;
+  }
+  std::optional<identify::ValidationGate> gate;
+  std::optional<identify::FlightTestGate> flight_test_gate;
+  if (acceptance) {
+    gate = identify::evaluate_validation_gate(result, acceptance->criteria);
+    flight_test_gate = identify::evaluate_flight_test_gate(
+        result, acceptance->criteria, acceptance->flight_test_evidence);
+  }
+
+  std::ostringstream summary;
+  summary << subject.vehicle_kind << ": " << result.outputs.size() << " output(s) over "
+          << result.sample_count
+          << " sample(s); separation: " << identify::to_string(result.separation);
+  if (result.caller_declaration_was_contradicted) {
+    summary << " (THE STUDY'S OWN DECLARATION WAS CONTRADICTED)";
+  }
+  for (const identify::ValidationOutput& output : result.outputs) {
+    summary << "; " << output.channel << " RMSE " << scientific(output.rmse);
+    if (output.fit_fraction_is_defined) {
+      summary << ", fit " << std::fixed << std::setprecision(3) << output.fit_fraction;
+      summary.unsetf(std::ios::floatfield);
+    } else {
+      summary << ", no fit fraction";
+    }
+  }
+  if (gate) {
+    summary << "; acceptance gate: " << identify::to_string(gate->status) << " ("
+            << gate->passed_count << "/" << gate->criteria_count << " criteria)";
+  }
+  if (flight_test_gate) {
+    summary << "; flight-test evidence gate: " << identify::to_string(flight_test_gate->status);
+  }
+
+  Artifact artifact;
+  artifact.kind = "validation";
+  artifact.summary = summary.str();
+  artifact.payload = ValidationArtifact{result, subject.identity, gate, flight_test_gate};
   return artifact;
 }
 
@@ -585,6 +848,30 @@ void register_identify_capabilities(Registry& registry) {
        "initial_extended_state",
        "initial_state_from_record",
        "step_s"}});
+
+  registry.add(Capability{
+      "identify.validate.vehicle",
+      "Run a built-in fixed-wing, multirotor or helicopter model against a measured record with "
+      "explicit state, environment, timing and held-out-data declarations; report numerical "
+      "prediction error without making an airworthiness claim",
+      "validation",
+      Capability::State::ImplementedUnvalidated,
+      validate_vehicle_capability,
+      {"model",
+       "record",
+       "estimation_record",
+       "estimation_record_sha256",
+       "declare_different_data",
+       "outputs",
+       "command_channels",
+       "trim",
+       "initial_extended_state",
+       "initial_state_from_record",
+       "step_s",
+       "altitude_m",
+       "delta_isa_k",
+       "wind_ned_m_s",
+       "acceptance"}});
 }
 
 }  // namespace galata::pipeline

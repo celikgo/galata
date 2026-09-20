@@ -1901,6 +1901,12 @@ Artifact simulate_helicopter_capability(const StageContext& context) {
             apply_failure_event(failure_events[next_failure], simulation_model, state));
         ++next_failure;
       }
+      // The boundary state at this timestamp is the state after all events at
+      // the boundary. Without replacing the previously stored sample, the
+      // trajectory would pair the post-event wind with the pre-event state,
+      // making a physically continuous wind step appear discontinuous in the
+      // exported record.
+      all_states.back() = state;
       if (step == steps) {
         break;
       }

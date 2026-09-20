@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Published A-7A condition-1 derivative set through the ordinary nonlinear
+# aircraft workflow. This is a source-transcription regression/example, not an
+# airworthiness or aircraft-validation claim.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.aircraft.derivatives
+    input:
+      path: ../../models/a7a/a7a-fc1.yaml
+
+  - id: trim
+    capability: trim.level
+    input:
+      aircraft: { from: aircraft }
+      altitude_m: 0.0
+      airspeed_m_s: 85.0392
+      flight_path_angle_deg: 0.0
+      tolerance: 1.0e-10
+
+  - id: longitudinal
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: longitudinal
+      report_truncation_error: true
+
+  - id: lateral
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: lateral
+      report_truncation_error: true
+
+  - id: longitudinal_modes
+    capability: analyze.modes
+    input:
+      system: { from: longitudinal }
+      classify: true
+
+  - id: lateral_modes
+    capability: analyze.modes
+    input:
+      system: { from: lateral }
+      classify: true
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: A-7A — trim, linearisation and modes at NASA condition 1
+      sections:
+        - { from: trim }
+        - { from: longitudinal }
+        - { from: longitudinal_modes }
+        - { from: lateral }
+        - { from: lateral_modes }
+      path: trim-and-modes.md

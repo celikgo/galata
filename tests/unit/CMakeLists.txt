@@ -69,17 +69,22 @@ add_executable(galata_unit_tests
   test_extended_linearize.cpp
   test_sampled_sensor.cpp
   test_response_metrics.cpp
+  test_hardware.cpp
+  test_onboard_runtime.cpp
+  test_onboard_controller.cpp
 )
 
 target_link_libraries(galata_unit_tests
   PRIVATE
     galata::core
+    galata::hardware
     galata::data
     galata::identify
     galata::numerics
     galata::analyze
     galata::model
     galata::modeling
+    galata::onboard
     galata::trim
     galata::linearize
     galata::synth
@@ -95,6 +100,12 @@ target_compile_definitions(galata_unit_tests
   # read is a model file nobody checks.
   PRIVATE GALATA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+if(TARGET galata_test_controller)
+  add_dependencies(galata_unit_tests galata_test_controller)
+  target_compile_definitions(galata_unit_tests PRIVATE
+    GALATA_TEST_CONTROLLER_PATH="$<TARGET_FILE:galata_test_controller>")
+endif()
 
 target_link_libraries(galata_unit_tests PRIVATE galata::validation_case_check)
 add_dependencies(galata_unit_tests galata_ulog_fixture)

@@ -23,14 +23,14 @@ configuration before any shared example is considered compatible.
 
 | Study | Output | SHA-256 |
 |---|---|---|
-| `nt33a-trim-and-linearise/study.yaml` | `trim-and-modes.md` | `3ca5a498a60c6c0b550fea58828377051b619fb45a8c7fbc84b9282ef6e2c3cd` |
-| `quadrotor-sampled-control/study.yaml` | `operating-point.yaml` | `97a43f4632e5998e67e938fdf3d378b789de09764624288bbcb72783df4513f2` |
-| `quadrotor-sampled-control/study.yaml` | `sampled-control.md` | `7a1399189ffb4206929b47a1e580b46e8a0bdec8c5903dfdb162a4f7e29148e9` |
-| `quadrotor-sampled-control/study.yaml` | `sampled-run.csv` | `feee6fabc0e5493344b711efa68f8f88cf007fff42420cc9eaca9e6510a4800a` |
-| `heli-performance-acceptance/study.yaml` | `performance.md` | `01bd9baa54cdf440904d79f27eba36cb45e5e56b3a3b818de064e24e31c3c5d9` |
-| `heli-performance-acceptance/study.yaml` | `open.csv` | `f9e32dd6d9e09d58f83b21714e217fcc59e6ab0d23ffd156f8910390cd14f232` |
-| `heli-performance-acceptance/study.yaml` | `closed.csv` | `6afe0117b427de231d9dd6e7ceb059a20141b37aa075bea25513699ba7bf1a83` |
-| `heli-performance-acceptance/study.yaml` | `closed.csv.controller.csv` | `ddc474083c89fc3fbbb59c2e9e8ff4b917a6978df9d0a86b082a93ed25748aa8` |
+| `examples/nt33a-trim-and-linearise/study.yaml` | `trim-and-modes.md` | `3ca5a498a60c6c0b550fea58828377051b619fb45a8c7fbc84b9282ef6e2c3cd` |
+| `examples/quadrotor-sampled-control/study.yaml` | `operating-point.yaml` | `97a43f4632e5998e67e938fdf3d378b789de09764624288bbcb72783df4513f2` |
+| `examples/quadrotor-sampled-control/study.yaml` | `sampled-control.md` | `7a1399189ffb4206929b47a1e580b46e8a0bdec8c5903dfdb162a4f7e29148e9` |
+| `examples/quadrotor-sampled-control/study.yaml` | `sampled-run.csv` | `feee6fabc0e5493344b711efa68f8f88cf007fff42420cc9eaca9e6510a4800a` |
+| `examples/heli-performance-acceptance/study.yaml` | `performance.md` | `01bd9baa54cdf440904d79f27eba36cb45e5e56b3a3b818de064e24e31c3c5d9` |
+| `examples/heli-performance-acceptance/study.yaml` | `open.csv` | `f9e32dd6d9e09d58f83b21714e217fcc59e6ab0d23ffd156f8910390cd14f232` |
+| `examples/heli-performance-acceptance/study.yaml` | `closed.csv` | `6afe0117b427de231d9dd6e7ceb059a20141b37aa075bea25513699ba7bf1a83` |
+| `examples/heli-performance-acceptance/study.yaml` | `closed.csv.controller.csv` | `ddc474083c89fc3fbbb59c2e9e8ff4b917a6978df9d0a86b082a93ed25748aa8` |
 
 The current rerun reproduced every listed digest on this macOS arm64 build.
 The comparison is intentionally made on the family-specific compatibility

@@ -5,6 +5,7 @@
 galata_find_eigen()
 
 add_library(galata_identify
+  flight_test_campaign.cpp
   static_fit.cpp
   greybox.cpp
   validate.cpp

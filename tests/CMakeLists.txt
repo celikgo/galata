@@ -13,6 +13,19 @@
 find_package(GTest CONFIG REQUIRED)
 include(GoogleTest)
 
+if(UNIX)
+  add_library(galata_test_controller SHARED fixtures/test_controller.cpp)
+  target_include_directories(galata_test_controller PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_BINARY_DIR}/generated/include")
+  set_target_properties(galata_test_controller PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    PREFIX ""
+    OUTPUT_NAME "galata-test-controller"
+    FOLDER "tests")
+endif()
+
 add_subdirectory(unit)
 add_subdirectory(property)
 add_subdirectory(integration)
@@ -170,6 +183,54 @@ if(UNIX AND TARGET galata_cli)
       "GALATA_PROJECT_TIMEOUT_S=${galata_project_timeout_s}"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_project_routes.py")
   set_tests_properties(ProjectRoutes PROPERTIES LABELS "integration" TIMEOUT 600)
+  add_test(NAME OnboardCLI
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_onboard_cli.py")
+  set_tests_properties(OnboardCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME OnboardRunnerCLI
+    COMMAND "${CMAKE_COMMAND}" -E env
+      "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "GALATA_TEST_CONTROLLER=$<TARGET_FILE:galata_test_controller>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_onboard_runner.py")
+  set_tests_properties(OnboardRunnerCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME OnboardTargetEvidenceCLI
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_onboard_target_evidence.py")
+  set_tests_properties(OnboardTargetEvidenceCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME OnboardDeploymentFixture
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_onboard_deployment_fixture.py")
+  set_tests_properties(OnboardDeploymentFixture PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME UH60AModelCLI
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_uh60a_model.py")
+  set_tests_properties(UH60AModelCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME FlightTestCampaignCLI
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_flight_test_campaign_cli.py")
+  set_tests_properties(FlightTestCampaignCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME FlightTestValidationReceipt
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_flight_test_validation.py")
+  set_tests_properties(FlightTestValidationReceipt PROPERTIES LABELS "integration" TIMEOUT 180)
+  add_test(NAME QualificationDossierCLI
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_qualification_dossier_cli.py")
+  set_tests_properties(QualificationDossierCLI PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME ProductionReadinessAudit
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_production_readiness.py")
+  set_tests_properties(ProductionReadinessAudit PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME ProductionEvidenceContract
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_production_contract.py")
+  set_tests_properties(ProductionEvidenceContract PROPERTIES LABELS "integration" TIMEOUT 240)
+  add_test(NAME AircraftValidationEvidence
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_aircraft_validation.py")
+  set_tests_properties(AircraftValidationEvidence PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME AircraftValidationContract
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_aircraft_validation_contract.py")
+  set_tests_properties(AircraftValidationContract PROPERTIES LABELS "integration" TIMEOUT 60)
   add_test(NAME DesktopPackageContract
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_desktop_packaging.py")
   set_tests_properties(DesktopPackageContract PROPERTIES LABELS "integration" TIMEOUT 60)

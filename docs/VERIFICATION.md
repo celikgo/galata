@@ -59,6 +59,12 @@ Four checks stand behind it, each a test rather than a convention:
 | Trim of a nonlinear model against the published flight condition | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-2 | **validated** — Dynamic pressure 61.78 psf against a published 61.7; Mach 0.2042 against 0.204. The trimmed alpha is 0.0519 deg below the published 2.2, and a test asserts that difference is exactly the drag-inclination term the conventional C_L = W/(qS) relation neglects. |
 | Linearised dimensional derivatives from a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Table II-7 | **validated** — Seven numbers the report computed from the same non-dimensional set by a different route, reproduced to 0.26%. The sharpest comparison in the suite. |
 | All five classical modes from trim and linearisation of a nonlinear model | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Tables II-4 and II-8 | **validated** — To 1.05%, worst case Dutch roll zeta. The input is a non-dimensional derivative set and some geometry; there is no matrix anywhere in it. |
+| Navion nominal derivative model through trim, linearisation and modal classification | Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969), Section X, Tables X-A through X-E | **validated**, with a caveat — The published Navion condition and modal values are reproduced within a fixed 3% rounded-source budget. This validates a second fixed-wing derivative transcription and the shared workflow at one nominal condition; it does not validate a global Navion model, a real aircraft, or any flight envelope. |
+| A-7A clean flexible-airplane derivative model through trim, linearisation and modal classification | Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969), Section II, Tables II-A through II-F | **validated**, with a caveat — The clean flexible-airplane condition-1 derivative set reproduces the source's dimensional derivatives and published short-period, spiral, roll-subsidence and Dutch-roll factors within a fixed 5% rounded-source budget. This adds a third published fixed-wing transcription; it does not validate a global A-7A model, structural flexibility, or any flight envelope. |
+| A-4D clean flexible-airplane derivative model through trim and local linearisation | Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969), Section III, Tables III-A through III-C | **validated**, with a caveat — All printed longitudinal and lateral dimensional derivatives are reproduced by the loaded coefficient conversion, and the nonlinear model trims and linearises at the declared speed. Rounded source intercepts produce a local trim offset, so this case does not claim modal agreement at the printed angle; it is not a global A-4D model or flight evidence. |
+| F-4C power-approach derivative model through trim and local linearisation | Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972), Section IV, Figure IV-1 and Table IV-1 | **validated**, with a caveat — The F-4C power-approach condition preserves the source's geometry, mass, inertia and non-dimensional derivatives, including the stability-to-body axis conversion, and executes the shared trim, linearisation and mode path. It is a fifth narrow fixed-wing transcription, not a global F-4C model, flight-test validation or certification artifact. |
+| NASA Generic Transport Model T2 nominal derivative slice through load and trim | NASA GTM_DesignSim, LAR-17625-1, and Cunningham et al., AIAA-2011-6451 | **validated**, with a caveat — A controlled first-order slice derived from NASA's public T2 polynomial database is loaded, checked against its committed derivation boundary and trimmed. This adds a sixth fixed-wing reference surface; it is not a port of NASA's nonlinear database, not flight validation and not a certification artifact. |
+| NASA F-16 nominal derivative slice through load and trim | NASA simupy-flight, NESC Case 11 F-16 model, public revision 70754e6916afc206e8c0abb386d1a9c98bf8f561 | **validated**, with a caveat — A controlled first-order slice derived from NASA's public simupy-flight F-16 model is loaded, checked against its committed derivation boundary and trimmed. This adds a seventh fixed-wing reference surface; it is not the nonlinear F-16 model, not flight validation and not a certification artifact. |
 | Determinism tier 1 — same platform, byte-identical | ADR-0004 | **validated** — Gated on Linux and macOS over 187 fingerprinted values. The strongest of these is splitting: 4000 steps must equal 1500 then 2500, bit for bit. |
 | Determinism tier 2 — cross-platform, bounded | ADR-0004 | **validated**, with a caveat — Bounded at 1e-9 relative between every pair of platforms, not bit-identical, because platform math libraries disagree on sin in the last bits. Values downstream of a finite difference are excluded from this tier and held byte-identical in tier 1 instead — 52 of the 187 values — because dividing by h amplifies a libm disagreement by 1/h. |
 | Frequency response G(jw) against closed-form transfer functions | Closed-form evaluation of rational transfer functions at s = jw | **validated** — The reference is arithmetic, not a document: for a system whose transfer function can be written down, G(jw) is a ratio of polynomials and the comparison is exact to rounding. |
@@ -120,6 +126,12 @@ ctest --preset dev -R '<test name>'
 | Trim of a nonlinear model against the published flight condition | `Nt33aChain.TrimConvergesToMachinePrecision` (validation)<br>`Nt33aChain.TrimSatisfiesTheClosedFormForceBalanceExactly` (validation)<br>`Nt33aChain.DynamicPressureAndMachMatchThePublishedFlightCondition` (validation)<br>`Nt33aChain.TrimAlphaDiffersFromThePublishedValueByExactlyTheDragInclinationTerm` (validation) |
 | Linearised dimensional derivatives from a nonlinear model | `Nt33aChain.LateralDimensionalDerivativesMatchThePublishedTable` (validation)<br>`Nt33aChain.TruncationErrorIsNegligible` (validation)<br>`Nt33aChain.TheLongitudinalAndLateralAxesDecoupleAtThisTrim` (validation) |
 | All five classical modes from trim and linearisation of a nonlinear model | `Nt33aChain.AllFiveClassicalModesMatchThePublishedValues` (validation)<br>`Nt33aChain.ThePhugoidDampingThatTheHandAssembledMatrixMissedIsRecovered` (validation) |
+| Navion nominal derivative model through trim, linearisation and modal classification | `NavionModel.PublishedNominalConditionTrimsAtTheDeclaredMachAndDynamicPressure` (validation)<br>`NavionModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget` (validation) |
+| A-7A clean flexible-airplane derivative model through trim, linearisation and modal classification | `A7AModel.PublishedConditionLoadsAndTrims` (validation)<br>`A7AModel.PublishedDimensionalDerivativesAreReproducedAtTheReferencePoint` (validation)<br>`A7AModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget` (validation) |
+| A-4D clean flexible-airplane derivative model through trim and local linearisation | `A4DModel.PublishedConditionLoadsAndTrims` (validation)<br>`A4DModel.LoadedCoefficientsReproduceEveryPublishedDimensionalDerivative` (validation)<br>`A4DModel.NonlinearTrimLinearisationIsFiniteWithMeasuredCoupling` (validation) |
+| F-4C power-approach derivative model through trim and local linearisation | `F4CModel.PublishedConditionLoadsWithDeclaredUnitsAndAxes` (validation)<br>`F4CModel.NonlinearTrimAndLinearisationAreFiniteAtThePublishedSpeed` (validation) |
+| NASA Generic Transport Model T2 nominal derivative slice through load and trim | `GtmModel.NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass` (validation)<br>`GtmModel.DerivedCoefficientsMatchTheCommittedSourceBoundary` (validation)<br>`GtmModel.NominalSliceTrimsAndReportsFiniteDynamics` (validation) |
+| NASA F-16 nominal derivative slice through load and trim | `F16Model.NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass` (validation)<br>`F16Model.DerivedCoefficientsMatchTheCommittedSourceBoundary` (validation)<br>`F16Model.NominalSliceTrimsAndReportsFiniteDynamics` (validation) |
 | Determinism tier 1 — same platform, byte-identical | `Determinism.LongIntegrationIsBitIdenticalAcrossRuns` (determinism)<br>`Determinism.SplittingAnIntegrationInTwoGivesTheSameResult` (determinism)<br>`Determinism.ModalDecompositionIsBitIdenticalAndOrderStable` (determinism)<br>`Determinism.AtmosphereDoesNotDependOnQueryOrder` (determinism) |
 | Determinism tier 2 — cross-platform, bounded | `Determinism.TheFingerprintTrajectoryIsNotChaotic` (determinism) |
 | Frequency response G(jw) against closed-form transfer functions | `FrequencyResponse.FirstOrderLagMatchesItsClosedForm` (unit)<br>`FrequencyResponse.SecondOrderResonantPeakMatchesItsClosedForm` (unit)<br>`FrequencyResponse.RationalTransferFunctionWithZerosMatchesItsRatio` (unit)<br>`FrequencyResponse.PhaseIsUnwrappedAcrossTheHalfTurnBoundary` (unit) |
@@ -159,7 +171,7 @@ against.
 | `analyze.helicopter_response` | implemented, unvalidated | — |
 | `analyze.hinfnorm` | implemented, unvalidated | — |
 | `analyze.margins` | implemented and validated | `analyze.margins` |
-| `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes` |
+| `analyze.modes` | implemented and validated | `nt33a.lateral_modes_hand`, `nt33a.longitudinal_modes_hand`, `nt33a.phugoid_damping_hand`, `analyze.classification`, `nt33a.chain_modes`, `navion.chain_modes`, `a7a.chain_modes`, `f4c.chain_modes` |
 | `analyze.nonlinear_agreement` | implemented, unvalidated | — |
 | `analyze.robust_bounds` | implemented, unvalidated | — |
 | `analyze.sensitivity` | implemented and validated | `analyze.sensitivity`, `analyze.sigma.grid_bound`, `analyze.sensitivity.bounds` |
@@ -170,10 +182,12 @@ against.
 | `identify.greybox` | implemented, unvalidated | — |
 | `identify.static_fit` | implemented, unvalidated | — |
 | `identify.validate` | implemented, unvalidated | — |
+| `identify.validate.vehicle` | implemented, unvalidated | — |
 | `linearize.extended` | implemented, unvalidated | `quadrotor.hover_linearisation` |
-| `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `linearize.finitediff` | implemented and validated | `nt33a.linearised_derivatives`, `nt33a.chain_modes`, `navion.chain_modes`, `a7a.chain_modes`, `a4d.chain_modes`, `f4c.chain_modes` |
+| `linearize.shared` | implemented, unvalidated | — |
 | `linearize.vehicle` | implemented, unvalidated | — |
-| `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `model.aircraft.derivatives` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes`, `navion.chain_modes`, `a7a.chain_modes`, `a4d.chain_modes`, `f4c.chain_modes`, `gtm_t2.nominal_slice`, `f16.nominal_slice` |
 | `model.channels` | implemented, unvalidated | — |
 | `model.compile` | implemented, unvalidated | — |
 | `model.control_system` | implemented, unvalidated | — |
@@ -186,11 +200,22 @@ against.
 | `model.quadrotor` | implemented, unvalidated | — |
 | `model.quadrotor.export` | implemented, unvalidated | — |
 | `model.series` | implemented, unvalidated | — |
+| `model.vehicle` | implemented, unvalidated | — |
+| `onboard.manifest` | implemented, unvalidated | — |
+| `report.control_law_json` | implemented, unvalidated | — |
 | `report.csv` | implemented, unvalidated | — |
 | `report.helicopter_csv` | implemented, unvalidated | — |
+| `report.helicopter_response_json` | implemented, unvalidated | — |
+| `report.helicopter_schema_json` | implemented, unvalidated | — |
+| `report.helicopter_trim_json` | implemented, unvalidated | — |
 | `report.html` | implemented, unvalidated | — |
+| `report.linear_system_json` | implemented, unvalidated | — |
 | `report.markdown` | implemented, unvalidated | — |
 | `report.record` | implemented, unvalidated | — |
+| `report.vehicle_csv` | implemented, unvalidated | — |
+| `report.vehicle_response_json` | implemented, unvalidated | — |
+| `report.vehicle_schema_json` | implemented, unvalidated | — |
+| `report.vehicle_trim_json` | implemented, unvalidated | — |
 | `sim.helicopter` | implemented, unvalidated | — |
 | `sim.helicopter.closed_loop` | implemented, unvalidated | — |
 | `sim.linear` | implemented, unvalidated | — |
@@ -198,6 +223,7 @@ against.
 | `sim.nonlinear` | implemented, unvalidated | — |
 | `sim.plant` | implemented, unvalidated | — |
 | `sim.sampled` | implemented, unvalidated | — |
+| `sim.vehicle` | implemented, unvalidated | — |
 | `study.helicopter_ensemble` | implemented, unvalidated | — |
 | `synth.care` | implemented and validated | `synth.care.worked` |
 | `synth.dare` | implemented, unvalidated | — |
@@ -206,7 +232,8 @@ against.
 | `synth.sampled_lqr` | implemented, unvalidated | — |
 | `trim.helicopter` | implemented, unvalidated | — |
 | `trim.hover` | implemented, unvalidated | `quadrotor.hover_trim` |
-| `trim.level` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes` |
+| `trim.level` | implemented and validated | `nt33a.trim`, `nt33a.linearised_derivatives`, `nt33a.chain_modes`, `navion.chain_modes`, `a7a.chain_modes`, `a4d.chain_modes`, `f4c.chain_modes`, `gtm_t2.nominal_slice`, `f16.nominal_slice` |
+| `trim.vehicle` | implemented, unvalidated | — |
 
 ## U.S. Standard Atmosphere, 1976
 

@@ -9,9 +9,9 @@
 #include "galata/pipeline/artifacts.hpp"
 #include "galata/sim/vehicle_execution.hpp"
 #include "galata/synth/control.hpp"
-#include "galata/trim/problem.hpp"
 #include "galata/trim/hover.hpp"
 #include "galata/trim/level.hpp"
+#include "galata/trim/problem.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -66,10 +66,10 @@ void metadata(std::ostream& out, const std::vector<model::ChannelMetadata>& valu
       out << ',';
     }
     out << "{\"name\":" << quote(channel.name) << ",\"unit\":" << quote(channel.unit)
-        << ",\"frame\":" << quote(channel.frame) << ",\"lower_bound\":"
-        << (channel.has_lower_bound ? number(channel.lower_bound) : "null")
-        << ",\"upper_bound\":"
-        << (channel.has_upper_bound ? number(channel.upper_bound) : "null") << '}';
+        << ",\"frame\":" << quote(channel.frame)
+        << ",\"lower_bound\":" << (channel.has_lower_bound ? number(channel.lower_bound) : "null")
+        << ",\"upper_bound\":" << (channel.has_upper_bound ? number(channel.upper_bound) : "null")
+        << '}';
   }
   out << ']';
 }
@@ -78,13 +78,15 @@ void parameters(std::ostream& out, const VehicleArtifact& vehicle) {
   out << '[';
   bool first = true;
   const auto add = [&](const std::string& name, double value, const std::string& unit) {
-    if (!first) out << ',';
+    if (!first)
+      out << ',';
     first = false;
     out << "{\"name\":" << quote(name) << ",\"value\":" << number(value)
         << ",\"unit\":" << quote(unit) << '}';
   };
   if (vehicle.vehicle_kind == "fixed-wing") {
-    const auto& aircraft = dynamic_cast<const model::FixedWingVehicleModel&>(*vehicle.model).source_model();
+    const auto& aircraft =
+        dynamic_cast<const model::FixedWingVehicleModel&>(*vehicle.model).source_model();
     add("mass.mass_kg", aircraft.mass.mass_kg, "kg");
     add("geometry.wing_area_m2", aircraft.geometry.wing_area_m2, "m^2");
     add("geometry.wing_span_m", aircraft.geometry.wing_span_m, "m");
@@ -95,7 +97,8 @@ void parameters(std::ostream& out, const VehicleArtifact& vehicle) {
     add("aero.pitching_moment_alpha", aircraft.aero.pitching_moment_alpha, "1/rad");
     add("aero.pitching_moment_elevator", aircraft.aero.pitching_moment_elevator, "1/rad");
   } else if (vehicle.vehicle_kind == "multirotor") {
-    const auto& quad = dynamic_cast<const model::MultirotorVehicleModel&>(*vehicle.model).source_model();
+    const auto& quad =
+        dynamic_cast<const model::MultirotorVehicleModel&>(*vehicle.model).source_model();
     add("mass.mass_kg", quad.mass.mass_kg, "kg");
     for (std::size_t index = 0; index < quad.rotors.size(); ++index) {
       const auto& rotor = quad.rotors[index];
@@ -124,7 +127,7 @@ std::string detect_kind(const std::string& declared, const std::string& bytes) {
 }
 
 std::map<std::string, double> apply_fixed_overrides(model::Aircraft& aircraft,
-                                                     const ValuePtr& declared) {
+                                                    const ValuePtr& declared) {
   std::map<std::string, double> applied;
   if (!declared) {
     return applied;
@@ -160,7 +163,7 @@ std::map<std::string, double> apply_fixed_overrides(model::Aircraft& aircraft,
 }
 
 std::map<std::string, double> apply_quad_overrides(model::Quadrotor& quadrotor,
-                                                    const ValuePtr& declared) {
+                                                   const ValuePtr& declared) {
   std::map<std::string, double> applied;
   if (!declared) {
     return applied;
@@ -225,12 +228,14 @@ Artifact load_vehicle(const StageContext& context) {
   } else if (kind == "helicopter") {
     if (context.input->get("parameter_overrides")) {
       throw std::invalid_argument(
-          "model.vehicle: helicopter overrides must use the established model.helicopter capability");
+          "model.vehicle: helicopter overrides must use the established model.helicopter "
+          "capability");
     }
     adapter = std::make_shared<model::HelicopterVehicleAdapter>(
         model::parse_helicopter(bytes, declared_path));
   } else {
-    throw std::invalid_argument("model.vehicle: kind must be fixed-wing, multirotor, helicopter or auto");
+    throw std::invalid_argument(
+        "model.vehicle: kind must be fixed-wing, multirotor, helicopter or auto");
   }
   adapter->validate_vocabulary();
   VehicleArtifact payload;
@@ -307,15 +312,19 @@ Artifact trim_vehicle(const StageContext& context) {
     condition.controls = Eigen::VectorXd::Zero(adapter->control_count());
     core::State rigid;
     rigid.position_ned_m = Eigen::Vector3d(0.0, 0.0, -altitude);
-    rigid.velocity_body_m_s = Eigen::Vector3d(context.input->number_at("airspeed_m_s", 0.0), 0.0, 0.0);
+    rigid.velocity_body_m_s =
+        Eigen::Vector3d(context.input->number_at("airspeed_m_s", 0.0), 0.0, 0.0);
     rigid.attitude_body_to_ned = core::identity_attitude();
     condition.extended_state = adapter->join(
         rigid, adapter->source_model().initial_auxiliary(condition.controls, environment));
     trim::TrimOptions options;
     options.iterations = context.input->integer_at("iterations", options.iterations);
     options.residual_tolerance = tolerance;
-    const trim::TrimResult solved = trim::solve_trim(
-        adapter->source_model(), trim::helicopter_trim_problem(adapter->source_model()), condition, options);
+    const trim::TrimResult solved =
+        trim::solve_trim(adapter->source_model(),
+                         trim::helicopter_trim_problem(adapter->source_model()),
+                         condition,
+                         options);
     state = solved.extended_state;
     const Eigen::VectorXd auxiliary = adapter->auxiliary_part(state);
     controls = solved.controls;
@@ -324,7 +333,8 @@ Artifact trim_vehicle(const StageContext& context) {
     }
     residual = solved.residual_norm;
   } else {
-    throw std::runtime_error("trim.vehicle: no trim declaration for kind '" + subject.vehicle_kind + "'");
+    throw std::runtime_error("trim.vehicle: no trim declaration for kind '" + subject.vehicle_kind
+                             + "'");
   }
   VehicleTrimArtifact payload;
   payload.model = subject.model;
@@ -360,10 +370,18 @@ Eigen::VectorXd euler_chart(const Eigen::VectorXd& extended) {
 }
 
 std::vector<std::string> chart_names(const model::VehicleModel& model) {
-  std::vector<std::string> names = {"position_north_m", "position_east_m", "position_down_m",
-                                    "velocity_u_m_s", "velocity_v_m_s", "velocity_w_m_s",
-                                    "roll_rad", "pitch_rad", "yaw_rad", "roll_rate_rad_s",
-                                    "pitch_rate_rad_s", "yaw_rate_rad_s"};
+  std::vector<std::string> names = {"position_north_m",
+                                    "position_east_m",
+                                    "position_down_m",
+                                    "velocity_u_m_s",
+                                    "velocity_v_m_s",
+                                    "velocity_w_m_s",
+                                    "roll_rad",
+                                    "pitch_rad",
+                                    "yaw_rad",
+                                    "roll_rate_rad_s",
+                                    "pitch_rate_rad_s",
+                                    "yaw_rate_rad_s"};
   const auto states = model.state_names();
   for (int index = 0; index < model.auxiliary_state_count(); ++index) {
     names.push_back(states[static_cast<std::size_t>(core::kStateSize + index)]);
@@ -375,8 +393,7 @@ std::string shared_signal_unit(const std::string& signal) {
   if (signal == "roll_rad" || signal == "pitch_rad" || signal == "yaw_rad") {
     return "rad";
   }
-  if (signal == "roll_rate_rad_s" || signal == "pitch_rate_rad_s"
-      || signal == "yaw_rate_rad_s") {
+  if (signal == "roll_rate_rad_s" || signal == "pitch_rate_rad_s" || signal == "yaw_rate_rad_s") {
     return "rad/s";
   }
   return "model-declared";
@@ -389,8 +406,7 @@ Eigen::VectorXd state_from_chart(const model::VehicleModel& model, const Eigen::
   core::State state;
   state.position_ned_m = chart.segment<3>(0);
   state.velocity_body_m_s = chart.segment<3>(3);
-  state.attitude_body_to_ned = core::quaternion_from_euler(
-      {chart(6), chart(7), chart(8)});
+  state.attitude_body_to_ned = core::quaternion_from_euler({chart(6), chart(7), chart(8)});
   state.angular_rate_body_rad_s = chart.segment<3>(9);
   Eigen::VectorXd auxiliary = Eigen::VectorXd::Zero(model.auxiliary_state_count());
   if (auxiliary.size() > 0) {
@@ -404,18 +420,15 @@ Artifact linearize_shared(const StageContext& context) {
   linearize::VehicleLinearisationOptions options;
   options.equilibrium_tolerance = context.input->number_at("equilibrium_tolerance", 1.0e-6);
   options.estimate_truncation_error = context.input->bool_at("report_truncation_error", true);
-  auto linear = linearize::linearize_vehicle(*trim.model,
-                                             trim.extended_state,
-                                             trim.controls,
-                                             trim.environment,
-                                             options);
+  auto linear = linearize::linearize_vehicle(
+      *trim.model, trim.extended_state, trim.controls, trim.environment, options);
   if (context.input->bool_at("drop_position_and_heading", false)) {
     linear = linear.reduced();
   }
   Artifact result;
   result.kind = "linear_system";
-  result.summary = std::to_string(linear.a.rows()) + " states, "
-                   + std::to_string(linear.b.cols()) + " controls; shared VehicleModel path";
+  result.summary = std::to_string(linear.a.rows()) + " states, " + std::to_string(linear.b.cols())
+                   + " controls; shared VehicleModel path";
   result.payload = linear.to_linear_system(trim.model->description());
   return result;
 }
@@ -434,7 +447,8 @@ Artifact simulate_shared(const StageContext& context) {
     }
     Eigen::VectorXd chart = euler_chart(initial);
     if (perturbation.size() != chart.size()) {
-      throw std::invalid_argument("sim.vehicle initial_chart_perturbation must match the shared chart");
+      throw std::invalid_argument(
+          "sim.vehicle initial_chart_perturbation must match the shared chart");
     }
     initial = state_from_chart(*trim.model, chart + perturbation);
   }
@@ -454,19 +468,15 @@ Artifact simulate_shared(const StageContext& context) {
       }
       selected_indices.push_back(static_cast<int>(found - full_names.begin()));
     }
-    controller = [law,
-                  reference,
-                  metadata,
-                  selected_indices,
-                  trim_controls = trim.controls](double, const Eigen::VectorXd& state) {
+    controller = [law, reference, metadata, selected_indices, trim_controls = trim.controls](
+                     double, const Eigen::VectorXd& state) {
       const Eigen::VectorXd full_error = euler_chart(state) - reference;
       Eigen::VectorXd error(static_cast<Eigen::Index>(selected_indices.size()));
       for (std::size_t index = 0; index < selected_indices.size(); ++index) {
         error(static_cast<Eigen::Index>(index)) = full_error(selected_indices[index]);
       }
-      Eigen::VectorXd command = law.plant.input_count() == 0
-                                    ? Eigen::VectorXd{}
-                                    : law.riccati.k * error;
+      Eigen::VectorXd command =
+          law.plant.input_count() == 0 ? Eigen::VectorXd{} : law.riccati.k * error;
       command = trim_controls - command;
       for (Eigen::Index index = 0; index < command.size(); ++index) {
         const auto& channel = metadata[static_cast<std::size_t>(index)];
@@ -527,11 +537,11 @@ Artifact report_schema(const StageContext& context) {
   out << ",\"supported_operations\":";
   strings(out, model.supported_operations());
   out << ",\"identity\":{\"path\":" << quote(vehicle.identity.path)
-      << ",\"sha256\":" << quote(vehicle.identity.sha256)
-      << ",\"parameter_overrides\":{";
+      << ",\"sha256\":" << quote(vehicle.identity.sha256) << ",\"parameter_overrides\":{";
   bool first_override = true;
   for (const auto& [name, value] : vehicle.parameter_overrides) {
-    if (!first_override) out << ',';
+    if (!first_override)
+      out << ',';
     first_override = false;
     out << quote(name) << ':' << number(value);
   }
@@ -564,11 +574,11 @@ Artifact report_trim(const StageContext& context) {
     out << (i == 0 ? "" : ",") << trim.controls(i);
   }
   out << "],\"residual_norm\":" << trim.residual_norm
-      << ",\"residual_tolerance\":" << trim.residual_tolerance
-      << ",\"parameter_overrides\":{";
+      << ",\"residual_tolerance\":" << trim.residual_tolerance << ",\"parameter_overrides\":{";
   bool first_override = true;
   for (const auto& [name, value] : trim.parameter_overrides) {
-    if (!first_override) out << ',';
+    if (!first_override)
+      out << ',';
     first_override = false;
     out << quote(name) << ':' << number(value);
   }
@@ -583,7 +593,8 @@ Artifact report_trim(const StageContext& context) {
 }
 
 Artifact report_vehicle_csv(const StageContext& context) {
-  const auto& run = context.upstream_at("trajectory").payload_as<VehicleRunArtifact>("vehicle_trajectory");
+  const auto& run =
+      context.upstream_at("trajectory").payload_as<VehicleRunArtifact>("vehicle_trajectory");
   const auto& states = run.result.integration.trajectory.states;
   const auto& times = run.result.integration.trajectory.times_s;
   const auto state_names = run.model->state_names();
@@ -596,15 +607,21 @@ Artifact report_vehicle_csv(const StageContext& context) {
   std::ostringstream out;
   out.imbue(std::locale::classic());
   out << std::setprecision(std::numeric_limits<double>::max_digits10) << "time_s";
-  for (const auto& name : state_names) out << ",state:" << name;
-  for (const auto& name : control_names) out << ",control:" << name;
-  for (const auto& name : output_names) out << ",output:" << name;
+  for (const auto& name : state_names)
+    out << ",state:" << name;
+  for (const auto& name : control_names)
+    out << ",control:" << name;
+  for (const auto& name : output_names)
+    out << ",output:" << name;
   out << '\n';
   for (std::size_t row = 0; row < states.size(); ++row) {
     out << times[row];
-    for (Eigen::Index i = 0; i < states[row].size(); ++i) out << ',' << states[row](i);
-    for (Eigen::Index i = 0; i < run.result.controls[row].size(); ++i) out << ',' << run.result.controls[row](i);
-    for (Eigen::Index i = 0; i < run.result.outputs[row].size(); ++i) out << ',' << run.result.outputs[row](i);
+    for (Eigen::Index i = 0; i < states[row].size(); ++i)
+      out << ',' << states[row](i);
+    for (Eigen::Index i = 0; i < run.result.controls[row].size(); ++i)
+      out << ',' << run.result.controls[row](i);
+    for (Eigen::Index i = 0; i < run.result.outputs[row].size(); ++i)
+      out << ',' << run.result.outputs[row](i);
     out << '\n';
   }
   const std::string path = context.input->string_at("path");
@@ -617,14 +634,17 @@ Artifact report_vehicle_csv(const StageContext& context) {
 }
 
 Artifact report_vehicle_response(const StageContext& context) {
-  const auto& open = context.upstream_at("open").payload_as<VehicleRunArtifact>("vehicle_trajectory");
-  const auto& closed = context.upstream_at("closed").payload_as<VehicleRunArtifact>("vehicle_trajectory");
+  const auto& open =
+      context.upstream_at("open").payload_as<VehicleRunArtifact>("vehicle_trajectory");
+  const auto& closed =
+      context.upstream_at("closed").payload_as<VehicleRunArtifact>("vehicle_trajectory");
   const auto& times_open = open.result.integration.trajectory.times_s;
   const auto& times_closed = closed.result.integration.trajectory.times_s;
   if (times_open != times_closed || open.result.outputs.size() != closed.result.outputs.size()
       || open.result.outputs.empty()) {
     throw std::invalid_argument(
-        "report.vehicle_response_json: open and closed runs require identical non-empty time grids");
+        "report.vehicle_response_json: open and closed runs require identical non-empty time "
+        "grids");
   }
   std::map<std::string, std::map<std::string, double>> requirements;
   if (const auto declared = context.input->get("signal_requirements")) {
@@ -632,13 +652,20 @@ Artifact report_vehicle_response(const StageContext& context) {
       throw std::invalid_argument(
           "report.vehicle_response_json signal_requirements must be a map keyed by signal");
     }
-    const std::set<std::string> allowed = {
-        "peak_tracking_error_rad", "final_tracking_error_rad", "rms_tracking_error_rad",
-        "settling_band_rad", "settling_dwell_s", "settling_time_s",
-        "peak_tracking_error_rad_s", "final_tracking_error_rad_s", "rms_tracking_error_rad_s",
-        "settling_band_rad_s",
-        "peak_tracking_error_m", "final_tracking_error_m", "rms_tracking_error_m",
-        "settling_band_m"};
+    const std::set<std::string> allowed = {"peak_tracking_error_rad",
+                                           "final_tracking_error_rad",
+                                           "rms_tracking_error_rad",
+                                           "settling_band_rad",
+                                           "settling_dwell_s",
+                                           "settling_time_s",
+                                           "peak_tracking_error_rad_s",
+                                           "final_tracking_error_rad_s",
+                                           "rms_tracking_error_rad_s",
+                                           "settling_band_rad_s",
+                                           "peak_tracking_error_m",
+                                           "final_tracking_error_m",
+                                           "rms_tracking_error_m",
+                                           "settling_band_m"};
     for (const auto& [signal, signal_value] : declared->as_map()) {
       if (signal_value->kind() != Value::Kind::Map) {
         throw std::invalid_argument("report.vehicle_response_json requirements for '" + signal
@@ -662,7 +689,8 @@ Artifact report_vehicle_response(const StageContext& context) {
   bool criteria_evaluated = !requirements.empty();
   std::vector<std::string> requested;
   if (const auto signals = context.input->get("signals")) {
-    for (const auto& item : signals->as_list()) requested.push_back(item->as_string());
+    for (const auto& item : signals->as_list())
+      requested.push_back(item->as_string());
   } else {
     requested = closed.model->output_names();
   }
@@ -681,8 +709,8 @@ Artifact report_vehicle_response(const StageContext& context) {
       throw std::invalid_argument("report.vehicle_response_json: unknown signal '" + signal + "'");
     }
     const bool from_chart = found == names.end();
-    const Eigen::Index column = static_cast<Eigen::Index>(
-        from_chart ? chart_found - chart.begin() : found - names.begin());
+    const Eigen::Index column =
+        static_cast<Eigen::Index>(from_chart ? chart_found - chart.begin() : found - names.begin());
     const auto value_at = [&](const VehicleRunArtifact& run, std::size_t row) {
       if (!from_chart) {
         return run.result.outputs[row](column);
@@ -701,7 +729,8 @@ Artifact report_vehicle_response(const StageContext& context) {
     const double rms = std::sqrt(sum_squared / static_cast<double>(closed.result.outputs.size()));
     const auto requirement_values = requirements.find(signal);
     const auto requirement = [&](const std::string& name) {
-      if (requirement_values == requirements.end()) return std::numeric_limits<double>::quiet_NaN();
+      if (requirement_values == requirements.end())
+        return std::numeric_limits<double>::quiet_NaN();
       const auto found_requirement = requirement_values->second.find(name);
       return found_requirement == requirement_values->second.end()
                  ? std::numeric_limits<double>::quiet_NaN()
@@ -715,17 +744,20 @@ Artifact report_vehicle_response(const StageContext& context) {
     std::string settling_status = "not_assessed";
     double settling_time = std::numeric_limits<double>::quiet_NaN();
     if (std::isfinite(settling_band)) {
-      const double sample_period = times_closed.size() > 1 ? times_closed[1] - times_closed[0] : 0.0;
-      const std::size_t dwell_samples = sample_period > 0.0 && std::isfinite(settling_dwell)
-                                            ? std::max<std::size_t>(1, static_cast<std::size_t>(
-                                                  std::ceil(settling_dwell / sample_period)))
-                                            : 1;
+      const double sample_period =
+          times_closed.size() > 1 ? times_closed[1] - times_closed[0] : 0.0;
+      const std::size_t dwell_samples =
+          sample_period > 0.0 && std::isfinite(settling_dwell)
+              ? std::max<std::size_t>(
+                    1, static_cast<std::size_t>(std::ceil(settling_dwell / sample_period)))
+              : 1;
       const bool initially_inside = std::fabs(value_at(closed, 0) - reference) <= settling_band;
       if (initially_inside) {
         settling_status = "already_within_band";
         settling_time = 0.0;
       } else {
-        for (std::size_t start = 0; start + dwell_samples <= closed.result.outputs.size(); ++start) {
+        for (std::size_t start = 0; start + dwell_samples <= closed.result.outputs.size();
+             ++start) {
           bool inside = true;
           for (std::size_t sample = start; sample < start + dwell_samples; ++sample) {
             inside = inside && std::fabs(value_at(closed, sample) - reference) <= settling_band;
@@ -736,33 +768,34 @@ Artifact report_vehicle_response(const StageContext& context) {
             break;
           }
         }
-        if (!std::isfinite(settling_time)) settling_status = "not_settled_within_observation_window";
+        if (!std::isfinite(settling_time))
+          settling_status = "not_settled_within_observation_window";
       }
     }
     const auto check = [&](const std::string& name, double measured) {
       const double limit = requirement(name);
       return !std::isfinite(limit) || measured <= limit;
     };
-    const bool signal_passed = check("peak_tracking_error" + suffix, peak)
-                               && check("final_tracking_error" + suffix, std::fabs(final_error))
-                               && check("rms_tracking_error" + suffix, rms)
-                               && (!std::isfinite(requirement("settling_time_s"))
-                                   || (std::isfinite(settling_time)
-                                       && settling_time <= requirement("settling_time_s")));
+    const bool signal_passed =
+        check("peak_tracking_error" + suffix, peak)
+        && check("final_tracking_error" + suffix, std::fabs(final_error))
+        && check("rms_tracking_error" + suffix, rms)
+        && (!std::isfinite(requirement("settling_time_s"))
+            || (std::isfinite(settling_time) && settling_time <= requirement("settling_time_s")));
     criteria_passed = criteria_passed && signal_passed;
-    if (!first) out << ',';
+    if (!first)
+      out << ',';
     first = false;
     out << "{\"signal\":" << quote(signal) << ",\"unit\":" << quote(shared_signal_unit(signal))
-        << ",\"peak_tracking_error\":"
-        << peak << ",\"final_tracking_error\":" << std::fabs(final_error)
-        << ",\"rms_tracking_error\":" << rms << ",\"settling_status\":"
-        << quote(settling_status) << ",\"settling_time_s\":"
-        << (std::isfinite(settling_time) ? number(settling_time) : "null") << ",\"criteria_passed\":"
-        << (signal_passed ? "true" : "false") << "}";
+        << ",\"peak_tracking_error\":" << peak
+        << ",\"final_tracking_error\":" << std::fabs(final_error)
+        << ",\"rms_tracking_error\":" << rms << ",\"settling_status\":" << quote(settling_status)
+        << ",\"settling_time_s\":"
+        << (std::isfinite(settling_time) ? number(settling_time) : "null")
+        << ",\"criteria_passed\":" << (signal_passed ? "true" : "false") << "}";
   }
-  out << "],\"requirements\":{},\"criteria_status\":" << quote(criteria_evaluated
-                                                  ? (criteria_passed ? "pass" : "fail")
-                                                  : "not_assessed")
+  out << "],\"requirements\":{},\"criteria_status\":"
+      << quote(criteria_evaluated ? (criteria_passed ? "pass" : "fail") : "not_assessed")
       << ",\"criteria_passed\":" << (criteria_evaluated && criteria_passed ? "true" : "false")
       << ",\"requirements_present\":" << (criteria_evaluated ? "true" : "false")
       << ",\"execution_completed\":true}\n";
@@ -788,45 +821,56 @@ void register_vehicle_capabilities(Registry& registry) {
                 {"path"},
                 {},
                 {{"path", 8 * 1024 * 1024}}});
-  registry.add({"trim.vehicle",
-                "Execute the declared family-specific trim problem and return a shared operating point",
-                "vehicle_trim",
-                State::ImplementedUnvalidated,
-                trim_vehicle,
-                {"vehicle", "airspeed_m_s", "altitude_m", "delta_isa_k", "wind_ned_m_s", "heading_rad",
-                 "tolerance", "iterations"}});
-  registry.add({"linearize.shared",
-                "Linearise any built-in vehicle adapter through the common named VehicleModel service",
-                "linear_system",
-                State::ImplementedUnvalidated,
-                linearize_shared,
-                {"trim", "drop_position_and_heading", "report_truncation_error", "equilibrium_tolerance"}});
+  registry.add(
+      {"trim.vehicle",
+       "Execute the declared family-specific trim problem and return a shared operating point",
+       "vehicle_trim",
+       State::ImplementedUnvalidated,
+       trim_vehicle,
+       {"vehicle",
+        "airspeed_m_s",
+        "altitude_m",
+        "delta_isa_k",
+        "wind_ned_m_s",
+        "heading_rad",
+        "tolerance",
+        "iterations"}});
+  registry.add(
+      {"linearize.shared",
+       "Linearise any built-in vehicle adapter through the common named VehicleModel service",
+       "linear_system",
+       State::ImplementedUnvalidated,
+       linearize_shared,
+       {"trim", "drop_position_and_heading", "report_truncation_error", "equilibrium_tolerance"}});
   registry.add({"sim.vehicle",
-                "Execute fixed-step RK4, projection, envelope and named outputs through the shared vehicle service",
+                "Execute fixed-step RK4, projection, envelope and named outputs through the shared "
+                "vehicle service",
                 "vehicle_trajectory",
                 State::ImplementedUnvalidated,
                 simulate_shared,
                 {"trim", "law", "step_s", "steps", "sample_stride", "initial_chart_perturbation"}});
-  registry.add({"report.vehicle_schema_json",
-                "Write versioned shared model metadata, units, frames, bounds and supported operations",
-                "report",
-                State::Implemented,
-                report_schema,
-                {"vehicle", "path"},
-                {},
-                {"path"}});
-  registry.add({"report.vehicle_trim_json",
-                "Write a structured shared trim result with state, controls and residual diagnostics",
-                "report",
-                State::Implemented,
-                report_trim,
-                {"trim", "path"},
-                {},
-                {"path"}});
+  registry.add(
+      {"report.vehicle_schema_json",
+       "Write versioned shared model metadata, units, frames, bounds and supported operations",
+       "report",
+       State::ImplementedUnvalidated,
+       report_schema,
+       {"vehicle", "path"},
+       {},
+       {"path"}});
+  registry.add(
+      {"report.vehicle_trim_json",
+       "Write a structured shared trim result with state, controls and residual diagnostics",
+       "report",
+       State::ImplementedUnvalidated,
+       report_trim,
+       {"trim", "path"},
+       {},
+       {"path"}});
   registry.add({"report.vehicle_csv",
                 "Write a shared trajectory with named state, control and output channels",
                 "report",
-                State::Implemented,
+                State::ImplementedUnvalidated,
                 report_vehicle_csv,
                 {"trajectory", "path"},
                 {},
@@ -834,7 +878,7 @@ void register_vehicle_capabilities(Registry& registry) {
   registry.add({"report.vehicle_response_json",
                 "Write structured open/closed response metrics on a shared vehicle trajectory",
                 "report",
-                State::Implemented,
+                State::ImplementedUnvalidated,
                 report_vehicle_response,
                 {"open", "closed", "signals", "signal_requirements", "path"},
                 {},

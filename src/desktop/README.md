@@ -44,7 +44,49 @@ session Undo/Redo; successful Save clears that history. Run Saved requires a sav
 draft and launches the same CLI as batch use. Cancel sends the child a termination
 signal for cooperative cancellation; inspection recognizes abrupt worker death as
 an interrupted run. Project switching and quitting guard unsaved drafts and active
-commands.
+commands. While a project has unsaved edits, the app also maintains one bounded
+local recovery snapshot under the user's Application Support directory. The snapshot
+is keyed by the normalized project path and records the saved base revision, draft,
+and any pending JSON editor text. Reopening the same revision offers recovery; a
+revision mismatch is discarded rather than merged, and a successful Save removes
+the snapshot. Recovery restores an unsaved draft only; it is not an autosaved project
+revision or a substitute for explicit Save.
+
+The File menu's **Verify Flight-Test Evidence…** action invokes the same
+`galata flighttest verify` command as scripted use. It checks the campaign
+manifest, required controlled-record roles, path containment, symlink policy and
+SHA-256 identities, then displays the aircraft/configuration/reviewer trace.
+The result remains explicitly `not_qualified`: package verification is not a
+flight-test acceptance, airworthiness decision, certification or tool
+qualification.
+
+File → Create Flight-Test Package… collects the controlled aircraft,
+configuration, evidence class, test-plan and reviewer identifiers, requires an
+explicit safety review confirmation, then asks for the five required evidence
+files. It invokes `flighttest create`, which copies and hashes the files into a
+new package, verifies the staged bytes and publishes the directory atomically.
+The resulting package is still `not_qualified`; `synthetic_contract` and
+`public_deidentified` packages remain unresolved for flight-test validation,
+and `measured_flight` only establishes a traceable evidence package. This
+action does not establish that the flight record is genuine or accepted.
+
+File → Run Flight-Test Validation… chooses a campaign manifest, a study YAML
+and a new output directory, then invokes `flighttest validate`. The shared
+worker verifies the package, requires the study's
+`acceptance.campaign_manifest` binding and `identify.validate.vehicle` stage,
+and writes a machine-readable execution receipt beside the run manifest and
+report. A synthetic or public package is displayed as `not_ready`; only a
+measured-flight package whose declared numerical and evidence gates pass can
+produce `gate_passed`, and that receipt still makes no airworthiness,
+certification or authority-acceptance claim.
+
+File → Create Qualification Dossier… collects the product, release, intended-use,
+aircraft, qualification-basis and authority identifiers, then asks for the nine
+required evidence files. It invokes `qualification create`, which copies and
+hashes the files into a new dossier, verifies the staged bytes and publishes the
+directory atomically. The resulting dossier is still `not_qualified`; this
+action assembles traceability but does not create independent review, authority
+acceptance, airworthiness or certification evidence.
 
 Imported rows expose their ordered `terms` array in the block JSON inspector.
 Each term declares an input type and a dimensional coefficient. Connection
@@ -134,6 +176,75 @@ diagnostics; this does not repair a damaged current draft, pointer or origin.
 The order is by retained filename, not inferred chronological save order. See
 [ADR-0014](../../docs/adr/0014-project-revision-recovery.md) for the recovery boundary.
 
+File → Export Review Package… writes the same immutable project snapshot as the
+CLI `project export` command. The destination must be new; the exported
+directory can be checked with File → Verify Review Package… or on another
+installation with `galata project verify`.
+Exported packages use the `.galata-review` suffix and are verified automatically
+before the desktop loads their saved project view.
+The package hashes project content and retained run evidence, but does not claim
+numerical accuracy, flight-test validity, airworthiness, certification or
+qualification.
+
+File → Verify Onboard Manifest… checks a manifest-only handoff with the same
+`onboard verify` command used in CI. File → Stage Onboard Package… first verifies
+that manifest, asks for one regular source file for every declared artifact role,
+and asks for a new staging directory. The engine performs the digest checks and
+atomic no-overwrite publication; the desktop only presents the result. Staging
+does not install target code, sign it, or make it qualified.
+
+File → Deploy Onboard Runtime… extends that workflow for bench integration: it
+verifies the manifest, asks for an executable POSIX runner and each declared
+model/controller artifact, then invokes `onboard deploy` to publish an atomic
+runtime bundle containing the runner, manifest, receipt and verified hashes.
+File → Verify Onboard Deployment… rechecks the published directory with
+`onboard verify-deployment`. This is a deployable host/POSIX integration
+package, not a target image or installer; it remains `not_qualified` until
+target timing, watchdog behavior, signing, hardware-in-the-loop evidence,
+deployment approval and airworthiness/certification gates are completed.
+
+File → Verify Target Evidence… accepts the exact onboard manifest and a
+`target-evidence.manifest`, then invokes `onboard target verify`. It checks the
+target identity, deployment hash, measured timing budgets, watchdog response,
+HIL/loss-of-link/emergency-stop pass states, signing record and every evidence
+byte, including the explicit `host_sil`, `target_hil` or `flight_target`
+provenance class. The result is traceable target-integration evidence, not a
+qualification or certification decision.
+
+File → Create Target Evidence Package… performs the corresponding controlled
+handoff. It collects the measured timing values, requires explicit operator
+confirmation that the external emergency-stop, loss-of-link, HIL and signing
+checks passed, collects the evidence class, selects one source file for each required evidence role, and
+invokes `onboard target create` to publish a new atomic package. The desktop
+workflow assembles and verifies the record; it does not claim to run the
+physical target tests.
+
+File → Onboard SIL Self-Test… runs the same guarded replay supervisor exposed
+by `onboard self-test` and displays its cycle count and explicit non-qualified
+scope. It is a host contract test, not target timing or flight-controller
+acceptance evidence.
+
+File → Verify Qualification Dossier… invokes the same `qualification verify`
+command used in CI. It checks the nine required evidence roles, relative-path
+and symlink rules, and every SHA-256 identity, then displays the product,
+aircraft/configuration and authority trace. A verified dossier is complete and
+byte-consistent only; it remains `not_qualified` until independent review and
+authorized external acceptance exist.
+
+File → Verify Qualification Chain… invokes `qualification verify-chain`. It
+asks for the gate-passed flight-validation receipt and the complete staged
+onboard runtime package, additionally verifies the complete flight-test
+campaign, the target-evidence package against its exact onboard deployment
+manifest, and the dossier's SHA-256 links to both manifests. The runtime
+executable hash is reported separately and must be bound to that deployment
+manifest.
+The dialog reports `qualification_eligibility`
+separately from traceability and lists its blocking reasons. `not_ready` is
+expected for synthetic/public flight evidence, host-SIL target evidence or a
+pending authority identifier; `eligible_for_authority_review` still leaves
+`qualification_state=not_qualified`. It remains a traceability check, not a
+qualification or certification decision.
+
 Original Study opens a separate read-only view containing the original adapter
 and full manifest, including source matrices, channel types/mappings, LQR weights
 and CARE diagnostics, and source linearization evidence. Reveal Original Manifest
@@ -158,6 +269,14 @@ previewed; full artifacts remain in the project. Evidence and
 selected-run manifest previews each have a 2 MiB limit. Subprocess output has an
 8 MiB limit, including the project view used by Original Study.
 
+File → Run Study… chooses any Galata study YAML and a new output directory, then launches
+the same `galata run` engine used by batch workflows. It runs asynchronously, supports the
+shared Cancel action, shows the complete bounded engine log in Evidence, and can reveal the
+resulting artifacts in Finder after success. This makes validation and flight-test study
+execution available from the desktop, but completion is still execution evidence only: the
+desktop does not interpret acceptance criteria or turn a run into flight-test, airworthiness,
+certification or qualification evidence.
+
 Known feasibility limits: macOS only; JSON property editors rather than polished
 per-kind forms; no multiselect, block renaming, project migration, autosave,
 signing or notarization.
@@ -181,3 +300,19 @@ full VoiceOver or assistive-technology workflow acceptance; the custom canvas
 and plot remain complemented by the native tables.
 The app does not interpret a study's acceptance criteria or promise GUI parity
 with all CLI capabilities.
+
+After building and testing a frozen desktop candidate, create and check the
+local delivery container with:
+
+    python3 scripts/package-desktop.py build/ci-macos \
+      --output-dir build/desktop-candidate-assets-final-YYYYMMDD-vN
+    python3 scripts/package-desktop-dmg.py \
+      build/desktop-candidate-assets-final-YYYYMMDD-vN/galata-desktop-v0.3.0-candidate-macos-arm64.zip \
+      --output-dir build/desktop-dmg-final-YYYYMMDD-vN
+    python3 scripts/check-desktop-dmg.py \
+      build/desktop-dmg-final-YYYYMMDD-vN/galata-desktop-v0.3.0-candidate-macos-arm64.dmg \
+      build/desktop-dmg-final-YYYYMMDD-vN/galata-desktop-v0.3.0-candidate-macos-arm64.dmg.json
+
+The DMG is a verified installer container around the same ad-hoc candidate
+bundle. It does not add Developer ID signing, notarization, clean-machine
+acceptance, accessibility acceptance or release approval.

@@ -1,0 +1,2 @@
+synthetic production-contract fixture
+Authority decision: external-authority-pending.

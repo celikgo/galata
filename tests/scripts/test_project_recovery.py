@@ -165,6 +165,36 @@ class ProjectRecovery(unittest.TestCase):
         self.assertEqual(same["revision"], restored["revision"])
         self.assertEqual(self.snapshot(), after)
 
+    def test_review_export_is_atomic_and_verifiable(self):
+        second = self.changed(self.first)
+        run = self.command("run", self.project)
+        self.assertEqual(run["status"], "completed")
+        before = self.snapshot()
+        destination = self.scratch / "review package.galata-review"
+
+        exported = self.command("export", self.project, destination)
+        self.assertEqual(exported["schema"], "galata.project-review-export.v1")
+        self.assertEqual(exported["revision"], second["revision"])
+        self.assertEqual(exported["run_count"], 1)
+        self.assertTrue((destination / "REVIEW.md").is_file())
+        self.assertTrue((destination / "review.json").is_file())
+        self.assertEqual(self.snapshot(), before)
+
+        verified = self.command("verify", destination)
+        self.assertEqual(verified["schema"], "galata.project-review-verification.v1")
+        self.assertEqual(verified["status"], "verified")
+        self.assertEqual(verified["revision"], second["revision"])
+        self.assertEqual(verified["run_count"], 1)
+
+        project_json = destination / "project.json"
+        original = project_json.read_bytes()
+        project_json.write_bytes(original + b"\n")
+        self.refused("verify", destination)
+        project_json.write_bytes(original)
+        self.assertEqual(self.command("verify", destination)["status"], "verified")
+
+        self.refused("export", self.project, destination)
+
     def test_stale_missing_and_malformed_targets_preserve_owned_documents(self):
         second = self.changed(self.first)
         before = self.snapshot()

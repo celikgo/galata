@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Navion nominal level-flight derivative model, NASA CR-96008, Table X.
+# The source citation and every unit conversion are recorded in PROVENANCE.md.
+#
+# This is a local first-order derivative model at one condition. It has no
+# stall, Mach schedule, engine map, or validated operating envelope.
+
+description: >-
+  Navion nominal level flight — sea level, M = 0.158, 176 ft/s, 2750 lb,
+  0.6 degree reference angle of attack
+
+citation: >-
+  Gary L. Teper, "Aircraft Stability and Control Data", NASA CR-96008,
+  Systems Technology, Inc. for NASA Ames Research Center, April 1969,
+  Tables X-A through X-E, N69-31783.
+
+geometry:
+  wing_area_m2: 16.7225472000
+  wing_span_m: 10.1803200000
+  mean_aerodynamic_chord_m: 1.7373600000
+
+mass:
+  mass_kg: 1247.3790175000
+  inertia_xx_kg_m2: 1420.8972098513
+  inertia_yy_kg_m2: 4067.4538449942
+  inertia_zz_kg_m2: 4786.0373576098
+  product_of_inertia_xz_kg_m2: 0.0
+
+thrust_incidence_rad: 0.0
+
+aero:
+  reference_alpha_rad: 0.0104719755
+  reference_mach: 0.158
+
+  # Table X-B, stability axes, flight condition 1.
+  lift_ref: 0.41
+  drag_ref: 0.05
+  pitching_moment_ref: 0.0
+  lift_alpha: 4.44
+  drag_alpha: 0.330
+  pitching_moment_alpha: -0.683
+  lift_pitch_rate: 0.0
+  pitching_moment_pitch_rate: -9.96
+  pitching_moment_alpha_dot: -4.36
+  lift_elevator: 0.355
+  drag_elevator: 0.0
+
+  # Table X-D gives M_delta_e = -11.1892 / s^2. Its equivalent coefficient
+  # is M_delta_e / (qbar S c / Iy), with qbar = 36.8 lbf/ft^2.
+  pitching_moment_elevator: -0.8890478007
+
+  # Table X-C, stability axes. The adapter rotates these into body axes at
+  # the declared reference angle before evaluating the equations of motion.
+  lateral_axes: stability
+  side_force_beta: -0.564
+  rolling_moment_beta: -0.074
+  yawing_moment_beta: 0.0701
+  rolling_moment_roll_rate: -0.410
+  yawing_moment_roll_rate: -0.0575
+  rolling_moment_yaw_rate: 0.107
+  yawing_moment_yaw_rate: -0.125
+  side_force_aileron: 0.0
+  rolling_moment_aileron: 0.1342
+  yawing_moment_aileron: -0.00346
+  side_force_rudder: 0.157
+  rolling_moment_rudder: 0.0118
+  yawing_moment_rudder: -0.0717

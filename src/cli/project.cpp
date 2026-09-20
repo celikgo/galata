@@ -51,6 +51,7 @@ using Node = YAML::Node;
 constexpr std::size_t kDocumentBytes = 2 * 1024 * 1024;
 constexpr std::size_t kOriginBytes = 8 * 1024 * 1024;
 constexpr std::size_t kArtifactBytes = 128 * 1024 * 1024;
+constexpr std::size_t kReviewTotalBytes = 512 * 1024 * 1024;
 constexpr std::size_t kHistoryEntries = 1024;
 constexpr std::size_t kPresentationRoutes = 256;
 constexpr std::size_t kRoutePoints = 64;
@@ -517,6 +518,252 @@ Node artifact(const p::RunFiles& files, const std::string& path) {
   Node result;
   result["path"] = text_node(path);
   result["sha256"] = text_node(p::sha256(read(files, path, kArtifactBytes)));
+  return result;
+}
+
+Node inspect(const p::RunFiles& files);
+
+struct ReviewFile {
+  std::string path;
+  std::string sha256;
+  std::size_t size_bytes = 0;
+};
+
+bool review_lock_file(const fs::path& relative) {
+  const std::string name = relative.filename().string();
+  return name == "project.lock" || name == "worker.lock";
+}
+
+bool review_file_less(const ReviewFile& left, const ReviewFile& right) {
+  return left.path < right.path;
+}
+
+bool review_file_equal(const ReviewFile& left, const ReviewFile& right) {
+  return left.path == right.path && left.sha256 == right.sha256
+         && left.size_bytes == right.size_bytes;
+}
+
+std::vector<ReviewFile> review_files(const fs::path& root, bool package_root) {
+  std::vector<ReviewFile> result;
+  std::size_t total_bytes = 0;
+  for (fs::recursive_directory_iterator iterator(root), end; iterator != end; ++iterator) {
+    const fs::path path = iterator->path();
+    const fs::file_status status = fs::symlink_status(path);
+    if (fs::is_symlink(status))
+      fail("review package refuses symlinks: " + path.string());
+    if (fs::is_directory(status))
+      continue;
+    if (!fs::is_regular_file(status))
+      fail("review package accepts regular files only: " + path.string());
+
+    const fs::path relative = fs::relative(path, root);
+    if (review_lock_file(relative))
+      continue;
+    if (relative.generic_string() == "review.json") {
+      if (!package_root)
+        fail("project uses reserved review-package file name 'review.json'");
+      continue;
+    }
+    if (relative.generic_string() == "REVIEW.md" && !package_root)
+      fail("project uses reserved review-package file name 'REVIEW.md'");
+
+    const auto bytes = p::read_file_bytes(path.string(), kArtifactBytes);
+    if (bytes.size() > kReviewTotalBytes - total_bytes)
+      fail("review package exceeds its bounded byte budget");
+    total_bytes += bytes.size();
+    result.push_back({relative.generic_string(), p::sha256(bytes), bytes.size()});
+  }
+  std::sort(result.begin(), result.end(), review_file_less);
+  return result;
+}
+
+void verify_review_file_set(const std::vector<ReviewFile>& expected,
+                            const std::vector<ReviewFile>& actual) {
+  if (expected.size() != actual.size())
+    fail("review package file inventory differs from its manifest");
+  for (std::size_t index = 0; index < expected.size(); ++index) {
+    if (!review_file_equal(expected[index], actual[index]))
+      fail("review package file inventory differs from its manifest at '" + expected[index].path
+           + "'");
+  }
+}
+
+Node review_file_node(const ReviewFile& file) {
+  Node result;
+  result["path"] = text_node(file.path);
+  result["sha256"] = text_node(file.sha256);
+  result["size_bytes"] = file.size_bytes;
+  return result;
+}
+
+std::string review_readme(const std::string& revision,
+                          std::size_t file_count,
+                          std::size_t run_count) {
+  std::ostringstream result;
+  result << "# Galata review package\n\n"
+         << "Current saved revision: `" << revision << "`\n\n"
+         << "This directory is an immutable content snapshot of a Galata project, including "
+            "retained revisions, source-origin attachments and run evidence. It contains "
+         << file_count << " verified project file(s) and " << run_count << " retained run(s).\n\n"
+         << "Verify it with `galata project verify <this-directory>`. The hashes establish "
+            "content identity, not authorship, numerical validity, airworthiness, certification "
+            "or qualification.\n";
+  return result.str();
+}
+
+fs::path review_temporary_directory(const fs::path& destination) {
+  const fs::path parent =
+      destination.parent_path().empty() ? fs::path(".") : destination.parent_path();
+  fs::create_directories(parent);
+  std::string pattern = (parent / (destination.filename().string() + ".new-XXXXXX")).string();
+  std::vector<char> mutable_pattern(pattern.begin(), pattern.end());
+  mutable_pattern.push_back('\0');
+  if (mkdtemp(mutable_pattern.data()) == nullptr)
+    fail("cannot create temporary review package directory");
+  return fs::path(mutable_pattern.data());
+}
+
+bool path_is_within(const fs::path& child, const fs::path& parent) {
+  const fs::path relative = child.lexically_relative(parent);
+  if (relative.empty())
+    return true;
+  const auto first = relative.begin();
+  return first == relative.end() || *first != "..";
+}
+
+Node review_manifest(const std::string& revision,
+                     const Node& project_view,
+                     const std::vector<ReviewFile>& files) {
+  Node manifest;
+  manifest["schema"] = text_node("galata.project-review.v1");
+  manifest["project_schema"] = text_node("galata.project.v1");
+  manifest["revision"] = text_node(revision);
+  manifest["files"] = Node(YAML::NodeType::Sequence);
+  for (const ReviewFile& file : files)
+    manifest["files"].push_back(review_file_node(file));
+  manifest["runs"] = Node(YAML::NodeType::Sequence);
+  for (const auto& run : project_view["runs"]) {
+    Node summary;
+    for (const auto& key : {"id", "revision", "status", "diagnostic"}) {
+      if (run[key])
+        summary[key] = run[key];
+    }
+    manifest["runs"].push_back(summary);
+  }
+  return manifest;
+}
+
+Node export_review_package(const p::RunFiles& files, const fs::path& destination) {
+  const fs::path source = fs::canonical(files.output_directory());
+  const fs::path target = fs::absolute(destination).lexically_normal();
+  if (target == source || path_is_within(target, source))
+    fail("review package destination must be outside the source project");
+  if (target.filename().empty() || target.filename() == "." || target.filename() == "..")
+    fail("review package destination must be a named new directory");
+  if (fs::exists(target))
+    fail("review package destination already exists");
+
+  const std::string revision = head(files);
+  const Node view = inspect(files);
+  for (const auto& run : view["runs"]) {
+    if (run["status"] && string(run, "status") == "running")
+      fail("cannot export a project while a worker is running");
+  }
+  const std::vector<ReviewFile> source_files = review_files(source, false);
+  if (source_files.empty())
+    fail("project has no reviewable files");
+
+  const fs::path temporary = review_temporary_directory(target);
+  bool published = false;
+  try {
+    p::RunFiles staged(temporary.string(), false);
+    std::size_t total_bytes = 0;
+    for (const ReviewFile& file : source_files) {
+      const auto bytes = p::read_file_bytes((source / file.path).string(), kArtifactBytes);
+      if (bytes.size() != file.size_bytes || p::sha256(bytes) != file.sha256)
+        fail("source project changed while creating the review package: " + file.path);
+      if (bytes.size() > kReviewTotalBytes - total_bytes)
+        fail("review package exceeds its bounded byte budget");
+      total_bytes += bytes.size();
+      staged.write_output(file.path, bytes, true);
+    }
+
+    const std::string readme =
+        review_readme(revision, source_files.size() + 1, view["runs"].size());
+    staged.write_output("REVIEW.md", readme, true);
+    std::vector<ReviewFile> package_files = source_files;
+    package_files.push_back({"REVIEW.md", p::sha256(readme), readme.size()});
+    std::sort(package_files.begin(), package_files.end(), review_file_less);
+
+    const Node manifest = review_manifest(revision, view, package_files);
+    const std::string manifest_bytes = json(manifest) + '\n';
+    staged.write_output("review.json", manifest_bytes, true);
+
+    verify_review_file_set(package_files, review_files(temporary, true));
+    verify_review_file_set(source_files, review_files(source, false));
+    fs::rename(temporary, target);
+    published = true;
+
+    Node result;
+    result["schema"] = text_node("galata.project-review-export.v1");
+    result["destination"] = text_node(target.string());
+    result["manifest_path"] = text_node((target / "review.json").string());
+    result["manifest_sha256"] = text_node(p::sha256(manifest_bytes));
+    result["revision"] = text_node(revision);
+    result["file_count"] = package_files.size();
+    result["run_count"] = view["runs"].size();
+    return result;
+  } catch (...) {
+    if (!published) {
+      std::error_code ignored;
+      fs::remove_all(temporary, ignored);
+    }
+    throw;
+  }
+}
+
+Node verify_review_package(const p::RunFiles& files) {
+  const Node manifest = load(files, "review.json", kDocumentBytes);
+  io::yaml_keys(
+      manifest, "review manifest", {"schema", "project_schema", "revision", "files", "runs"});
+  schema(manifest, "galata.project-review.v1");
+  if (string(manifest, "project_schema") != "galata.project.v1")
+    fail("review package names an unsupported project schema");
+  const std::string revision = string(manifest, "revision");
+  if (!digest(revision))
+    fail("review package has an invalid current revision identity");
+  if (!manifest["files"].IsSequence() || manifest["files"].size() > kHistoryEntries * 256)
+    fail("review package has an invalid file inventory");
+
+  std::vector<ReviewFile> expected;
+  std::set<std::string> paths;
+  for (const auto& item : manifest["files"]) {
+    io::yaml_keys(item, "review file", {"path", "sha256", "size_bytes"});
+    const std::string path = string(item, "path");
+    if (path == "review.json" || review_lock_file(fs::path(path)) || !paths.insert(path).second)
+      fail("review package has a duplicate or reserved file path");
+    const std::string hash = string(item, "sha256");
+    if (!digest(hash))
+      fail("review package has an invalid file digest: " + path);
+    const std::size_t size = item["size_bytes"].as<std::size_t>();
+    expected.push_back({path, hash, size});
+    const std::string bytes = read(files, path, kArtifactBytes);
+    if (bytes.size() != size || p::sha256(bytes) != hash)
+      fail("review package file digest mismatch: " + path);
+  }
+  std::sort(expected.begin(), expected.end(), review_file_less);
+  verify_review_file_set(expected, review_files(files.output_directory(), true));
+
+  if (head(files) != revision)
+    fail("review package current revision does not match its manifest");
+  const Node view = inspect(files);
+  Node result;
+  result["schema"] = text_node("galata.project-review-verification.v1");
+  result["status"] = text_node("verified");
+  result["revision"] = text_node(revision);
+  result["file_count"] = expected.size();
+  result["run_count"] = view["runs"].size();
+  result["manifest_sha256"] = text_node(p::sha256(read(files, "review.json")));
   return result;
 }
 
@@ -1072,18 +1319,24 @@ int project_command(const std::vector<std::string>& arguments) {
   try {
     if (arguments.size() < 2)
       fail(
-          "usage: galata project <create|inspect|revisions|run> <directory>, revision <directory> "
+          "usage: galata project <create|inspect|revisions|run|export|verify> <directory>, "
+          "revision <directory> "
           "<revision>, import-linear <directory> <study.yaml>, or <save|restore> <directory> "
           "<draft.json|revision> --expected-revision <revision>");
     const auto& operation = arguments[0];
     const bool expected = operation == "save" || operation == "restore";
     const bool selected = operation == "import-linear" || operation == "revision";
+    const bool export_operation = operation == "export";
+    const bool verify_operation = operation == "verify";
     if ((expected && (arguments.size() != 5 || arguments[3] != "--expected-revision"))
-        || (selected && arguments.size() != 3) || (!expected && !selected && arguments.size() != 2))
+        || (selected && arguments.size() != 3) || (export_operation && arguments.size() != 3)
+        || (verify_operation && arguments.size() != 2)
+        || (!expected && !selected && !export_operation && !verify_operation
+            && arguments.size() != 2))
       fail("invalid command arguments");
     if (operation != "create" && operation != "save" && operation != "run" && operation != "inspect"
         && operation != "import-linear" && operation != "revisions" && operation != "revision"
-        && operation != "restore")
+        && operation != "restore" && operation != "export" && operation != "verify")
       fail("unknown project operation");
     const fs::path root(arguments[1]);
     if (fs::is_symlink(fs::symlink_status(root)))
@@ -1095,7 +1348,15 @@ int project_command(const std::vector<std::string>& arguments) {
       fail("project directory does not exist");
     }
     p::RunFiles files(root.string(), true);
-    if (operation == "create") {
+    if (operation == "verify") {
+      Lock edit(files.output_path("project.lock"));
+      std::cout << json(verify_review_package(files)) << '\n';
+      return 0;
+    } else if (operation == "export") {
+      Lock edit(files.output_path("project.lock"));
+      std::cout << json(export_review_package(files, fs::path(arguments[2]))) << '\n';
+      return 0;
+    } else if (operation == "create") {
       Lock edit(files.output_path("project.lock"));
       if (fs::exists(files.output_path("project.json")))
         fail("project already exists");

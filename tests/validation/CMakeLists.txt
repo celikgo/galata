@@ -28,6 +28,12 @@ add_executable(galata_validation_tests
   test_rigid_body_dynamics.cpp
   test_nt33a_modes.cpp
   test_nt33a_trim_linearize.cpp
+  test_navion_model.cpp
+  test_a7a_model.cpp
+  test_a4d_model.cpp
+  test_f4c_model.cpp
+  test_gtm_model.cpp
+  test_f16_model.cpp
   test_disk_margin_seiler.cpp
   test_sensitivity_bounds.cpp
   test_case_registry.cpp

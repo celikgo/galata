@@ -36,14 +36,16 @@ target_compile_options(galata_desktop PRIVATE -fobjc-arc -Wall -Wextra -Wpedanti
 if(GALATA_WERROR)
   target_compile_options(galata_desktop PRIVATE -Werror)
 endif()
-target_link_libraries(galata_desktop PRIVATE "-framework AppKit" "-framework Foundation"
-  "-framework QuartzCore")
+target_link_libraries(galata_desktop PRIVATE galata::public_headers
+  "-framework AppKit" "-framework Foundation" "-framework QuartzCore")
 # The UI always launches the same CLI implementation used by batch studies.
 add_dependencies(galata_desktop galata_cli)
 set_property(TARGET galata_desktop APPEND PROPERTY LINK_DEPENDS "$<TARGET_FILE:galata_cli>")
 set_property(TARGET galata_desktop APPEND PROPERTY LINK_DEPENDS
   "${PROJECT_SOURCE_DIR}/scripts/package-desktop.py"
-  "${PROJECT_SOURCE_DIR}/scripts/check-desktop-package.py")
+  "${PROJECT_SOURCE_DIR}/scripts/check-desktop-package.py"
+  "${PROJECT_SOURCE_DIR}/scripts/package-desktop-dmg.py"
+  "${PROJECT_SOURCE_DIR}/scripts/check-desktop-dmg.py")
 add_custom_command(TARGET galata_desktop POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:galata_cli>"
     "$<TARGET_BUNDLE_DIR:galata_desktop>/Contents/MacOS/galata"

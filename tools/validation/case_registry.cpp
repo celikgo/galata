@@ -16,6 +16,13 @@ const char* const kUssa =
     "COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335";
 const char* const kCr2144 =
     "Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972)";
+const char* const kCr96008 =
+    "Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969)";
+const char* const kGtm =
+    "NASA GTM_DesignSim, LAR-17625-1, and Cunningham et al., AIAA-2011-6451";
+const char* const kF16 =
+    "NASA simupy-flight, NESC Case 11 F-16 model, public revision "
+    "70754e6916afc206e8c0abb386d1a9c98bf8f561";
 const char* const kSeiler =
     "Seiler, Packard & Gahinet, *An Introduction to Disk Margins*, IEEE CSM 40(5) (2020)";
 const char* const kMathWorks =
@@ -543,6 +550,87 @@ const std::vector<Case>& validation_cases() {
        "To {modes.worst_percent}, worst case {modes.worst_name}. The input is a non-dimensional "
        "derivative "
        "set and some geometry; there is no matrix anywhere in it."},
+
+      {"navion.chain_modes",
+       "Navion nominal derivative model through trim, linearisation and modal classification",
+       {"model.aircraft.derivatives", "trim.level", "linearize.finitediff", "analyze.modes"},
+       std::string(kCr96008) + ", Section X, Tables X-A through X-E",
+       Status::ValidatedWithCaveat,
+       {E{kValidation,
+          "NavionModel.PublishedNominalConditionTrimsAtTheDeclaredMachAndDynamicPressure"},
+        E{kValidation,
+          "NavionModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget"}},
+       "The published Navion condition and modal values are reproduced within a fixed 3% "
+       "rounded-source budget. This validates a second fixed-wing derivative transcription and "
+       "the shared workflow at one nominal condition; it does not validate a global Navion "
+       "model, a real aircraft, or any flight envelope."},
+
+      {"a7a.chain_modes",
+       "A-7A clean flexible-airplane derivative model through trim, linearisation and modal "
+       "classification",
+       {"model.aircraft.derivatives", "trim.level", "linearize.finitediff", "analyze.modes"},
+       std::string(kCr96008) + ", Section II, Tables II-A through II-F",
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "A7AModel.PublishedConditionLoadsAndTrims"},
+        E{kValidation, "A7AModel.PublishedDimensionalDerivativesAreReproducedAtTheReferencePoint"},
+        E{kValidation, "A7AModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget"}},
+       "The clean flexible-airplane condition-1 derivative set reproduces the source's "
+       "dimensional derivatives and published short-period, spiral, roll-subsidence and "
+       "Dutch-roll factors within a fixed 5% rounded-source budget. This adds a third "
+      "published fixed-wing transcription; it does not validate a global A-7A model, "
+       "structural flexibility, or any flight envelope."},
+
+      {"a4d.chain_modes",
+       "A-4D clean flexible-airplane derivative model through trim and local linearisation",
+       {"model.aircraft.derivatives", "trim.level", "linearize.finitediff"},
+       std::string(kCr96008) + ", Section III, Tables III-A through III-C",
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "A4DModel.PublishedConditionLoadsAndTrims"},
+        E{kValidation, "A4DModel.LoadedCoefficientsReproduceEveryPublishedDimensionalDerivative"},
+        E{kValidation, "A4DModel.NonlinearTrimLinearisationIsFiniteWithMeasuredCoupling"}},
+       "All printed longitudinal and lateral dimensional derivatives are reproduced by the "
+       "loaded coefficient conversion, and the nonlinear model trims and linearises at the "
+       "declared speed. Rounded source intercepts produce a local trim offset, so this case "
+       "does not claim modal agreement at the printed angle; it is not a global A-4D model or "
+       "flight evidence."},
+
+      {"f4c.chain_modes",
+       "F-4C power-approach derivative model through trim and local linearisation",
+       {"model.aircraft.derivatives", "trim.level", "linearize.finitediff", "analyze.modes"},
+       std::string(kCr2144) + ", Section IV, Figure IV-1 and Table IV-1",
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "F4CModel.PublishedConditionLoadsWithDeclaredUnitsAndAxes"},
+        E{kValidation, "F4CModel.NonlinearTrimAndLinearisationAreFiniteAtThePublishedSpeed"}},
+       "The F-4C power-approach condition preserves the source's geometry, mass, inertia and "
+       "non-dimensional derivatives, including the stability-to-body axis conversion, and "
+       "executes the shared trim, linearisation and mode path. It is a fifth narrow fixed-wing "
+       "transcription, not a global F-4C model, flight-test validation or certification artifact."},
+
+      {"gtm_t2.nominal_slice",
+       "NASA Generic Transport Model T2 nominal derivative slice through load and trim",
+       {"model.aircraft.derivatives", "trim.level"},
+       kGtm,
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "GtmModel.NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass"},
+        E{kValidation, "GtmModel.DerivedCoefficientsMatchTheCommittedSourceBoundary"},
+        E{kValidation, "GtmModel.NominalSliceTrimsAndReportsFiniteDynamics"}},
+       "A controlled first-order slice derived from NASA's public T2 polynomial database is "
+       "loaded, checked against its committed derivation boundary and trimmed. This adds a "
+       "sixth fixed-wing reference surface; it is not a port of NASA's nonlinear database, "
+       "not flight validation and not a certification artifact."},
+
+      {"f16.nominal_slice",
+       "NASA F-16 nominal derivative slice through load and trim",
+       {"model.aircraft.derivatives", "trim.level"},
+       kF16,
+       Status::ValidatedWithCaveat,
+       {E{kValidation, "F16Model.NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass"},
+        E{kValidation, "F16Model.DerivedCoefficientsMatchTheCommittedSourceBoundary"},
+        E{kValidation, "F16Model.NominalSliceTrimsAndReportsFiniteDynamics"}},
+       "A controlled first-order slice derived from NASA's public simupy-flight F-16 model is "
+       "loaded, checked against its committed derivation boundary and trimmed. This adds a "
+       "seventh fixed-wing reference surface; it is not the nonlinear F-16 model, not flight "
+       "validation and not a certification artifact."},
 
       // --- Determinism ------------------------------------------------------
       {"determinism.tier1",

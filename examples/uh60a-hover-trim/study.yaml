@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native UH-60A Level-1 study path. The model is explicitly assumption-heavy;
+# see models/uh60a/PROVENANCE.md before interpreting any output.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.helicopter
+    input:
+      path: ../../models/uh60a/uh60a-level1.yaml
+
+  - id: hover
+    capability: trim.helicopter
+    input:
+      helicopter: {from: aircraft}
+      airspeed_m_s: 0.0
+      altitude_m: 0.0
+
+  - id: linear
+    capability: linearize.vehicle
+    input:
+      trim: {from: hover}
+      drop_position_and_heading: true
+
+  - id: modes
+    capability: analyze.modes
+    input:
+      system: {from: linear}
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: UH-60A Level-1 study hover and linearisation
+      sections: [{from: hover}, {from: linear}, {from: modes}]
+      path: uh60a-hover-trim.md

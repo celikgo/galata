@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A-7A, clean flexible airplane, flight condition 1.
+# PRIMARY SOURCE: Gary L. Teper, Aircraft Stability and Control Data,
+# NASA CR-96008, Section II, Tables II-A through II-F, N69-31783.
+# https://ntrs.nasa.gov/citations/19690022405
+# The source is a US Government NASA report, distributed without restriction.
+# Values were read from rendered table pages; the conversion and limitations
+# are documented in models/a7a/PROVENANCE.md.
+#
+quantity,value,units,location
+altitude,0,ft,Table II-A row h p.21
+mach,0.25,-,Table II-A row M p.21
+true_airspeed,279,ft/s,Table II-A row VT0 p.21
+dynamic_pressure,91.5,lbf/ft2,Table II-A row qbar p.21
+reference_alpha,11.2,deg,Table II-A row alpha0 p.21
+weight,21889,lbf,Table II-A row W p.21
+trim_elevator,-7.4,deg,Table II-A row delta_e0 p.21
+X_u,0.0162,1/s,Table II-B p.22
+X_w,-0.0145,1/s,Table II-B p.22
+X_delta_e,5.75,1/s2,Table II-B p.22
+Z_u,-0.0814,1/s,Table II-B p.22
+Z_w,-0.779,1/s,Table II-B p.22
+Z_delta_e,-29.0,1/s2,Table II-B p.22
+M_u,0.00201,1/(s-ft),Table II-B p.22
+M_w,-0.00982,1/(s-ft),Table II-B p.22
+M_w_dot,-0.000286,1/ft,Table II-B p.22
+M_q,-0.466,1/s,Table II-B p.22
+M_delta_e,-5.44,1/s2,Table II-B p.22
+Y_v,-0.162,1/s,Table II-C p.23
+Y_delta_a,-0.00274,1/s2,Table II-C p.23
+Y_delta_r,0.0430,1/s2,Table II-C p.23
+L_beta_prime,-11.9,1/s2,Table II-C p.23
+L_p_prime,-2.00,1/s,Table II-C p.23
+L_r_prime,1.18,1/s,Table II-C p.23
+L_delta_a_prime,5.34,1/s2,Table II-C p.23
+L_delta_r_prime,2.22,1/s2,Table II-C p.23
+N_beta_prime,1.28,1/s2,Table II-C p.23
+N_p_prime,-0.0870,1/s,Table II-C p.23
+N_r_prime,-0.369,1/s,Table II-C p.23
+N_delta_a_prime,0.402,1/s2,Table II-C p.23
+N_delta_r_prime,-1.93,1/s2,Table II-C p.23
+short_period_damping_ratio,0.367,-,Table II-D p.24
+short_period_natural_frequency,1.76,rad/s,Table II-D p.24
+spiral_root,0.0462,1/s,Table II-E p.25
+roll_subsidence_root,1.62,1/s,Table II-E p.25
+dutch_roll_damping_ratio,0.237,-,Table II-E p.25
+dutch_roll_natural_frequency,1.81,rad/s,Table II-E p.25

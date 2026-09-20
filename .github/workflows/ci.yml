@@ -130,11 +130,28 @@ jobs:
           python3 scripts/package-desktop.py "build/${{ matrix.preset }}"
           --output-dir build/desktop-candidate-assets
 
+      - name: Build and verify the macOS installer image
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="$(find build/desktop-candidate-assets -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$zip_path"
+          python3 scripts/package-desktop-dmg.py "$zip_path" \
+            --output-dir build/desktop-dmg-candidate
+          dmg_path="$(find build/desktop-dmg-candidate -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          metadata_path="$(find build/desktop-dmg-candidate -maxdepth 1 -type f -name '*.dmg.json' -print -quit)"
+          test -n "$dmg_path"
+          test -n "$metadata_path"
+          python3 scripts/check-desktop-dmg.py "$dmg_path" "$metadata_path"
+
       - uses: actions/upload-artifact@v4
         if: matrix.name == 'macos'
         with:
           name: desktop-candidate-${{ inputs.source_sha || github.sha }}
-          path: build/desktop-candidate-assets/*
+          path: |
+            build/desktop-candidate-assets/*
+            build/desktop-dmg-candidate/*
           if-no-files-found: error
           retention-days: 7
 

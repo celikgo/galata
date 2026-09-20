@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NASA simupy-flight F-16 nominal derivative slice through the ordinary
+# fixed-wing trim, linearisation and mode-report path.
+
+version: 1
+
+stages:
+  - id: aircraft
+    capability: model.aircraft.derivatives
+    input:
+      path: ../../models/f16/f16-nominal.yaml
+
+  - id: trim
+    capability: trim.level
+    input:
+      aircraft: { from: aircraft }
+      altitude_m: 3048.0
+      airspeed_m_s: 91.44
+      flight_path_angle_deg: 0.0
+      tolerance: 1.0e-10
+
+  - id: longitudinal
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: longitudinal
+      report_truncation_error: true
+
+  - id: lateral
+    capability: linearize.finitediff
+    input:
+      trim_point: { from: trim }
+      axes: lateral
+      report_truncation_error: true
+
+  - id: longitudinal_modes
+    capability: analyze.modes
+    input:
+      system: { from: longitudinal }
+      classify: true
+
+  - id: lateral_modes
+    capability: analyze.modes
+    input:
+      system: { from: lateral }
+      classify: true
+
+  - id: report
+    capability: report.markdown
+    input:
+      title: NASA F-16 — nominal derivative slice
+      sections:
+        - { from: trim }
+        - { from: longitudinal }
+        - { from: longitudinal_modes }
+        - { from: lateral }
+        - { from: lateral_modes }
+      path: trim-and-modes.md

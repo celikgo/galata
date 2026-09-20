@@ -65,6 +65,20 @@ theme, native block/sample tables and saved-revision review/restore. Source
 matrices and diagnostics remain attached after edits. It has no 3-D viewport or
 signed desktop installer. It does not complete the former v1.0 feature list.
 
+## Current 0.3.0 candidate overlay
+
+The working tree now contains additional, still-candidate integration surfaces
+that were not present in the original roadmap baseline: a vehicle-neutral
+flight-test comparison and campaign-package gate, serial/UDP/SocketCAN-CAN-FD
+hardware adapters with an atomic POSIX onboard runtime bundle, a
+class-aware target-evidence package, a qualification dossier/chain verifier,
+and a native desktop path for those workflows. These are implemented and
+tested repository contracts, not evidence that a particular aircraft,
+flight-computer installation or authority has accepted them. The production
+status and external gates are maintained in
+[`FINALIZATION_AUDIT.md`](FINALIZATION_AUDIT.md) and
+[`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
+
 ## Future work — not implemented
 
 The following are separate extensions, each requiring its own model assumptions,
@@ -80,8 +94,9 @@ reference data and acceptance criteria before it becomes a release commitment.
 | Extensions and automation | Stable C plugin ABI, aerodynamic/sensor extension contracts, AI and MCP interfaces with separate execution controls and evaluations |
 
 A future stable release needs an explicit scope and compatibility contract; it
-cannot be inferred from the number of completed capabilities. There is no
-onboard deployment or tool-qualification claim in this roadmap.
+cannot be inferred from the number of completed capabilities. The current
+candidate makes no target-hardware deployment, tool-qualification,
+airworthiness or certification claim.
 
 ## Reference data and evidence
 
