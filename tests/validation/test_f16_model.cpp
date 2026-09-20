@@ -21,8 +21,7 @@ using galata::model::Aircraft;
 using galata::trim::LevelTrimRequest;
 
 Aircraft f16() {
-  return galata::model::load_aircraft(std::string(GALATA_MODELS_DIR)
-                                      + "/f16/f16-nominal.yaml");
+  return galata::model::load_aircraft(std::string(GALATA_MODELS_DIR) + "/f16/f16-nominal.yaml");
 }
 
 }  // namespace
@@ -32,9 +31,7 @@ TEST(F16Model, NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass) {
   EXPECT_NEAR(aircraft.geometry.wing_area_m2, 27.870912, 1.0e-12);
   EXPECT_NEAR(aircraft.geometry.wing_span_m, 9.144, 1.0e-12);
   EXPECT_NEAR(aircraft.mass.mass_kg, 9300.108714, 1.0e-9);
-  EXPECT_NEAR(aircraft.aero.reference_alpha_rad,
-              galata::units::degrees_to_radians(5.0),
-              1.0e-12);
+  EXPECT_NEAR(aircraft.aero.reference_alpha_rad, galata::units::degrees_to_radians(5.0), 1.0e-12);
   EXPECT_GT(aircraft.aero.lift_alpha, 0.0);
   EXPECT_NE(aircraft.aero.pitching_moment_elevator, 0.0);
 }
@@ -79,7 +76,7 @@ TEST(F16Model, DerivedCoefficientsMatchTheCommittedSourceBoundary) {
 TEST(F16Model, NominalSliceTrimsAndReportsFiniteDynamics) {
   const Aircraft aircraft = f16();
   LevelTrimRequest request;
-  request.altitude_m = 3048.0;  // Source study condition: 10,000 ft.
+  request.altitude_m = 3048.0;            // Source study condition: 10,000 ft.
   request.airspeed_m_s = 300.0 * 0.3048;  // NASA source: 300 ft/s.
   request.flight_path_angle_rad = 0.0;
   request.residual_tolerance = 1.0e-10;

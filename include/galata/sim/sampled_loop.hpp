@@ -42,8 +42,8 @@ struct SampledLoopResult {
 };
 
 struct SampledLoopOptions {
-  double step_s = 0.0;              // s
-  double controller_period_s = 0.0; // s
+  double step_s = 0.0;               // s
+  double controller_period_s = 0.0;  // s
   int steps = 0;
   int sample_stride = 1;
   int delay_periods = 0;

@@ -98,7 +98,7 @@ Eigen::VectorXd theta_step(const DerivativeFunction& derivative,
   const double next_time = time_s + step_s;
 
   const Eigen::VectorXd explicit_part =
-      theta < 1.0 ? Eigen::VectorXd(derivative(time_s, state)) : Eigen::VectorXd::Zero(n).eval();
+      theta < 1.0 ? derivative(time_s, state) : Eigen::VectorXd::Zero(n).eval();
   if (theta < 1.0 && (explicit_part.size() != n || !explicit_part.allFinite())) {
     throw std::runtime_error("integrate: the derivative is non-finite at the step's start");
   }
@@ -110,8 +110,7 @@ Eigen::VectorXd theta_step(const DerivativeFunction& derivative,
   // step. A guess taken from the previous step's answer would make the result
   // depend on the trajectory's history in a way that is harder to reason about
   // and no cheaper.
-  const Eigen::VectorXd slope =
-      theta < 1.0 ? explicit_part : Eigen::VectorXd(derivative(time_s, state));
+  const Eigen::VectorXd slope = theta < 1.0 ? explicit_part : derivative(time_s, state);
   if (slope.size() != n || !slope.allFinite()) {
     throw std::runtime_error("integrate: the derivative is non-finite at the step's start");
   }
@@ -122,8 +121,7 @@ Eigen::VectorXd theta_step(const DerivativeFunction& derivative,
   // rather than quadratically, which is why the iteration count is a parameter,
   // and it costs one Jacobian per step rather than one per iteration.
   const Eigen::MatrixXd jacobian = stage_jacobian(derivative, next_time, guess);
-  Eigen::MatrixXd iteration_matrix =
-      Eigen::MatrixXd::Identity(n, n) - (step_s * theta) * jacobian;
+  Eigen::MatrixXd iteration_matrix = Eigen::MatrixXd::Identity(n, n) - (step_s * theta) * jacobian;
   const Eigen::PartialPivLU<Eigen::MatrixXd> factorisation(iteration_matrix);
 
   for (int k = 0; k < iterations; ++k) {
@@ -251,11 +249,11 @@ Eigen::VectorXd integration_step(IntegrationMethod method,
       // gets exactly the bits integrator.hpp produced before this file existed.
       return rk4_step(derivative, time_s, state, step_s);
     case IntegrationMethod::ImplicitEulerFixed:
-      return theta_step(derivative, time_s, state, step_s, 1.0, newton_iterations,
-                        iterations_performed);
+      return theta_step(
+          derivative, time_s, state, step_s, 1.0, newton_iterations, iterations_performed);
     case IntegrationMethod::TrapezoidalFixed:
-      return theta_step(derivative, time_s, state, step_s, 0.5, newton_iterations,
-                        iterations_performed);
+      return theta_step(
+          derivative, time_s, state, step_s, 0.5, newton_iterations, iterations_performed);
   }
   throw std::invalid_argument("integration_step: unknown method");
 }
@@ -293,8 +291,8 @@ IntegrationResult integrate(const DerivativeFunction& derivative,
     throw std::invalid_argument("integrate: jacobian_refresh_steps must be at least 1");
   }
   if (!bounds.empty() && bounds.size() != initial_state.size()) {
-    throw std::invalid_argument("integrate: bounds are declared for " + std::to_string(bounds.size())
-                                + " states but the state has "
+    throw std::invalid_argument("integrate: bounds are declared for "
+                                + std::to_string(bounds.size()) + " states but the state has "
                                 + std::to_string(initial_state.size()));
   }
 
@@ -325,8 +323,13 @@ IntegrationResult integrate(const DerivativeFunction& derivative,
     const double time_s = initial_time_s + static_cast<double>(step) * options.step_s;
     Eigen::VectorXd next;
     try {
-      next = integration_step(options.method, derivative, time_s, state, options.step_s,
-                              options.newton_iterations, &result.newton_iterations_performed);
+      next = integration_step(options.method,
+                              derivative,
+                              time_s,
+                              state,
+                              options.step_s,
+                              options.newton_iterations,
+                              &result.newton_iterations_performed);
     } catch (const std::exception& error) {
       result.reason = TerminationReason::DerivativeFailed;
       result.detail = std::string("step ") + std::to_string(step + 1) + " failed: " + error.what();
@@ -345,8 +348,8 @@ IntegrationResult integrate(const DerivativeFunction& derivative,
     // a result: the trajectory ends at the last good sample and the reason says
     // what happened at the next one.
     if (const std::string bad = bounds.violation(next); !bad.empty()) {
-      result.reason = !next.allFinite() ? TerminationReason::NonFinite
-                                        : TerminationReason::BoundExceeded;
+      result.reason =
+          !next.allFinite() ? TerminationReason::NonFinite : TerminationReason::BoundExceeded;
       result.detail = "at t = " + number(next_time) + " s, after " + std::to_string(step + 1)
                       + " steps, " + bad
                       + ". The trajectory returned ends at the last state that satisfied it";

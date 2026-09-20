@@ -285,6 +285,7 @@ TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
     const char* directory;
     const char* kind;
   };
+
   const std::vector<Example> examples = {
       {"shared-fixed-wing-workflow", "fixed-wing"},
       {"shared-multirotor-workflow", "multirotor"},
@@ -296,8 +297,8 @@ TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
     ASSERT_EQ(result.stages.size(), 8U);
     const auto* vehicle_stage = result.find("vehicle");
     ASSERT_NE(vehicle_stage, nullptr);
-    const auto& vehicle = vehicle_stage->payload_as<galata::pipeline::VehicleArtifact>(
-        "vehicle_model");
+    const auto& vehicle =
+        vehicle_stage->payload_as<galata::pipeline::VehicleArtifact>("vehicle_model");
     EXPECT_EQ(vehicle.vehicle_kind, example.kind);
     EXPECT_FALSE(vehicle.model->state_names().empty());
     EXPECT_FALSE(vehicle.model->control_metadata().empty());
@@ -306,8 +307,8 @@ TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
 
     const auto* trim_stage = result.find("trim");
     ASSERT_NE(trim_stage, nullptr);
-    const auto& trim = trim_stage->payload_as<galata::pipeline::VehicleTrimArtifact>(
-        "vehicle_trim");
+    const auto& trim =
+        trim_stage->payload_as<galata::pipeline::VehicleTrimArtifact>("vehicle_trim");
     EXPECT_EQ(trim.model.get(), vehicle.model.get());
     EXPECT_LT(trim.residual_norm, 1e-7);
 
@@ -320,8 +321,8 @@ TEST(SharedVehicleExecution, AllBuiltInFamiliesUseTheCommonArtifacts) {
 
     const auto* run_stage = result.find("trajectory");
     ASSERT_NE(run_stage, nullptr);
-    const auto& run = run_stage->payload_as<galata::pipeline::VehicleRunArtifact>(
-        "vehicle_trajectory");
+    const auto& run =
+        run_stage->payload_as<galata::pipeline::VehicleRunArtifact>("vehicle_trajectory");
     ASSERT_FALSE(run.result.integration.trajectory.states.empty());
     EXPECT_EQ(run.result.integration.trajectory.states.size(), run.result.controls.size());
     EXPECT_EQ(run.result.integration.trajectory.states.size(), run.result.outputs.size());

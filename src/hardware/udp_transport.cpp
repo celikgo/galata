@@ -13,8 +13,8 @@
 #include <utility>
 #include <vector>
 
-#include <netdb.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <poll.h>
 #include <unistd.h>
 

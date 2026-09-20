@@ -11,7 +11,8 @@ void require_fixed_udp_local_port(const std::string& endpoint) {
   const std::size_t separator = endpoint.rfind('|');
   if (separator == std::string::npos || separator + 1U >= endpoint.size()) {
     throw std::invalid_argument(
-        "hardware: UDP deployment endpoint must declare a fixed local port as host:port|local_port");
+        "hardware: UDP deployment endpoint must declare a fixed local port as "
+        "host:port|local_port");
   }
   std::uint32_t port = 0;
   for (std::size_t index = separator + 1U; index < endpoint.size(); ++index) {
@@ -34,7 +35,8 @@ void require_fixed_udp_local_port(const std::string& endpoint) {
 }
 
 void validate_target_identity(const TargetIdentity& identity) {
-  for (const auto& [value, field] : std::initializer_list<std::pair<const std::string*, const char*>>{
+  for (const auto& [value, field] :
+       std::initializer_list<std::pair<const std::string*, const char*>>{
            {&identity.hardware_id, "hardware_id"},
            {&identity.flight_computer_id, "flight_computer_id"},
            {&identity.firmware_id, "firmware_id"},

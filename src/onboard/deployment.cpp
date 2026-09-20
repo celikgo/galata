@@ -480,11 +480,10 @@ DeploymentPackage parse_manifest_package(const std::string& manifest) {
   package.manifest_sha256 = core::sha256(manifest);
   const auto fields = manifest_fields(manifest);
   package.target_platform = required_manifest_text(fields, "target_platform");
-  package.target_identity = {
-      required_manifest_text(fields, "target.hardware_id"),
-      required_manifest_text(fields, "target.flight_computer_id"),
-      required_manifest_text(fields, "target.firmware_id"),
-      required_manifest_text(fields, "target.emergency_stop_id")};
+  package.target_identity = {required_manifest_text(fields, "target.hardware_id"),
+                             required_manifest_text(fields, "target.flight_computer_id"),
+                             required_manifest_text(fields, "target.firmware_id"),
+                             required_manifest_text(fields, "target.emergency_stop_id")};
   package.interface = interface_from_fields(fields);
   package.max_controller_time_s = positive_manifest_number(fields, "runtime.max_controller_time_s");
   package.transport_profile = transport_profile_from_fields(fields);

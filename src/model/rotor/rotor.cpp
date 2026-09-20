@@ -95,8 +95,7 @@ void RotorGeometry::validate() const {
   require_finite(blade_flap_inertia_kg_m2, name, "blade_flap_inertia_kg_m2");
   require_finite(polar_inertia_kg_m2, name, "polar_inertia_kg_m2");
   require_finite(inflow_time_constant_s, name, "inflow_time_constant_s");
-  require_finite(maximum_thrust_coefficient_solidity, name,
-                 "maximum_thrust_coefficient_solidity");
+  require_finite(maximum_thrust_coefficient_solidity, name, "maximum_thrust_coefficient_solidity");
   require_finite(maximum_advance_ratio, name, "maximum_advance_ratio");
   if (!position_cg_to_hub_body_m.allFinite() || !hub_to_body.allFinite()) {
     throw std::invalid_argument("rotor '" + name + "': hub position and rotation must be finite");
@@ -136,16 +135,17 @@ void RotorGeometry::validate() const {
     throw std::invalid_argument("rotor '" + name + "': hinge_offset_m is " + number(hinge_offset_m)
                                 + ", must be in [0, radius)");
   }
-  if (flap_stiffness_n_m_rad < 0.0 || blade_flap_inertia_kg_m2 < 0.0
-      || polar_inertia_kg_m2 < 0.0) {
+  if (flap_stiffness_n_m_rad < 0.0 || blade_flap_inertia_kg_m2 < 0.0 || polar_inertia_kg_m2 < 0.0) {
     throw std::invalid_argument("rotor '" + name
                                 + "': flap stiffness and the two inertias must be non-negative");
   }
   if (inflow_time_constant_s < 0.0) {
-    throw std::invalid_argument("rotor '" + name + "': inflow_time_constant_s must be non-negative");
+    throw std::invalid_argument("rotor '" + name
+                                + "': inflow_time_constant_s must be non-negative");
   }
   if (!(maximum_advance_ratio > 0.0) || !(maximum_thrust_coefficient_solidity > 0.0)) {
-    throw std::invalid_argument("rotor '" + name + "': the declared envelope limits must be positive");
+    throw std::invalid_argument("rotor '" + name
+                                + "': the declared envelope limits must be positive");
   }
 
   // A NEAR-ROTATION IS NOT A ROTATION, and the failure is silent. A hub matrix
@@ -184,7 +184,8 @@ double hover_induced_velocity_m_s(const RotorGeometry& geometry,
 Eigen::Vector3d rotor_angular_momentum_body(const RotorGeometry& geometry,
                                             const RotorState& state) {
   // Along +z_hub when spin is +1, magnitude I_R * Omega.
-  const Eigen::Vector3d h_hub(0.0, 0.0,
+  const Eigen::Vector3d h_hub(0.0,
+                              0.0,
                               static_cast<double>(geometry.spin_about_shaft)
                                   * geometry.polar_inertia_kg_m2 * state.speed_rad_s);
   return geometry.hub_to_body * h_hub;
@@ -230,7 +231,8 @@ RotorSolution solve_rotor(const RotorGeometry& geometry,
                           const Eigen::Vector3d& body_rate_rad_s,
                           double density_kg_m3) {
   if (!(density_kg_m3 > 0.0) || !std::isfinite(density_kg_m3)) {
-    throw std::invalid_argument("rotor '" + geometry.name + "': density must be positive and finite");
+    throw std::invalid_argument("rotor '" + geometry.name
+                                + "': density must be positive and finite");
   }
   if (!velocity_hub_body_m_s.allFinite() || !body_rate_rad_s.allFinite()) {
     throw std::invalid_argument("rotor '" + geometry.name
@@ -326,9 +328,9 @@ RotorSolution solve_rotor(const RotorGeometry& geometry,
   const double thrust_at_zero_inflow = thrust_at(lambda_c);
   const double hover_scale =
       thrust_at_zero_inflow > 0.0 ? std::sqrt(0.5 * thrust_at_zero_inflow) : 0.0;
-  double lambda_quasi_static =
-      (std::isfinite(state.inflow_ratio) && state.inflow_ratio > 0.0) ? state.inflow_ratio
-                                                                     : hover_scale;
+  double lambda_quasi_static = (std::isfinite(state.inflow_ratio) && state.inflow_ratio > 0.0)
+                                   ? state.inflow_ratio
+                                   : hover_scale;
   // A rotor at negative thrust has no momentum-theory inflow in this form.
   // Holding the inflow at zero is the declared treatment, not an approximation
   // to a solution that exists.
@@ -414,17 +416,15 @@ RotorSolution solve_rotor(const RotorGeometry& geometry,
   const double flap_frequency_ratio_squared =
       1.0
       + (geometry.blade_flap_inertia_kg_m2 > 0.0
-             ? geometry.flap_stiffness_n_m_rad
-                   / (geometry.blade_flap_inertia_kg_m2 * omega * omega)
+             ? geometry.flap_stiffness_n_m_rad / (geometry.blade_flap_inertia_kg_m2 * omega * omega)
              : 0.0)
       + (geometry.hinge_offset_m > 0.0
              ? 1.5 * geometry.hinge_offset_m / (radius - geometry.hinge_offset_m)
              : 0.0);
 
   if (geometry.blade_flap_inertia_kg_m2 > 0.0) {
-    const double lock =
-        density_kg_m3 * a * geometry.chord_m * std::pow(radius, 4.0)
-        / geometry.blade_flap_inertia_kg_m2;
+    const double lock = density_kg_m3 * a * geometry.chord_m * std::pow(radius, 4.0)
+                        / geometry.blade_flap_inertia_kg_m2;
     const double stiffening = flap_frequency_ratio_squared - 1.0;
     // Padfield 3.63-3.66, retaining the first-harmonic terms that matter at
     // Level 1: the disc tilts back with mu (flap-back), follows cyclic, and
@@ -460,8 +460,8 @@ RotorSolution solve_rotor(const RotorGeometry& geometry,
   const double sin_a = std::sin(a1s);
   const double cos_b = std::cos(b1s);
   const double sin_b = std::sin(b1s);
-  const Eigen::Vector3d thrust_hub(-thrust_n * sin_a * cos_b, thrust_n * sin_b,
-                                   -thrust_n * cos_a * cos_b);
+  const Eigen::Vector3d thrust_hub(
+      -thrust_n * sin_a * cos_b, thrust_n * sin_b, -thrust_n * cos_a * cos_b);
 
   // Shaft torque reacts onto the airframe in the sense opposite to the rotor's
   // own rotation: a rotor turning one way yaws the body the other.
@@ -495,7 +495,8 @@ RotorSolution solve_rotor(const RotorGeometry& geometry,
   }
   solution.quasi_static_inflow_ratio = lambda_quasi_static;
 
-  if (!solution.wrench.force_body_n.allFinite() || !solution.wrench.moment_cg_body_n_m.allFinite()) {
+  if (!solution.wrench.force_body_n.allFinite()
+      || !solution.wrench.moment_cg_body_n_m.allFinite()) {
     throw std::runtime_error("rotor '" + geometry.name + "': produced a non-finite wrench");
   }
   return solution;

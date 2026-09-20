@@ -79,9 +79,9 @@ namespace galata::trim {
 // vocabulary. Resolving by name rather than by index is what lets a problem
 // declaration be written once and applied to any model that has those names.
 struct TrimUnknown {
-  std::string name;          // must appear in state_names() or control_names()
+  std::string name;  // must appear in state_names() or control_names()
   double initial_guess = 0.0;
-  double minimum = 0.0;      // checked AFTER the solve; equal bounds mean unbounded
+  double minimum = 0.0;  // checked AFTER the solve; equal bounds mean unbounded
   double maximum = 0.0;
   // Scale for the Newton step and the Jacobian's conditioning. An unknown in
   // radians and one in rad/s differ by two orders of magnitude, and a Jacobian
@@ -118,8 +118,7 @@ struct TrimResidual {
 
   // Required for Custom, ignored otherwise. Takes the extended state and the
   // controls, returns the quantity that must be zero.
-  std::function<double(const Eigen::VectorXd& extended_state,
-                       const Eigen::VectorXd& controls)>
+  std::function<double(const Eigen::VectorXd& extended_state, const Eigen::VectorXd& controls)>
       evaluate;
 
   // Scale, for the same reason TrimUnknown has one: a force residual in newtons

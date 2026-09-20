@@ -23,7 +23,6 @@
 #include "galata/version.hpp"
 
 #include "project.hpp"
-
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -551,8 +550,7 @@ int flight_test_verify_command(const std::vector<std::string>& arguments) {
               << ",\"aircraft_id\":" << json_quote(campaign.evidence.aircraft_id)
               << ",\"aircraft_configuration\":"
               << json_quote(campaign.evidence.aircraft_configuration)
-              << ",\"evidence_class\":"
-              << json_quote(campaign.evidence.evidence_class)
+              << ",\"evidence_class\":" << json_quote(campaign.evidence.evidence_class)
               << ",\"test_plan_id\":" << json_quote(campaign.evidence.test_plan_id)
               << ",\"reviewer_id\":" << json_quote(campaign.evidence.reviewer_id)
               << ",\"safety_review_complete\":true,\"file_count\":" << campaign.files.size()
@@ -591,8 +589,7 @@ bool value_binds_campaign_manifest(const galata::pipeline::ValuePtr& value,
   }
   if (value->kind() == galata::pipeline::Value::Kind::Map) {
     for (const auto& [key, child] : value->as_map()) {
-      if (key == "campaign_manifest"
-          && child->kind() == galata::pipeline::Value::Kind::String) {
+      if (key == "campaign_manifest" && child->kind() == galata::pipeline::Value::Kind::String) {
         const std::filesystem::path declared(child->as_string());
         const std::filesystem::path resolved =
             declared.is_absolute() ? declared : std::filesystem::path(base_directory) / declared;
@@ -700,7 +697,8 @@ int flight_test_validate_command(const std::vector<std::string>& arguments) {
       throw std::invalid_argument("flighttest validate: --output-dir is required");
     }
     if (receipt_path.empty()) {
-      receipt_path = std::filesystem::path(output_directory) / "flight-test-validation-receipt.json";
+      receipt_path =
+          std::filesystem::path(output_directory) / "flight-test-validation-receipt.json";
     }
     if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(study_path))) {
       throw std::invalid_argument("flighttest validate: study is not a regular file: "
@@ -714,7 +712,8 @@ int flight_test_validate_command(const std::vector<std::string>& arguments) {
                                                     : std::filesystem::path(".");
     (void)galata::identify::verify_flight_test_campaign(campaign, campaign_root);
 
-    const galata::pipeline::Pipeline pipeline = galata::pipeline::load_pipeline(study_path.string());
+    const galata::pipeline::Pipeline pipeline =
+        galata::pipeline::load_pipeline(study_path.string());
     const std::string base_directory =
         study_path.has_parent_path() ? study_path.parent_path().string() : std::string(".");
     const bool campaign_bound = std::any_of(
@@ -785,7 +784,8 @@ int flight_test_validate_command(const std::vector<std::string>& arguments) {
       reasons.push_back("flight-test evidence gate is " + flight_gate);
     }
     if (campaign.evidence.evidence_class != "measured_flight") {
-      reasons.push_back("only measured_flight provenance can produce a production validation receipt");
+      reasons.push_back(
+          "only measured_flight provenance can produce a production validation receipt");
     }
     const bool gate_passed = reasons.empty();
     const std::string status = gate_passed ? "gate_passed" : "not_ready";
@@ -1069,7 +1069,8 @@ int qualification_command(const std::vector<std::string>& arguments) {
         } else if (arguments[index] == "--flight-validation-receipt") {
           if (!flight_validation_receipt_path.empty()) {
             throw std::invalid_argument(
-                "qualification verify-chain: --flight-validation-receipt was supplied more than once");
+                "qualification verify-chain: --flight-validation-receipt was supplied more than "
+                "once");
           }
           flight_validation_receipt_path = value;
         } else if (arguments[index] == "--target-evidence") {
@@ -1085,22 +1086,22 @@ int qualification_command(const std::vector<std::string>& arguments) {
         index += 2U;
       }
       if (flight_test_path.empty() || flight_validation_receipt_path.empty()
-          || deployment_path.empty() || deployment_directory.empty() || target_evidence_path.empty()) {
+          || deployment_path.empty() || deployment_directory.empty()
+          || target_evidence_path.empty()) {
         throw std::invalid_argument(
             "qualification verify-chain: --flighttest, --flight-validation-receipt, "
             "--deployment, --deployment-dir and --target-evidence are all required");
       }
 
-      const auto dossier = galata::qualification::parse_dossier(
-          read_bounded_manifest(dossier_path));
-      const std::filesystem::path dossier_root = dossier_path.has_parent_path()
-                                                     ? dossier_path.parent_path()
-                                                     : std::filesystem::path(".");
+      const auto dossier =
+          galata::qualification::parse_dossier(read_bounded_manifest(dossier_path));
+      const std::filesystem::path dossier_root =
+          dossier_path.has_parent_path() ? dossier_path.parent_path() : std::filesystem::path(".");
       const std::uintmax_t dossier_bytes =
           galata::qualification::verify_dossier(dossier, dossier_root);
 
-      const auto campaign = galata::identify::parse_flight_test_campaign(
-          read_bounded_manifest(flight_test_path));
+      const auto campaign =
+          galata::identify::parse_flight_test_campaign(read_bounded_manifest(flight_test_path));
       const std::filesystem::path campaign_root = flight_test_path.has_parent_path()
                                                       ? flight_test_path.parent_path()
                                                       : std::filesystem::path(".");
@@ -1126,17 +1127,15 @@ int qualification_command(const std::vector<std::string>& arguments) {
           && receipt_string("evidence_class") == "measured_flight"
           && receipt_string("numerical_acceptance_gate") == "pass"
           && receipt_string("flight_test_evidence_gate") == "pass"
-          && receipt_bool("campaign_binding_verified")
-          && receipt_bool("run_inputs_verified")
+          && receipt_bool("campaign_binding_verified") && receipt_bool("run_inputs_verified")
           && validation_receipt["campaign_manifest"]
           && validation_receipt["campaign_manifest"].IsScalar()
           && path_matches(validation_receipt["campaign_manifest"].as<std::string>(),
                           flight_test_path);
 
-      const auto deployment = galata::onboard::parse_manifest_package(
-          read_bounded_manifest(deployment_path));
-      const auto deployment_runtime =
-          galata::onboard::verify_runtime_package(deployment_directory);
+      const auto deployment =
+          galata::onboard::parse_manifest_package(read_bounded_manifest(deployment_path));
+      const auto deployment_runtime = galata::onboard::verify_runtime_package(deployment_directory);
       if (deployment_runtime.manifest_sha256 != deployment.manifest_sha256) {
         throw std::invalid_argument(
             "qualification verify-chain: deployed runtime package is bound to a different "
@@ -1153,12 +1152,12 @@ int qualification_command(const std::vector<std::string>& arguments) {
 
       const auto dossier_role_digest = [&](const std::string& role) -> const std::string& {
         const auto found = std::find_if(
-            dossier.files.begin(), dossier.files.end(), [&](const galata::qualification::DossierFile& file) {
-              return file.role == role;
-            });
+            dossier.files.begin(),
+            dossier.files.end(),
+            [&](const galata::qualification::DossierFile& file) { return file.role == role; });
         if (found == dossier.files.end()) {
-          throw std::invalid_argument("qualification verify-chain: dossier is missing role '"
-                                      + role + "'");
+          throw std::invalid_argument("qualification verify-chain: dossier is missing role '" + role
+                                      + "'");
         }
         return found->sha256;
       };
@@ -1167,8 +1166,7 @@ int qualification_command(const std::vector<std::string>& arguments) {
             "qualification verify-chain: dossier flight_test_campaign digest does not link to "
             "the supplied campaign manifest");
       }
-      if (sha256_regular_file(target_evidence_path)
-          != dossier_role_digest("hardware_hil_report")) {
+      if (sha256_regular_file(target_evidence_path) != dossier_role_digest("hardware_hil_report")) {
         throw std::invalid_argument(
             "qualification verify-chain: dossier hardware_hil_report digest does not link to "
             "the supplied target-evidence manifest");
@@ -1184,17 +1182,14 @@ int qualification_command(const std::vector<std::string>& arguments) {
       // states.  A verified manifest can still contain only synthetic or
       // host-SIL evidence, and a non-pending authority id is only a declared
       // routing value until the responsible authority's record is reviewed.
-      const bool flight_test_eligibility =
-          campaign.evidence.evidence_class == "measured_flight"
-          && campaign.evidence.safety_review_complete
-          && flight_validation_receipt_verified;
-      const bool target_hardware_eligibility =
-          target_evidence.evidence_class == "target_hil"
-          || target_evidence.evidence_class == "flight_target";
+      const bool flight_test_eligibility = campaign.evidence.evidence_class == "measured_flight"
+                                           && campaign.evidence.safety_review_complete
+                                           && flight_validation_receipt_verified;
+      const bool target_hardware_eligibility = target_evidence.evidence_class == "target_hil"
+                                               || target_evidence.evidence_class == "flight_target";
       const bool authority_decision_eligibility =
           !dossier.authority_id.empty() && dossier.authority_id != "external-authority-pending";
-      const bool qualification_eligibility = flight_test_eligibility
-                                             && target_hardware_eligibility
+      const bool qualification_eligibility = flight_test_eligibility && target_hardware_eligibility
                                              && authority_decision_eligibility
                                              && deployment_runtime.contains_executable;
       std::vector<std::string> eligibility_reasons;
@@ -1215,39 +1210,32 @@ int qualification_command(const std::vector<std::string>& arguments) {
       }
 
       const std::uintmax_t total_bytes = dossier_bytes + campaign_bytes + target_bytes;
-      std::cout << "{\"schema\":\"galata.qualification-chain-verification.v1\","
-                    "\"status\":\"verified\",\"dossier_manifest_sha256\":"
-                << json_quote(dossier.manifest_sha256)
-                << ",\"flight_test_manifest_sha256\":"
-                << json_quote(campaign.manifest_sha256)
-                << ",\"target_evidence_manifest_sha256\":"
-                << json_quote(target_evidence.manifest_sha256)
-                << ",\"deployment_manifest_sha256\":"
-                << json_quote(deployment.manifest_sha256)
-                << ",\"deployment_runtime_sha256\":"
-                << json_quote(deployment_runtime.runtime_sha256)
-                << ",\"deployment_runtime_verified\":true"
-                << ",\"flight_validation_receipt_sha256\":"
-                << json_quote(sha256_regular_file(flight_validation_receipt_path))
-                << ",\"aircraft_id\":" << json_quote(dossier.aircraft_id)
-                << ",\"aircraft_configuration\":"
-                << json_quote(dossier.aircraft_configuration)
-                << ",\"dossier_evidence_verified\":true"
-                   ",\"flight_test_evidence_verified\":true"
-                   ",\"flight_validation_receipt_verified\":"
-                << (flight_validation_receipt_verified ? "true" : "false")
-                << ",\"target_evidence_verified\":true"
-                << ",\"traceability_links_verified\":true"
-                << ",\"flight_test_eligibility\":"
-                << (flight_test_eligibility ? "true" : "false")
-                << ",\"target_hardware_eligibility\":"
-                << (target_hardware_eligibility ? "true" : "false")
-                << ",\"authority_decision_eligibility\":"
-                << (authority_decision_eligibility ? "true" : "false")
-                << ",\"qualification_eligibility\":"
-                << json_quote(qualification_eligibility ? "eligible_for_authority_review"
-                                                         : "not_ready")
-                << ",\"qualification_eligibility_reasons\":[";
+      std::cout
+          << "{\"schema\":\"galata.qualification-chain-verification.v1\","
+             "\"status\":\"verified\",\"dossier_manifest_sha256\":"
+          << json_quote(dossier.manifest_sha256)
+          << ",\"flight_test_manifest_sha256\":" << json_quote(campaign.manifest_sha256)
+          << ",\"target_evidence_manifest_sha256\":" << json_quote(target_evidence.manifest_sha256)
+          << ",\"deployment_manifest_sha256\":" << json_quote(deployment.manifest_sha256)
+          << ",\"deployment_runtime_sha256\":" << json_quote(deployment_runtime.runtime_sha256)
+          << ",\"deployment_runtime_verified\":true"
+          << ",\"flight_validation_receipt_sha256\":"
+          << json_quote(sha256_regular_file(flight_validation_receipt_path))
+          << ",\"aircraft_id\":" << json_quote(dossier.aircraft_id)
+          << ",\"aircraft_configuration\":" << json_quote(dossier.aircraft_configuration)
+          << ",\"dossier_evidence_verified\":true"
+             ",\"flight_test_evidence_verified\":true"
+             ",\"flight_validation_receipt_verified\":"
+          << (flight_validation_receipt_verified ? "true" : "false")
+          << ",\"target_evidence_verified\":true"
+          << ",\"traceability_links_verified\":true"
+          << ",\"flight_test_eligibility\":" << (flight_test_eligibility ? "true" : "false")
+          << ",\"target_hardware_eligibility\":" << (target_hardware_eligibility ? "true" : "false")
+          << ",\"authority_decision_eligibility\":"
+          << (authority_decision_eligibility ? "true" : "false")
+          << ",\"qualification_eligibility\":"
+          << json_quote(qualification_eligibility ? "eligible_for_authority_review" : "not_ready")
+          << ",\"qualification_eligibility_reasons\":[";
       for (std::size_t index = 0U; index < eligibility_reasons.size(); ++index) {
         if (index != 0U) {
           std::cout << ",";
@@ -1384,8 +1372,7 @@ galata::hardware::UdpEndpoint udp_endpoint(const std::string& endpoint,
     const std::size_t closing = remote_endpoint.find(']');
     if (closing == std::string::npos || closing + 2U > remote_endpoint.size()
         || remote_endpoint[closing + 1U] != ':') {
-      throw std::invalid_argument(
-          "onboard: UDP IPv6 endpoint must use [host]:port[|local_port]");
+      throw std::invalid_argument("onboard: UDP IPv6 endpoint must use [host]:port[|local_port]");
     }
     host = remote_endpoint.substr(1U, closing - 1U);
     port_text = remote_endpoint.substr(closing + 2U);
@@ -1427,15 +1414,11 @@ std::unique_ptr<galata::hardware::Transport> live_transport(
     const galata::hardware::TransportProfile& profile) {
   if (profile.transport == "serial") {
     return std::make_unique<galata::hardware::SerialTransport>(
-        serial_endpoint(profile.endpoint,
-                        profile.receive_timeout_ms,
-                        profile.transmit_timeout_ms));
+        serial_endpoint(profile.endpoint, profile.receive_timeout_ms, profile.transmit_timeout_ms));
   }
   if (profile.transport == "udp") {
     return std::make_unique<galata::hardware::UdpTransport>(
-        udp_endpoint(profile.endpoint,
-                     profile.receive_timeout_ms,
-                     profile.transmit_timeout_ms));
+        udp_endpoint(profile.endpoint, profile.receive_timeout_ms, profile.transmit_timeout_ms));
   }
   if (profile.transport == "can_fd") {
     return std::make_unique<galata::hardware::CanFdTransport>(
@@ -1534,12 +1517,11 @@ int onboard_run_command(const std::vector<std::string>& arguments) {
     galata::onboard::ControllerPlugin controller(
         controller_path, model_path, package.interface, package.manifest);
     galata::hardware::ArmingInterlock interlock;
-    galata::onboard::Runtime runtime(
-        *transport,
-        interlock,
-        {package.interface,
-         package.max_controller_time_s,
-         package.transport_profile.watchdog_timeout_s});
+    galata::onboard::Runtime runtime(*transport,
+                                     interlock,
+                                     {package.interface,
+                                      package.max_controller_time_s,
+                                      package.transport_profile.watchdog_timeout_s});
 
     const auto previous_int = std::signal(SIGINT, request_onboard_stop);
     const auto previous_term = std::signal(SIGTERM, request_onboard_stop);
@@ -1568,8 +1550,7 @@ int onboard_run_command(const std::vector<std::string>& arguments) {
                 << ",\"observed_cycles\":" << runtime.metrics().observed_cycles
                 << ",\"observed_controller_worst_case_s\":"
                 << runtime.metrics().controller_worst_case_s
-                << ",\"observed_cycle_worst_case_s\":"
-                << runtime.metrics().cycle_worst_case_s
+                << ",\"observed_cycle_worst_case_s\":" << runtime.metrics().cycle_worst_case_s
                 << ",\"transport\":" << json_quote(package.transport_profile.transport)
                 << ",\"target_platform\":" << json_quote(package.target_platform)
                 << ",\"qualification_state\":\"not_qualified\","
@@ -1617,11 +1598,9 @@ int onboard_self_test_command() {
     std::cout << "{\"schema\":\"galata.onboard-self-test.v1\",\"status\":\"passed\","
                  "\"completed_cycles\":3,\"transport\":\"replay\","
                  "\"observed_cycles\":"
-              << runtime.metrics().observed_cycles
-              << ",\"observed_controller_worst_case_s\":"
+              << runtime.metrics().observed_cycles << ",\"observed_controller_worst_case_s\":"
               << runtime.metrics().controller_worst_case_s
-              << ",\"observed_cycle_worst_case_s\":"
-              << runtime.metrics().cycle_worst_case_s
+              << ",\"observed_cycle_worst_case_s\":" << runtime.metrics().cycle_worst_case_s
               << ",\"target_executable\":false,\"qualification_state\":\"not_qualified\","
                  "\"hardware_timing_claim\":false,\"airworthiness_claim\":false}\n";
     return 0;
@@ -1640,24 +1619,21 @@ int onboard_target_verify_command(const std::vector<std::string>& arguments) {
   try {
     const std::filesystem::path deployment_path(arguments[2]);
     const std::filesystem::path evidence_path(arguments[3]);
-    const auto deployment = galata::onboard::parse_manifest_package(
-        read_bounded_manifest(deployment_path));
-    const auto evidence = galata::onboard::parse_target_evidence_package(
-        read_bounded_manifest(evidence_path));
+    const auto deployment =
+        galata::onboard::parse_manifest_package(read_bounded_manifest(deployment_path));
+    const auto evidence =
+        galata::onboard::parse_target_evidence_package(read_bounded_manifest(evidence_path));
     galata::onboard::verify_target_evidence_package(evidence, deployment);
-    const std::filesystem::path package_root = evidence_path.has_parent_path()
-                                                   ? evidence_path.parent_path()
-                                                   : std::filesystem::path(".");
+    const std::filesystem::path package_root =
+        evidence_path.has_parent_path() ? evidence_path.parent_path() : std::filesystem::path(".");
     const std::uintmax_t total_bytes =
         galata::onboard::verify_target_evidence_files(evidence, package_root);
     std::cout << "{\"schema\":\"galata.onboard-target-evidence-verification.v2\","
                  "\"status\":\"verified\",\"manifest_sha256\":"
-              << json_quote(evidence.manifest_sha256)
-              << ",\"deployment_manifest_sha256\":"
+              << json_quote(evidence.manifest_sha256) << ",\"deployment_manifest_sha256\":"
               << json_quote(evidence.deployment_manifest_sha256)
               << ",\"evidence_class\":" << json_quote(evidence.evidence_class)
-              << ",\"target_hardware_id\":"
-              << json_quote(evidence.target_identity.hardware_id)
+              << ",\"target_hardware_id\":" << json_quote(evidence.target_identity.hardware_id)
               << ",\"flight_computer_id\":"
               << json_quote(evidence.target_identity.flight_computer_id)
               << ",\"firmware_id\":" << json_quote(evidence.target_identity.firmware_id)
@@ -1666,8 +1642,7 @@ int onboard_target_verify_command(const std::vector<std::string>& arguments) {
               << ",\"controller_worst_case_s\":" << evidence.controller_worst_case_s
               << ",\"cycle_worst_case_s\":" << evidence.cycle_worst_case_s
               << ",\"watchdog_response_s\":" << evidence.watchdog_response_s
-              << ",\"file_count\":" << evidence.files.size()
-              << ",\"total_bytes\":" << total_bytes
+              << ",\"file_count\":" << evidence.files.size() << ",\"total_bytes\":" << total_bytes
               << ",\"target_acceptance_state\":\"passed\","
                  "\"qualification_state\":\"not_qualified\","
                  "\"airworthiness_claim\":false,\"certification_claim\":false}\n";
@@ -1692,8 +1667,7 @@ double parse_nonnegative_double(const std::string& text, const char* option) {
   return value;
 }
 
-galata::onboard::TargetEvidenceSource target_evidence_source_argument(
-    const std::string& argument) {
+galata::onboard::TargetEvidenceSource target_evidence_source_argument(const std::string& argument) {
   const std::size_t separator = argument.find('=');
   if (separator == std::string::npos || separator == 0U || separator + 1U >= argument.size()) {
     throw std::invalid_argument("onboard target create: --file expects role=path");
@@ -1736,21 +1710,18 @@ int onboard_target_create_command(const std::vector<std::string>& arguments) {
         evidence_class_supplied = true;
         index += 2U;
       } else if (arguments[index] == "--controller-worst-case-s") {
-        specification.controller_worst_case_s =
-            parse_nonnegative_double(require_value(index, "--controller-worst-case-s"),
-                                     "--controller-worst-case-s");
+        specification.controller_worst_case_s = parse_nonnegative_double(
+            require_value(index, "--controller-worst-case-s"), "--controller-worst-case-s");
         controller_supplied = true;
         index += 2U;
       } else if (arguments[index] == "--cycle-worst-case-s") {
-        specification.cycle_worst_case_s =
-            parse_nonnegative_double(require_value(index, "--cycle-worst-case-s"),
-                                     "--cycle-worst-case-s");
+        specification.cycle_worst_case_s = parse_nonnegative_double(
+            require_value(index, "--cycle-worst-case-s"), "--cycle-worst-case-s");
         cycle_supplied = true;
         index += 2U;
       } else if (arguments[index] == "--watchdog-response-s") {
-        specification.watchdog_response_s =
-            parse_nonnegative_double(require_value(index, "--watchdog-response-s"),
-                                     "--watchdog-response-s");
+        specification.watchdog_response_s = parse_nonnegative_double(
+            require_value(index, "--watchdog-response-s"), "--watchdog-response-s");
         watchdog_supplied = true;
         index += 2U;
       } else if (arguments[index] == "--emergency-stop-passed") {
@@ -1785,8 +1756,8 @@ int onboard_target_create_command(const std::vector<std::string>& arguments) {
           "onboard target create: evidence class, timing values and exactly five --file "
           "arguments are required");
     }
-    const bool physical_confirmation_supplied = emergency_stop_supplied || loss_of_link_supplied
-                                                || hil_supplied || signing_supplied;
+    const bool physical_confirmation_supplied =
+        emergency_stop_supplied || loss_of_link_supplied || hil_supplied || signing_supplied;
     if (specification.evidence_class == "host_sil" && physical_confirmation_supplied) {
       throw std::invalid_argument(
           "onboard target create: host_sil omits physical-test and target-signing confirmations; "
@@ -1801,24 +1772,22 @@ int onboard_target_create_command(const std::vector<std::string>& arguments) {
           "onboard target create: target_hil and flight_target require every explicit pass "
           "confirmation to be true");
     }
-    const auto deployment = galata::onboard::parse_manifest_package(
-        read_bounded_manifest(arguments[3]));
+    const auto deployment =
+        galata::onboard::parse_manifest_package(read_bounded_manifest(arguments[3]));
     const std::filesystem::path destination(arguments[2]);
-    const auto package = galata::onboard::stage_target_evidence_package(
-        deployment, specification, destination);
+    const auto package =
+        galata::onboard::stage_target_evidence_package(deployment, specification, destination);
     const std::uintmax_t total_bytes =
         galata::onboard::verify_target_evidence_files(package, destination);
     std::cout << "{\"schema\":\"galata.onboard-target-evidence-package.v2\","
                  "\"status\":\"staged\",\"destination\":"
               << json_quote(destination.string())
-              << ",\"manifest\":"
-              << json_quote((destination / "target-evidence.manifest").string())
+              << ",\"manifest\":" << json_quote((destination / "target-evidence.manifest").string())
               << ",\"manifest_sha256\":" << json_quote(package.manifest_sha256)
               << ",\"evidence_class\":" << json_quote(package.evidence_class)
               << ",\"physical_tests_applicable\":"
               << (package.evidence_class == "host_sil" ? "false" : "true")
-              << ",\"file_count\":" << package.files.size()
-              << ",\"total_bytes\":" << total_bytes
+              << ",\"file_count\":" << package.files.size() << ",\"total_bytes\":" << total_bytes
               << ",\"target_acceptance_state\":\"passed\","
                  "\"qualification_state\":\"not_qualified\","
                  "\"evidence_references_verified\":true}\n";
@@ -1884,16 +1853,13 @@ int onboard_command(const std::vector<std::string>& arguments) {
       }
       std::cout << "{\"schema\":\"galata.onboard-verification.v1\",\"status\":\"verified\","
                    "\"manifest_sha256\":"
-                << json_quote(package.manifest_sha256)
-                << ",\"target_identity\":{\"hardware_id\":"
-                << json_quote(package.target_identity.hardware_id)
-                << ",\"flight_computer_id\":"
+                << json_quote(package.manifest_sha256) << ",\"target_identity\":{\"hardware_id\":"
+                << json_quote(package.target_identity.hardware_id) << ",\"flight_computer_id\":"
                 << json_quote(package.target_identity.flight_computer_id)
                 << ",\"firmware_id\":" << json_quote(package.target_identity.firmware_id)
                 << ",\"emergency_stop_id\":"
                 << json_quote(package.target_identity.emergency_stop_id)
-                << "},\"artifact_count\":" << package.artifacts.size()
-                << ",\"artifact_roles\":[";
+                << "},\"artifact_count\":" << package.artifacts.size() << ",\"artifact_roles\":[";
       for (std::size_t index = 0; index < package.artifacts.size(); ++index) {
         if (index != 0) {
           std::cout << ',';

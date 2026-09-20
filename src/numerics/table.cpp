@@ -153,11 +153,8 @@ Table1D::Table1D(std::string name,
                  std::vector<double> values,
                  TableInterpolation interpolation,
                  TableExtrapolation extrapolation)
-    : name_(std::move(name)),
-      breakpoints_(std::move(breakpoints)),
-      values_(std::move(values)),
-      interpolation_(interpolation),
-      extrapolation_(extrapolation) {
+    : name_(std::move(name)), breakpoints_(std::move(breakpoints)), values_(std::move(values)),
+      interpolation_(interpolation), extrapolation_(extrapolation) {
   if (name_.empty()) {
     throw std::invalid_argument(
         "table: a table needs a name; it is what an out-of-range refusal reports");
@@ -202,8 +199,8 @@ double Table1D::at(double argument) const {
   if (!std::isfinite(argument)) {
     throw std::invalid_argument("table '" + name_ + "': the argument is not finite");
   }
-  const double effective = apply_outside_rule(name_, "argument", breakpoints_, argument,
-                                              extrapolation_, out_of_range_, worst_excursion_);
+  const double effective = apply_outside_rule(
+      name_, "argument", breakpoints_, argument, extrapolation_, out_of_range_, worst_excursion_);
   const Bracket bracket = bracket_of(breakpoints_, effective);
   const double low = values_[bracket.lower];
   if (interpolation_ == TableInterpolation::Nearest_Low) {
@@ -240,12 +237,8 @@ Table2D::Table2D(std::string name,
                  Eigen::MatrixXd values,
                  TableInterpolation interpolation,
                  TableExtrapolation extrapolation)
-    : name_(std::move(name)),
-      rows_(std::move(rows)),
-      columns_(std::move(columns)),
-      values_(std::move(values)),
-      interpolation_(interpolation),
-      extrapolation_(extrapolation) {
+    : name_(std::move(name)), rows_(std::move(rows)), columns_(std::move(columns)),
+      values_(std::move(values)), interpolation_(interpolation), extrapolation_(extrapolation) {
   if (name_.empty()) {
     throw std::invalid_argument("table: a table needs a name");
   }
@@ -253,10 +246,10 @@ Table2D::Table2D(std::string name,
   validate_axis(name_, "column", columns_);
   if (values_.rows() != static_cast<Eigen::Index>(rows_.size())
       || values_.cols() != static_cast<Eigen::Index>(columns_.size())) {
-    throw std::invalid_argument("table '" + name_ + "': values are " + std::to_string(values_.rows())
-                                + "x" + std::to_string(values_.cols()) + " but the axes are "
-                                + std::to_string(rows_.size()) + " rows by "
-                                + std::to_string(columns_.size()) + " columns");
+    throw std::invalid_argument(
+        "table '" + name_ + "': values are " + std::to_string(values_.rows()) + "x"
+        + std::to_string(values_.cols()) + " but the axes are " + std::to_string(rows_.size())
+        + " rows by " + std::to_string(columns_.size()) + " columns");
   }
   if (!values_.allFinite()) {
     throw std::invalid_argument("table '" + name_ + "': a value is not finite");
@@ -278,8 +271,8 @@ double Table2D::at(double row_argument, double column_argument) const {
   // Both axes are checked before either is used, so a query outside both
   // reports the row axis first and deterministically, rather than whichever
   // the evaluation order reached.
-  const double row_effective = apply_outside_rule(name_, "row", rows_, row_argument,
-                                                  extrapolation_, out_of_range_, worst_excursion_);
+  const double row_effective = apply_outside_rule(
+      name_, "row", rows_, row_argument, extrapolation_, out_of_range_, worst_excursion_);
   const double column_effective = apply_outside_rule(
       name_, "column", columns_, column_argument, extrapolation_, out_of_range_, worst_excursion_);
 

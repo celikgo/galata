@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cmath>
-#include <cctype>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -65,8 +65,9 @@ std::map<std::string, std::string> fields_from_manifest(const std::string& manif
       for (const char raw_character : value) {
         const unsigned char character = static_cast<unsigned char>(raw_character);
         if (character < 0x20U || character == 0x7fU) {
-          throw std::invalid_argument("onboard target evidence: manifest value contains control "
-                                      "characters");
+          throw std::invalid_argument(
+              "onboard target evidence: manifest value contains control "
+              "characters");
         }
       }
     }
@@ -86,8 +87,7 @@ std::string required(const std::map<std::string, std::string>& fields, const std
   return found->second;
 }
 
-double positive_number(const std::map<std::string, std::string>& fields,
-                       const std::string& key) {
+double positive_number(const std::map<std::string, std::string>& fields, const std::string& key) {
   const std::string text = required(fields, key);
   std::size_t consumed = 0U;
   double value = 0.0;
@@ -172,8 +172,7 @@ bool same_target_identity(const hardware::TargetIdentity& left,
          && left.emergency_stop_id == right.emergency_stop_id;
 }
 
-void reject_symlink_path(const std::filesystem::path& root,
-                         const std::filesystem::path& relative) {
+void reject_symlink_path(const std::filesystem::path& root, const std::filesystem::path& relative) {
   const auto root_status = std::filesystem::symlink_status(root);
   if (!std::filesystem::is_directory(root_status) || std::filesystem::is_symlink(root_status)) {
     throw std::invalid_argument("onboard target evidence: package root must be a real directory");
@@ -213,25 +212,24 @@ void write_file(const std::filesystem::path& path, const std::string& bytes) {
 }
 
 void check_known_field(const std::string& key) {
-  static const std::set<std::string> known = {
-      "format",
-      "evidence_class",
-      "qualification_state",
-      "target_acceptance_state",
-      "target.hardware_id",
-      "target.flight_computer_id",
-      "target.firmware_id",
-      "target.emergency_stop_id",
-      "deployment_manifest_sha256",
-      "interface.id",
-      "hardware.profile_id",
-      "measurement.controller_worst_case_s",
-      "measurement.cycle_worst_case_s",
-      "measurement.watchdog_response_s",
-      "test.emergency_stop",
-      "test.loss_of_link",
-      "test.hil",
-      "signing.state"};
+  static const std::set<std::string> known = {"format",
+                                              "evidence_class",
+                                              "qualification_state",
+                                              "target_acceptance_state",
+                                              "target.hardware_id",
+                                              "target.flight_computer_id",
+                                              "target.firmware_id",
+                                              "target.emergency_stop_id",
+                                              "deployment_manifest_sha256",
+                                              "interface.id",
+                                              "hardware.profile_id",
+                                              "measurement.controller_worst_case_s",
+                                              "measurement.cycle_worst_case_s",
+                                              "measurement.watchdog_response_s",
+                                              "test.emergency_stop",
+                                              "test.loss_of_link",
+                                              "test.hil",
+                                              "signing.state"};
   if (!known.contains(key) && !key.starts_with("file.")) {
     throw std::invalid_argument("onboard target evidence: unknown manifest field '" + key + "'");
   }
@@ -277,7 +275,8 @@ TargetEvidencePackage parse_target_evidence_package(const std::string& manifest)
   package.watchdog_response_s = positive_number(fields, "measurement.watchdog_response_s");
   const bool physical_tests_applicable = package.evidence_class != "host_sil";
   const std::string expected_test_state = physical_tests_applicable ? "passed" : "not_applicable";
-  const std::string expected_signing_state = physical_tests_applicable ? "verified" : "not_applicable";
+  const std::string expected_signing_state =
+      physical_tests_applicable ? "verified" : "not_applicable";
   if (required(fields, "test.emergency_stop") != expected_test_state
       || required(fields, "test.loss_of_link") != expected_test_state
       || required(fields, "test.hil") != expected_test_state
@@ -288,9 +287,11 @@ TargetEvidencePackage parse_target_evidence_package(const std::string& manifest)
   }
 
   const auto grouped = file_fields(fields);
-  constexpr std::array<std::string_view, 5> required_roles = {
-      "timing_report", "hardware_hil_report", "failsafe_report", "signing_record",
-      "target_configuration"};
+  constexpr std::array<std::string_view, 5> required_roles = {"timing_report",
+                                                              "hardware_hil_report",
+                                                              "failsafe_report",
+                                                              "signing_record",
+                                                              "target_configuration"};
   std::set<std::string> roles;
   for (std::size_t index = 0U; index < grouped.size(); ++index) {
     const auto found = grouped.find(index);
@@ -309,8 +310,10 @@ TargetEvidencePackage parse_target_evidence_package(const std::string& manifest)
     package.files.push_back({role, path, sha256});
   }
   if (roles.size() != required_roles.size()
-      || !std::all_of(required_roles.begin(), required_roles.end(),
-                      [&roles](const std::string_view role) { return roles.contains(std::string(role)); })) {
+      || !std::all_of(
+          required_roles.begin(), required_roles.end(), [&roles](const std::string_view role) {
+            return roles.contains(std::string(role));
+          })) {
     throw std::invalid_argument(
         "onboard target evidence: all five target evidence roles are required");
   }
@@ -322,10 +325,9 @@ void verify_target_evidence_package(const TargetEvidencePackage& evidence,
 std::uintmax_t verify_target_evidence_files(const TargetEvidencePackage& evidence,
                                             const std::filesystem::path& package_root);
 
-TargetEvidencePackage stage_target_evidence_package(
-    const DeploymentPackage& deployment,
-    const TargetEvidenceSpec& specification,
-    const std::filesystem::path& destination) {
+TargetEvidencePackage stage_target_evidence_package(const DeploymentPackage& deployment,
+                                                    const TargetEvidenceSpec& specification,
+                                                    const std::filesystem::path& destination) {
   verify_manifest_package(deployment);
   if (!is_evidence_class(specification.evidence_class)) {
     throw std::invalid_argument(
@@ -346,11 +348,10 @@ TargetEvidencePackage stage_target_evidence_package(
         "onboard target evidence: host_sil must not claim physical-test or target-signing "
         "passes");
   }
-  for (const auto [value, field] :
-       std::array<std::pair<double, const char*>, 3>{{
-           {specification.controller_worst_case_s, "controller_worst_case_s"},
-           {specification.cycle_worst_case_s, "cycle_worst_case_s"},
-           {specification.watchdog_response_s, "watchdog_response_s"}}}) {
+  for (const auto& [value, field] : std::array<std::pair<double, const char*>, 3>{
+           {{specification.controller_worst_case_s, "controller_worst_case_s"},
+            {specification.cycle_worst_case_s, "cycle_worst_case_s"},
+            {specification.watchdog_response_s, "watchdog_response_s"}}}) {
     if (value < 0.0 || !std::isfinite(value)) {
       throw std::invalid_argument("onboard target evidence: " + std::string(field)
                                   + " must be finite and non-negative");
@@ -364,17 +365,18 @@ TargetEvidencePackage stage_target_evidence_package(
         "onboard target evidence: measured timing cannot satisfy the deployment contract");
   }
 
-  constexpr std::array<std::string_view, 5> required_roles = {
-      "timing_report", "hardware_hil_report", "failsafe_report", "signing_record",
-      "target_configuration"};
+  constexpr std::array<std::string_view, 5> required_roles = {"timing_report",
+                                                              "hardware_hil_report",
+                                                              "failsafe_report",
+                                                              "signing_record",
+                                                              "target_configuration"};
   if (specification.files.size() != required_roles.size()) {
     throw std::invalid_argument(
         "onboard target evidence: exactly five evidence files are required");
   }
   std::map<std::string, std::filesystem::path> sources;
   for (const auto& source : specification.files) {
-    if (!safe_role(source.role)
-        || !sources.emplace(source.role, source.source).second
+    if (!safe_role(source.role) || !sources.emplace(source.role, source.source).second
         || std::find(required_roles.begin(), required_roles.end(), source.role)
                == required_roles.end()) {
       throw std::invalid_argument("onboard target evidence: invalid or duplicate evidence role '"
@@ -421,8 +423,8 @@ TargetEvidencePackage stage_target_evidence_package(
     digests.reserve(required_roles.size());
     for (const auto role : required_roles) {
       const std::filesystem::path target = staging / "evidence" / std::string(role);
-      std::filesystem::copy_file(sources.at(std::string(role)), target,
-                                 std::filesystem::copy_options::none);
+      std::filesystem::copy_file(
+          sources.at(std::string(role)), target, std::filesystem::copy_options::none);
       const std::string digest = core::sha256(read_file(target));
       if (digest != core::sha256(read_file(sources.at(std::string(role))))) {
         throw std::runtime_error("onboard target evidence: source changed while copying role '"
@@ -440,13 +442,12 @@ TargetEvidencePackage stage_target_evidence_package(
              << "target.flight_computer_id=" << deployment.target_identity.flight_computer_id
              << "\n"
              << "target.firmware_id=" << deployment.target_identity.firmware_id << "\n"
-             << "target.emergency_stop_id=" << deployment.target_identity.emergency_stop_id
-             << "\n"
+             << "target.emergency_stop_id=" << deployment.target_identity.emergency_stop_id << "\n"
              << "deployment_manifest_sha256=" << deployment.manifest_sha256 << "\n"
              << "interface.id=" << deployment.interface.id << "\n"
              << "hardware.profile_id=" << deployment.transport_profile.id << "\n"
-             << "measurement.controller_worst_case_s="
-             << specification.controller_worst_case_s << "\n"
+             << "measurement.controller_worst_case_s=" << specification.controller_worst_case_s
+             << "\n"
              << "measurement.cycle_worst_case_s=" << specification.cycle_worst_case_s << "\n"
              << "measurement.watchdog_response_s=" << specification.watchdog_response_s << "\n"
              << "test.emergency_stop=" << (physical_tests_applicable ? "passed" : "not_applicable")
@@ -491,10 +492,12 @@ void verify_target_evidence_package(const TargetEvidencePackage& evidence,
       || parsed.controller_worst_case_s != evidence.controller_worst_case_s
       || parsed.cycle_worst_case_s != evidence.cycle_worst_case_s
       || parsed.watchdog_response_s != evidence.watchdog_response_s) {
-    throw std::invalid_argument("onboard target evidence: parsed package does not match its object");
+    throw std::invalid_argument(
+        "onboard target evidence: parsed package does not match its object");
   }
   if (!same_target_identity(evidence.target_identity, deployment.target_identity)) {
-    throw std::invalid_argument("onboard target evidence: target identity does not match deployment");
+    throw std::invalid_argument(
+        "onboard target evidence: target identity does not match deployment");
   }
   if (evidence.deployment_manifest_sha256 != deployment.manifest_sha256) {
     throw std::invalid_argument(

@@ -9,9 +9,9 @@
 #include <stdexcept>
 #include <vector>
 
+using galata::analyze::analyze_response_segment;
 using galata::analyze::ResponseMetricOptions;
 using galata::analyze::SettlingStatus;
-using galata::analyze::analyze_response_segment;
 
 TEST(ResponseMetrics, KnownStepHasIndependentRmsSettlingAndPositiveOvershoot) {
   const std::vector<double> time{0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
@@ -28,13 +28,14 @@ TEST(ResponseMetrics, KnownStepHasIndependentRmsSettlingAndPositiveOvershoot) {
   const auto result = analyze_response_segment(time, reference, measured, options);
   EXPECT_NEAR(result.peak_tracking_error, 0.6, 1.0e-12);
   EXPECT_NEAR(result.final_tracking_error, 0.0, 1.0e-12);
-  EXPECT_NEAR(result.rms_tracking_error, std::sqrt((0.6 * 0.6 + 0.2 * 0.2 + 0.04 * 0.04) / 5.0),
-              1.0e-12);
+  EXPECT_NEAR(
+      result.rms_tracking_error, std::sqrt((0.6 * 0.6 + 0.2 * 0.2 + 0.04 * 0.04) / 5.0), 1.0e-12);
   EXPECT_EQ(result.settling_status, SettlingStatus::DemonstratedRecovery);
   EXPECT_NEAR(result.settling_duration_s, 2.0, 1.0e-12);
   EXPECT_TRUE(result.overshoot_applicable);
   EXPECT_NEAR(result.overshoot_fraction, 0.2, 1.0e-12);
 }
+
 // repeated-step metric coverage follows in the integration contract
 TEST(ResponseMetrics, RepeatedStepsAreMeasuredPerSegmentAndOscillationSettlesAfterDwell) {
   ResponseMetricOptions first;
@@ -47,7 +48,8 @@ TEST(ResponseMetrics, RepeatedStepsAreMeasuredPerSegmentAndOscillationSettlesAft
   const std::vector<double> first_time{1.0, 2.0, 3.0};
   const std::vector<double> first_reference{1.0, 1.0, 1.0};
   const std::vector<double> first_measured{0.2, 1.3, 0.0};
-  const auto first_result = analyze_response_segment(first_time, first_reference, first_measured, first);
+  const auto first_result =
+      analyze_response_segment(first_time, first_reference, first_measured, first);
   EXPECT_EQ(first_result.settling_status, SettlingStatus::NotSettledWithinObservationWindow);
   EXPECT_NEAR(first_result.overshoot_fraction, 0.3, 1.0e-12);
   ResponseMetricOptions second = first;
@@ -57,7 +59,8 @@ TEST(ResponseMetrics, RepeatedStepsAreMeasuredPerSegmentAndOscillationSettlesAft
   const std::vector<double> second_time{3.0, 4.0, 5.0, 6.0};
   const std::vector<double> second_reference{-1.0, -1.0, -1.0, -1.0};
   const std::vector<double> second_measured{0.0, -1.4, -1.04, -1.0};
-  const auto second_result = analyze_response_segment(second_time, second_reference, second_measured, second);
+  const auto second_result =
+      analyze_response_segment(second_time, second_reference, second_measured, second);
   EXPECT_EQ(second_result.settling_status, SettlingStatus::DemonstratedRecovery);
   EXPECT_NEAR(second_result.settling_duration_s, 2.0, 1.0e-12);
   EXPECT_NEAR(second_result.overshoot_fraction, 0.2, 1.0e-12);

@@ -155,10 +155,10 @@ struct RotorGeometry {
   // +1 when the rotor's angular velocity points along +z_hub (downwards).
   int spin_about_shaft = 1;  // +1 or -1, dimensionless
 
-  double radius_m = 0.0;            // R, m
-  double chord_m = 0.0;             // c, m, equivalent constant chord
-  int blade_count = 0;              // N_b
-  double lift_curve_slope = 0.0;    // a, 1/rad
+  double radius_m = 0.0;                  // R, m
+  double chord_m = 0.0;                   // c, m, equivalent constant chord
+  int blade_count = 0;                    // N_b
+  double lift_curve_slope = 0.0;          // a, 1/rad
   double profile_drag_coefficient = 0.0;  // C_d0, dimensionless
 
   // Induced power factor kappa. Momentum theory's ideal induced power is a
@@ -170,15 +170,15 @@ struct RotorGeometry {
   // that leaves it there UNDER-PREDICTS power, and by roughly the 15% the
   // literature puts on it.
   double induced_power_factor = 1.0;  // kappa, dimensionless, >= 1
-  double blade_twist_rad = 0.0;     // theta_tw, rad, linear, root to tip (negative = washout)
-  double tip_loss_factor = 0.97;    // B, dimensionless, in (0, 1]
+  double blade_twist_rad = 0.0;       // theta_tw, rad, linear, root to tip (negative = washout)
+  double tip_loss_factor = 0.97;      // B, dimensionless, in (0, 1]
 
   // Flapping. `hinge_offset_m` is the flap hinge's radial station; the
   // equivalent flap stiffness supplies the hub moment a hingeless rotor
   // produces and an articulated one does not.
-  double hinge_offset_m = 0.0;              // e, m
-  double flap_stiffness_n_m_rad = 0.0;      // K_beta, N m/rad
-  double blade_flap_inertia_kg_m2 = 0.0;    // I_beta, kg m^2, one blade about the hinge
+  double hinge_offset_m = 0.0;            // e, m
+  double flap_stiffness_n_m_rad = 0.0;    // K_beta, N m/rad
+  double blade_flap_inertia_kg_m2 = 0.0;  // I_beta, kg m^2, one blade about the hinge
 
   // Polar moment about the shaft, whole rotor, for the rotor-speed state and
   // the gyroscopic coupling into the airframe.
@@ -211,9 +211,9 @@ struct RotorGeometry {
 // zero: a tail rotor has no swashplate. The helicopter model enforces that;
 // this struct does not, because a tilting-rotor vehicle might use all three.
 struct RotorControls {
-  double collective_rad = 0.0;             // theta_0, rad, blade root pitch
-  double longitudinal_cyclic_rad = 0.0;    // theta_1s, rad, positive tilts the disc forward
-  double lateral_cyclic_rad = 0.0;         // theta_1c, rad, positive tilts the disc right
+  double collective_rad = 0.0;           // theta_0, rad, blade root pitch
+  double longitudinal_cyclic_rad = 0.0;  // theta_1s, rad, positive tilts the disc forward
+  double lateral_cyclic_rad = 0.0;       // theta_1c, rad, positive tilts the disc right
 };
 
 // The rotor's own dynamic states, carried in the vehicle's auxiliary state.
@@ -228,21 +228,21 @@ struct RotorState {
 struct RotorSolution {
   sim::Wrench wrench;  // in BODY axes, moment about the CG
 
-  double thrust_n = 0.0;               // T, N, along the tip-path-plane normal
-  double torque_n_m = 0.0;             // Q, N m, shaft torque DEMANDED (positive)
-  double power_w = 0.0;                // P = Q * Omega, W
-  double thrust_coefficient = 0.0;     // C_T, dimensionless
-  double torque_coefficient = 0.0;     // C_Q, dimensionless
-  double induced_inflow_ratio = 0.0;   // lambda_i, dimensionless, the one thrust was built on
+  double thrust_n = 0.0;              // T, N, along the tip-path-plane normal
+  double torque_n_m = 0.0;            // Q, N m, shaft torque DEMANDED (positive)
+  double power_w = 0.0;               // P = Q * Omega, W
+  double thrust_coefficient = 0.0;    // C_T, dimensionless
+  double torque_coefficient = 0.0;    // C_Q, dimensionless
+  double induced_inflow_ratio = 0.0;  // lambda_i, dimensionless, the one thrust was built on
   // The value the momentum balance settles at for this condition. Equal to
   // `induced_inflow_ratio` for a rotor with no lag; the target it is relaxing
   // towards for a rotor with one.
-  double quasi_static_inflow_ratio = 0.0;  // dimensionless
-  double axial_inflow_ratio = 0.0;     // lambda_c, dimensionless, positive climbing
-  double advance_ratio = 0.0;          // mu, dimensionless
-  double longitudinal_flap_rad = 0.0;  // a_1s, rad, positive aft
-  double lateral_flap_rad = 0.0;       // b_1s, rad, positive toward the advancing side
-  double induced_velocity_m_s = 0.0;   // v_i, m/s
+  double quasi_static_inflow_ratio = 0.0;    // dimensionless
+  double axial_inflow_ratio = 0.0;           // lambda_c, dimensionless, positive climbing
+  double advance_ratio = 0.0;                // mu, dimensionless
+  double longitudinal_flap_rad = 0.0;        // a_1s, rad, positive aft
+  double lateral_flap_rad = 0.0;             // b_1s, rad, positive toward the advancing side
+  double induced_velocity_m_s = 0.0;         // v_i, m/s
   double thrust_coefficient_solidity = 0.0;  // C_T/sigma, dimensionless
 
   // Rate of the inflow state, for a rotor with a dynamic-inflow lag. Zero when

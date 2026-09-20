@@ -47,10 +47,18 @@ std::string number(double value, int digits = 4) {
 
 // Euler coordinate names, in the order the linear state carries them.
 std::vector<std::string> euler_names() {
-  return {"position_north_m", "position_east_m", "position_down_m",
-          "velocity_u_m_s",   "velocity_v_m_s",  "velocity_w_m_s",
-          "roll_rad",         "pitch_rad",       "yaw_rad",
-          "roll_rate_rad_s",  "pitch_rate_rad_s", "yaw_rate_rad_s"};
+  return {"position_north_m",
+          "position_east_m",
+          "position_down_m",
+          "velocity_u_m_s",
+          "velocity_v_m_s",
+          "velocity_w_m_s",
+          "roll_rad",
+          "pitch_rad",
+          "yaw_rad",
+          "roll_rate_rad_s",
+          "pitch_rate_rad_s",
+          "yaw_rate_rad_s"};
 }
 
 // Pack an extended (quaternion) state into Euler coordinates.
@@ -159,8 +167,7 @@ VehicleLinearisation linearize_vehicle(const model::VehicleModel& model,
   const auto model_states = model.state_names();
   result.state_names = euler_names();
   for (int i = 0; i < model.auxiliary_state_count(); ++i) {
-    result.state_names.push_back(
-        model_states[static_cast<std::size_t>(core::kStateSize + i)]);
+    result.state_names.push_back(model_states[static_cast<std::size_t>(core::kStateSize + i)]);
   }
 
   const Eigen::VectorXd point = to_euler(model, extended_state);
@@ -267,8 +274,8 @@ VehicleLinearisation linearize_vehicle(const model::VehicleModel& model,
   // cheap — does the model's auxiliary rate respond to the perturbation at
   // all? — and the answer goes in the report.
   for (Eigen::Index j = 0; j < m; ++j) {
-    const double step = std::max(options.relative_step * std::fabs(controls(j)),
-                                 options.absolute_step);
+    const double step =
+        std::max(options.relative_step * std::fabs(controls(j)), options.absolute_step);
     Eigen::VectorXd up = controls;
     Eigen::VectorXd down = controls;
     up(j) += step;
@@ -301,8 +308,8 @@ model::LinearSystem VehicleLinearisation::to_linear_system(const std::string& de
 VehicleLinearisation VehicleLinearisation::reduced() const {
   // Dropped BY NAME, so the choice is visible in the result rather than
   // implied by an index.
-  static const std::vector<std::string> dropped = {"position_north_m", "position_east_m",
-                                                   "position_down_m", "yaw_rad"};
+  static const std::vector<std::string> dropped = {
+      "position_north_m", "position_east_m", "position_down_m", "yaw_rad"};
   std::vector<Eigen::Index> keep;
   std::vector<std::string> names;
   for (std::size_t i = 0; i < state_names.size(); ++i) {
@@ -376,9 +383,8 @@ NonlinearAgreement nonlinear_agreement(const model::VehicleModel& model,
   // nonlinear trajectories, so that is what it is measured against.
   const auto base_trajectory = numerics::integrate(nonlinear_rate, base, 0.0, integration);
   if (!base_trajectory.completed()) {
-    throw std::runtime_error(
-        "nonlinear_agreement: the unperturbed trajectory did not complete: "
-        + base_trajectory.detail);
+    throw std::runtime_error("nonlinear_agreement: the unperturbed trajectory did not complete: "
+                             + base_trajectory.detail);
   }
   const Eigen::VectorXd base_final = base_trajectory.trajectory.states.back();
 
@@ -423,9 +429,8 @@ NonlinearAgreement nonlinear_agreement(const model::VehicleModel& model,
     const double coarse = out.discrepancies[i - 1];
     const double fine = out.discrepancies[i];
     const double ratio = epsilons[i - 1] / epsilons[i];
-    const double order = (fine > 0.0 && ratio > 1.0)
-                             ? std::log(coarse / fine) / std::log(ratio)
-                             : 0.0;
+    const double order =
+        (fine > 0.0 && ratio > 1.0) ? std::log(coarse / fine) / std::log(ratio) : 0.0;
     out.observed_orders.push_back(order);
   }
   if (!out.observed_orders.empty()) {

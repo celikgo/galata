@@ -15,7 +15,6 @@
 #include "galata/trim/problem.hpp"
 
 #include <Eigen/Eigenvalues>
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -23,27 +22,26 @@
 #include <stdexcept>
 #include <string>
 
+using galata::analyze::analyze_modes;
 using galata::analyze::ModeLabel;
 using galata::analyze::StateRoles;
-using galata::analyze::analyze_modes;
-using galata::core::State;
 using galata::core::identity_attitude;
-using galata::linearize::VehicleLinearisation;
+using galata::core::State;
 using galata::linearize::linearize_vehicle;
 using galata::linearize::nonlinear_agreement;
+using galata::linearize::VehicleLinearisation;
 using galata::model::Environment;
 using galata::model::HelicopterModel;
 using galata::model::kCollectivePosition;
 using galata::model::load_helicopter;
-using galata::trim::TrimCondition;
 using galata::trim::helicopter_trim_problem;
 using galata::trim::solve_trim;
+using galata::trim::TrimCondition;
 
 namespace {
 
 HelicopterModel souxmar() {
-  return load_helicopter(std::string(GALATA_SOURCE_DIR)
-                         + "/models/souxmar-heli/souxmar-heli.yaml");
+  return load_helicopter(std::string(GALATA_SOURCE_DIR) + "/models/souxmar-heli/souxmar-heli.yaml");
 }
 
 // Trim, then set the COMMANDS equal to the solved actuator POSITIONS. Without
@@ -86,8 +84,8 @@ TrimmedHelicopter trimmed_hover(double forward_speed_m_s = 0.0) {
 
 TEST(HelicopterLinearisation, LinearisesAboutTheHoverTrim) {
   const auto trimmed = trimmed_hover();
-  const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                        trimmed.environment);
+  const auto linear = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
 
   // Twelve Euler coordinates plus the model's eight auxiliary states: rotor
   // speed, two inflows, four actuator positions and the engine torque.
@@ -128,8 +126,8 @@ TEST(HelicopterLinearisation, RefusesAPointThatIsNotAnEquilibriumAndNamesTheStat
 
 TEST(HelicopterLinearisation, TheActuatorLagsAppearAsTheirOwnEigenvalues) {
   const auto trimmed = trimmed_hover();
-  const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                        trimmed.environment);
+  const auto linear = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
   const Eigen::VectorXcd eigenvalues = linear.a.eigenvalues();
 
   // A first-order actuator with time constant tau contributes a real
@@ -152,8 +150,8 @@ TEST(HelicopterLinearisation, TheActuatorLagsAppearAsTheirOwnEigenvalues) {
 
 TEST(HelicopterLinearisation, ReducedDropsThePositionAndHeadingIntegratorsByName) {
   const auto trimmed = trimmed_hover();
-  const auto full = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                      trimmed.environment);
+  const auto full = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
   const auto reduced = full.reduced();
 
   EXPECT_EQ(reduced.a.rows(), 16);
@@ -173,16 +171,20 @@ TEST(HelicopterLinearisation, ReducedDropsThePositionAndHeadingIntegratorsByName
 
 TEST(HelicopterLinearisation, NonlinearAndLinearAgreeToSecondOrderInForwardFlight) {
   const auto trimmed = trimmed_hover(20.0);
-  const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                        trimmed.environment);
+  const auto linear = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
 
   Eigen::VectorXd direction = Eigen::VectorXd::Zero(linear.a.rows());
   direction(3) = 1.0;  // velocity_u_m_s
   direction(5) = 0.5;  // velocity_w_m_s
 
-  const auto agreement =
-      nonlinear_agreement(trimmed.model, linear, trimmed.environment, direction,
-                          {0.4, 0.2, 0.1, 0.05, 0.025}, 0.5, 0.001);
+  const auto agreement = nonlinear_agreement(trimmed.model,
+                                             linear,
+                                             trimmed.environment,
+                                             direction,
+                                             {0.4, 0.2, 0.1, 0.05, 0.025},
+                                             0.5,
+                                             0.001);
 
   ASSERT_EQ(agreement.discrepancies.size(), 5u);
 
@@ -204,9 +206,8 @@ TEST(HelicopterLinearisation, NonlinearAndLinearAgreeToSecondOrderInForwardFligh
   // account for. 1.9 to 2.1 is that band.
   for (std::size_t i = 0; i < agreement.observed_orders.size(); ++i) {
     EXPECT_GT(agreement.observed_orders[i], 1.9)
-        << "order " << agreement.observed_orders[i] << " between epsilon "
-        << agreement.epsilons[i] << " and " << agreement.epsilons[i + 1]
-        << " — a first-order error would sit near 1";
+        << "order " << agreement.observed_orders[i] << " between epsilon " << agreement.epsilons[i]
+        << " and " << agreement.epsilons[i + 1] << " — a first-order error would sit near 1";
     EXPECT_LT(agreement.observed_orders[i], 2.1) << agreement.observed_orders[i];
   }
 }
@@ -239,16 +240,15 @@ TEST(HelicopterLinearisation, HasANonVanishingErrorFloorInExactHoverAndThatIsThe
   // that converges cleanly would mean the advance ratio's kink had been
   // smoothed away — and a smoothed mu is a better Jacobian of a worse model.
   const auto trimmed = trimmed_hover(0.0);
-  const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                        trimmed.environment);
+  const auto linear = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
 
   Eigen::VectorXd direction = Eigen::VectorXd::Zero(linear.a.rows());
   direction(3) = 1.0;
   direction(5) = 0.5;
 
-  const auto agreement =
-      nonlinear_agreement(trimmed.model, linear, trimmed.environment, direction,
-                          {0.1, 0.0125, 0.00625}, 0.5, 0.001);
+  const auto agreement = nonlinear_agreement(
+      trimmed.model, linear, trimmed.environment, direction, {0.1, 0.0125, 0.00625}, 0.5, 0.001);
 
   const double floor_value = agreement.discrepancies.back();
 
@@ -260,19 +260,19 @@ TEST(HelicopterLinearisation, HasANonVanishingErrorFloorInExactHoverAndThatIsThe
   // And it is small: about 3.1e-3 in mixed state units over half a second, so
   // the hover linearisation is still usable for stability analysis — which is
   // what it is for — while being unfit for trajectory prediction.
-  EXPECT_LT(floor_value, 1.0e-2)
-      << "the hover error floor has grown beyond the two known kinks: " << floor_value;
+  EXPECT_LT(floor_value, 1.0e-2) << "the hover error floor has grown beyond the two known kinks: "
+                                 << floor_value;
 }
 
 TEST(HelicopterLinearisation, RefusesAnAgreementStudyWithOneEpsilon) {
   const auto trimmed = trimmed_hover();
-  const auto linear = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                        trimmed.environment);
+  const auto linear = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
   Eigen::VectorXd direction = Eigen::VectorXd::Zero(linear.a.rows());
   direction(3) = 1.0;
   const auto run = [&] {
-    (void)nonlinear_agreement(trimmed.model, linear, trimmed.environment, direction, {0.1}, 1.0,
-                              0.002);
+    (void)nonlinear_agreement(
+        trimmed.model, linear, trimmed.environment, direction, {0.1}, 1.0, 0.002);
   };
   EXPECT_THROW(run(), std::invalid_argument);
 }
@@ -283,9 +283,10 @@ TEST(HelicopterLinearisation, RefusesAnAgreementStudyWithOneEpsilon) {
 
 TEST(HelicopterModes, ClassifiesTheHoverModesAndFindsAnUnstableOscillation) {
   const auto trimmed = trimmed_hover();
-  const auto reduced = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                         trimmed.environment)
-                           .reduced();
+  const auto reduced =
+      linearize_vehicle(
+          trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment)
+          .reduced();
   const auto roles = StateRoles::from_names(reduced.state_names);
 
   // The rotor-speed role is what makes the rotorcraft labels candidates at all.
@@ -349,9 +350,10 @@ TEST(HelicopterModes, ALabelIsNeverAssignedOnNegligibleParticipation) {
   // greedy assignment hands a spare label to whatever scores above zero once the
   // strong candidates are taken.
   const auto trimmed = trimmed_hover();
-  const auto reduced = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                         trimmed.environment)
-                           .reduced();
+  const auto reduced =
+      linearize_vehicle(
+          trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment)
+          .reduced();
   const auto modes =
       analyze_modes(reduced.a, reduced.state_names, StateRoles::from_names(reduced.state_names));
 
@@ -363,8 +365,8 @@ TEST(HelicopterModes, ALabelIsNeverAssignedOnNegligibleParticipation) {
                             || mode.label == ModeLabel::RotorSpeedMode;
     if (rotorcraft) {
       EXPECT_GE(mode.label_score, 0.10)
-          << galata::analyze::to_string(mode.label) << " was assigned on only "
-          << mode.label_score << " of participation";
+          << galata::analyze::to_string(mode.label) << " was assigned on only " << mode.label_score
+          << " of participation";
     }
   }
 }
@@ -375,9 +377,10 @@ TEST(HelicopterModes, AModelWithNoRotorSpeedRoleCannotBeGivenARotorcraftLabel) {
   // what they returned before these labels existed. Asserted here directly
   // rather than only implied by the NT-33A validation case.
   const auto trimmed = trimmed_hover();
-  const auto reduced = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                         trimmed.environment)
-                           .reduced();
+  const auto reduced =
+      linearize_vehicle(
+          trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment)
+          .reduced();
 
   auto roles = StateRoles::from_names(reduced.state_names);
   roles.rotor_speed = -1;  // pretend this is a fixed-wing model
@@ -395,10 +398,10 @@ TEST(HelicopterModes, AModelWithNoRotorSpeedRoleCannotBeGivenARotorcraftLabel) {
 
 TEST(HelicopterLinearisation, RepeatedLinearisationsAreBitIdentical) {
   const auto trimmed = trimmed_hover();
-  const auto a = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                   trimmed.environment);
-  const auto b = linearize_vehicle(trimmed.model, trimmed.extended_state, trimmed.controls,
-                                   trimmed.environment);
+  const auto a = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
+  const auto b = linearize_vehicle(
+      trimmed.model, trimmed.extended_state, trimmed.controls, trimmed.environment);
   for (Eigen::Index i = 0; i < a.a.rows(); ++i) {
     for (Eigen::Index j = 0; j < a.a.cols(); ++j) {
       EXPECT_EQ(a.a(i, j), b.a(i, j)) << "A(" << i << ", " << j << ")";

@@ -21,8 +21,11 @@ Table1D linear_table(TableExtrapolation outside = TableExtrapolation::Refuse) {
   // y = 2x + 1 sampled at four breakpoints. Linear interpolation of a linear
   // function is EXACT everywhere inside, which is what makes this a closed-form
   // check rather than a tolerance check.
-  return Table1D("cd0_vs_alpha", {-2.0, 0.0, 1.0, 4.0}, {-3.0, 1.0, 3.0, 9.0},
-                 TableInterpolation::Linear, outside);
+  return Table1D("cd0_vs_alpha",
+                 {-2.0, 0.0, 1.0, 4.0},
+                 {-3.0, 1.0, 3.0, 9.0},
+                 TableInterpolation::Linear,
+                 outside);
 }
 
 }  // namespace
@@ -46,21 +49,26 @@ TEST(Table1D, ReproducesALinearFunctionExactlyBetweenBreakpoints) {
 TEST(Table1D, RefusesAnAxisThatDoesNotStrictlyIncrease) {
   // A repeated breakpoint is how a step gets written by somebody who has not
   // read the header, and reading it as either value picks a different function.
-  EXPECT_THROW(Table1D("t", {0.0, 1.0, 1.0}, {0.0, 1.0, 2.0}, TableInterpolation::Linear,
+  EXPECT_THROW(Table1D("t",
+                       {0.0, 1.0, 1.0},
+                       {0.0, 1.0, 2.0},
+                       TableInterpolation::Linear,
                        TableExtrapolation::Hold),
                std::invalid_argument);
-  EXPECT_THROW(Table1D("t", {0.0, 2.0, 1.0}, {0.0, 1.0, 2.0}, TableInterpolation::Linear,
+  EXPECT_THROW(Table1D("t",
+                       {0.0, 2.0, 1.0},
+                       {0.0, 1.0, 2.0},
+                       TableInterpolation::Linear,
                        TableExtrapolation::Hold),
                std::invalid_argument);
 }
 
 TEST(Table1D, RefusesASizeMismatchAndATooShortAxis) {
-  EXPECT_THROW(Table1D("t", {0.0, 1.0}, {0.0}, TableInterpolation::Linear,
-                       TableExtrapolation::Hold),
-               std::invalid_argument);
   EXPECT_THROW(
-      Table1D("t", {0.0}, {0.0}, TableInterpolation::Linear, TableExtrapolation::Hold),
+      Table1D("t", {0.0, 1.0}, {0.0}, TableInterpolation::Linear, TableExtrapolation::Hold),
       std::invalid_argument);
+  EXPECT_THROW(Table1D("t", {0.0}, {0.0}, TableInterpolation::Linear, TableExtrapolation::Hold),
+               std::invalid_argument);
 }
 
 TEST(Table1D, RefusesOutOfRangeWhenTheStudyDeclaredRefuse) {
@@ -94,8 +102,11 @@ TEST(Table1D, LinearExtrapolationContinuesTheEndSegmentSlope) {
 }
 
 TEST(Table1D, NearestLowTakesTheLastBreakpointNotAfterTheQuery) {
-  const Table1D table("schedule", {0.0, 1.0, 2.0}, {10.0, 20.0, 30.0},
-                      TableInterpolation::Nearest_Low, TableExtrapolation::Hold);
+  const Table1D table("schedule",
+                      {0.0, 1.0, 2.0},
+                      {10.0, 20.0, 30.0},
+                      TableInterpolation::Nearest_Low,
+                      TableExtrapolation::Hold);
   EXPECT_EQ(table.at(0.0), 10.0);
   EXPECT_EQ(table.at(0.999), 10.0);
   EXPECT_EQ(table.at(1.0), 20.0);
@@ -137,7 +148,11 @@ TEST(Table2D, ReproducesABilinearFunctionExactly) {
       values(i, j) = 1.0 + 2.0 * x + 3.0 * y + 4.0 * x * y;
     }
   }
-  const Table2D table("cl_vs_alpha_beta", rows, columns, values, TableInterpolation::Linear,
+  const Table2D table("cl_vs_alpha_beta",
+                      rows,
+                      columns,
+                      values,
+                      TableInterpolation::Linear,
                       TableExtrapolation::Refuse);
   for (double x = 0.0; x <= 3.0; x += 0.25) {
     for (double y = -1.0; y <= 2.0; y += 0.25) {
@@ -151,7 +166,11 @@ TEST(Table2D, ReproducesABilinearFunctionExactly) {
 TEST(Table2D, RefusesAShapeMismatch) {
   Eigen::MatrixXd values(2, 3);
   values.setZero();
-  EXPECT_THROW(Table2D("t", {0.0, 1.0, 2.0}, {0.0, 1.0, 2.0}, values, TableInterpolation::Linear,
+  EXPECT_THROW(Table2D("t",
+                       {0.0, 1.0, 2.0},
+                       {0.0, 1.0, 2.0},
+                       values,
+                       TableInterpolation::Linear,
                        TableExtrapolation::Hold),
                std::invalid_argument);
 }
@@ -159,8 +178,8 @@ TEST(Table2D, RefusesAShapeMismatch) {
 TEST(Table2D, RefusesOutOfRangeOnEitherAxis) {
   Eigen::MatrixXd values(2, 2);
   values << 1.0, 2.0, 3.0, 4.0;
-  const Table2D table("t", {0.0, 1.0}, {0.0, 1.0}, values, TableInterpolation::Linear,
-                      TableExtrapolation::Refuse);
+  const Table2D table(
+      "t", {0.0, 1.0}, {0.0, 1.0}, values, TableInterpolation::Linear, TableExtrapolation::Refuse);
   EXPECT_THROW((void)table.at(1.5, 0.5), std::out_of_range);
   EXPECT_THROW((void)table.at(0.5, 1.5), std::out_of_range);
   EXPECT_NO_THROW((void)table.at(1.0, 1.0));

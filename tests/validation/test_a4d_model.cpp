@@ -18,8 +18,8 @@
 #include "validation_config.hpp"
 #include <gtest/gtest.h>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <string>
 #include <utility>
@@ -100,10 +100,10 @@ TEST(A4DModel, LoadedCoefficientsReproduceEveryPublishedDimensionalDerivative) {
   const double moment_scale = kQbarPsf * kWingAreaFt2 * kChordFt / kIyySlugFt2;
   const double cx = -aero.drag_ref * c + aero.lift_ref * s;
   const double cz = -aero.drag_ref * s - aero.lift_ref * c;
-  const double cxa = -aero.drag_alpha * c + aero.drag_ref * s + aero.lift_alpha * s
-                     + aero.lift_ref * c;
-  const double cza = -aero.drag_alpha * s - aero.drag_ref * c - aero.lift_alpha * c
-                     + aero.lift_ref * s;
+  const double cxa =
+      -aero.drag_alpha * c + aero.drag_ref * s + aero.lift_alpha * s + aero.lift_ref * c;
+  const double cza =
+      -aero.drag_alpha * s - aero.drag_ref * c - aero.lift_alpha * c + aero.lift_ref * s;
   const double xu = force_scale * (2.0 * c / kSpeedFtS * cx - s / kSpeedFtS * cxa);
   const double xw = force_scale * (2.0 * s / kSpeedFtS * cx + c / kSpeedFtS * cxa);
   const double zu = force_scale * (2.0 * c / kSpeedFtS * cz - s / kSpeedFtS * cza);
@@ -114,60 +114,55 @@ TEST(A4DModel, LoadedCoefficientsReproduceEveryPublishedDimensionalDerivative) {
   const double mw = moment_scale
                     * (2.0 * s / kSpeedFtS * aero.pitching_moment_ref
                        + c / kSpeedFtS * aero.pitching_moment_alpha);
-  const double mwd = moment_scale * aero.pitching_moment_alpha_dot * kChordFt
-                     / (2.0 * kSpeedFtS * kSpeedFtS);
-  const double mq = moment_scale * aero.pitching_moment_pitch_rate * kChordFt
-                    / (2.0 * kSpeedFtS);
-  const double xde = force_scale
-                     * (-aero.drag_elevator * c + aero.lift_elevator * s);
-  const double zde = force_scale
-                     * (-aero.drag_elevator * s - aero.lift_elevator * c);
+  const double mwd =
+      moment_scale * aero.pitching_moment_alpha_dot * kChordFt / (2.0 * kSpeedFtS * kSpeedFtS);
+  const double mq = moment_scale * aero.pitching_moment_pitch_rate * kChordFt / (2.0 * kSpeedFtS);
+  const double xde = force_scale * (-aero.drag_elevator * c + aero.lift_elevator * s);
+  const double zde = force_scale * (-aero.drag_elevator * s - aero.lift_elevator * c);
   const double mde = moment_scale * aero.pitching_moment_elevator;
 
   const std::pair<const char*, double> longitudinal[] = {
-      {"X_u", xu},       {"X_w", xw},       {"X_delta_e", xde},
-      {"Z_u", zu},       {"Z_w", zw},       {"Z_delta_e", zde},
-      {"M_u", mu},       {"M_w", mw},       {"M_w_dot", mwd},
-      {"M_q", mq},       {"M_delta_e", mde},
+      {"X_u", xu},
+      {"X_w", xw},
+      {"X_delta_e", xde},
+      {"Z_u", zu},
+      {"Z_w", zw},
+      {"Z_delta_e", zde},
+      {"M_u", mu},
+      {"M_w", mw},
+      {"M_w_dot", mwd},
+      {"M_q", mq},
+      {"M_delta_e", mde},
   };
   for (const auto& [name, value] : longitudinal) {
     EXPECT_LT(relative_error(value, source(published, name)), 0.001)
         << name << ": computed " << value << ", source " << source(published, name);
   }
 
-  const double yv = aero.side_force_beta * kQbarPsf * kWingAreaFt2
-                    / (kMassSlug * kSpeedFtS);
+  const double yv = aero.side_force_beta * kQbarPsf * kWingAreaFt2 / (kMassSlug * kSpeedFtS);
   const double yda = aero.side_force_aileron * kQbarPsf * kWingAreaFt2 / kMassSlug;
   const double ydr = aero.side_force_rudder * kQbarPsf * kWingAreaFt2 / kMassSlug;
   const auto beta = primed_from_raw_moment(
-      raw_moment_from_body_coefficients(aero.rolling_moment_beta,
-                                         aero.yawing_moment_beta,
-                                         kQbarPsf,
-                                         kWingAreaFt2,
-                                         kSpanFt)
+      raw_moment_from_body_coefficients(
+          aero.rolling_moment_beta, aero.yawing_moment_beta, kQbarPsf, kWingAreaFt2, kSpanFt)
           .first,
-      raw_moment_from_body_coefficients(aero.rolling_moment_beta,
-                                         aero.yawing_moment_beta,
-                                         kQbarPsf,
-                                         kWingAreaFt2,
-                                         kSpanFt)
+      raw_moment_from_body_coefficients(
+          aero.rolling_moment_beta, aero.yawing_moment_beta, kQbarPsf, kWingAreaFt2, kSpanFt)
           .second);
-  const auto p = primed_from_raw_moment(
-      aero.rolling_moment_roll_rate * kQbarPsf * kWingAreaFt2 * kSpanFt * kSpanFt
-          / (2.0 * kSpeedFtS),
-      aero.yawing_moment_roll_rate * kQbarPsf * kWingAreaFt2 * kSpanFt * kSpanFt
-          / (2.0 * kSpeedFtS));
-  const auto r = primed_from_raw_moment(
-      aero.rolling_moment_yaw_rate * kQbarPsf * kWingAreaFt2 * kSpanFt * kSpanFt
-          / (2.0 * kSpeedFtS),
-      aero.yawing_moment_yaw_rate * kQbarPsf * kWingAreaFt2 * kSpanFt * kSpanFt
-          / (2.0 * kSpeedFtS));
-  const auto da = primed_from_raw_moment(
-      aero.rolling_moment_aileron * kQbarPsf * kWingAreaFt2 * kSpanFt,
-      aero.yawing_moment_aileron * kQbarPsf * kWingAreaFt2 * kSpanFt);
-  const auto dr = primed_from_raw_moment(
-      aero.rolling_moment_rudder * kQbarPsf * kWingAreaFt2 * kSpanFt,
-      aero.yawing_moment_rudder * kQbarPsf * kWingAreaFt2 * kSpanFt);
+  const auto p = primed_from_raw_moment(aero.rolling_moment_roll_rate * kQbarPsf * kWingAreaFt2
+                                            * kSpanFt * kSpanFt / (2.0 * kSpeedFtS),
+                                        aero.yawing_moment_roll_rate * kQbarPsf * kWingAreaFt2
+                                            * kSpanFt * kSpanFt / (2.0 * kSpeedFtS));
+  const auto r = primed_from_raw_moment(aero.rolling_moment_yaw_rate * kQbarPsf * kWingAreaFt2
+                                            * kSpanFt * kSpanFt / (2.0 * kSpeedFtS),
+                                        aero.yawing_moment_yaw_rate * kQbarPsf * kWingAreaFt2
+                                            * kSpanFt * kSpanFt / (2.0 * kSpeedFtS));
+  const auto da =
+      primed_from_raw_moment(aero.rolling_moment_aileron * kQbarPsf * kWingAreaFt2 * kSpanFt,
+                             aero.yawing_moment_aileron * kQbarPsf * kWingAreaFt2 * kSpanFt);
+  const auto dr =
+      primed_from_raw_moment(aero.rolling_moment_rudder * kQbarPsf * kWingAreaFt2 * kSpanFt,
+                             aero.yawing_moment_rudder * kQbarPsf * kWingAreaFt2 * kSpanFt);
 
   const std::pair<const char*, double> lateral[] = {
       {"Y_v", yv},

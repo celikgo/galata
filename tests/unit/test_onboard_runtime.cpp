@@ -171,8 +171,6 @@ TEST(OnboardRuntime, RefusesAControllerBudgetLongerThanTheWatchdog) {
   galata::hardware::ReplayTransport transport({Frame{0, 0.0, {25.0}}});
   galata::hardware::ArmingInterlock interlock;
   EXPECT_THROW(
-      {
-        galata::onboard::Runtime runtime(transport, interlock, {specification(), 0.02, 0.01});
-      },
+      { galata::onboard::Runtime runtime(transport, interlock, {specification(), 0.02, 0.01}); },
       std::invalid_argument);
 }

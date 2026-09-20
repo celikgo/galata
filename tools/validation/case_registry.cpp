@@ -16,10 +16,8 @@ const char* const kUssa =
     "COESA, *U.S. Standard Atmosphere, 1976*, NOAA-S/T 76-1562 / NASA-TM-X-74335";
 const char* const kCr2144 =
     "Heffley & Jewell, *Aircraft Handling Qualities Data*, NASA CR-2144 (1972)";
-const char* const kCr96008 =
-    "Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969)";
-const char* const kGtm =
-    "NASA GTM_DesignSim, LAR-17625-1, and Cunningham et al., AIAA-2011-6451";
+const char* const kCr96008 = "Teper, *Aircraft Stability and Control Data*, NASA CR-96008 (1969)";
+const char* const kGtm = "NASA GTM_DesignSim, LAR-17625-1, and Cunningham et al., AIAA-2011-6451";
 const char* const kF16 =
     "NASA simupy-flight, NESC Case 11 F-16 model, public revision "
     "70754e6916afc206e8c0abb386d1a9c98bf8f561";
@@ -558,8 +556,7 @@ const std::vector<Case>& validation_cases() {
        Status::ValidatedWithCaveat,
        {E{kValidation,
           "NavionModel.PublishedNominalConditionTrimsAtTheDeclaredMachAndDynamicPressure"},
-        E{kValidation,
-          "NavionModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget"}},
+        E{kValidation, "NavionModel.PublishedModesRemainWithinThePredeclaredRoundedSourceBudget"}},
        "The published Navion condition and modal values are reproduced within a fixed 3% "
        "rounded-source budget. This validates a second fixed-wing derivative transcription and "
        "the shared workflow at one nominal condition; it does not validate a global Navion "
@@ -577,7 +574,7 @@ const std::vector<Case>& validation_cases() {
        "The clean flexible-airplane condition-1 derivative set reproduces the source's "
        "dimensional derivatives and published short-period, spiral, roll-subsidence and "
        "Dutch-roll factors within a fixed 5% rounded-source budget. This adds a third "
-      "published fixed-wing transcription; it does not validate a global A-7A model, "
+       "published fixed-wing transcription; it does not validate a global A-7A model, "
        "structural flexibility, or any flight envelope."},
 
       {"a4d.chain_modes",

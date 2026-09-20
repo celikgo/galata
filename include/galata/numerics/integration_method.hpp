@@ -123,12 +123,15 @@ class StateBounds {
   [[nodiscard]] bool empty() const noexcept {
     return magnitudes_.size() == 0;
   }
+
   [[nodiscard]] Eigen::Index size() const noexcept {
     return magnitudes_.size();
   }
+
   [[nodiscard]] const std::vector<std::string>& names() const noexcept {
     return names_;
   }
+
   [[nodiscard]] const Eigen::VectorXd& magnitudes() const noexcept {
     return magnitudes_;
   }
@@ -146,9 +149,9 @@ class StateBounds {
 
 struct IntegrationOptions {
   IntegrationMethod method = IntegrationMethod::Rk4Fixed;
-  double step_s = 0.0;       // s, positive
-  int step_count = 0;        // number of fixed steps, non-negative
-  int sample_stride = 1;     // steps between recorded samples
+  double step_s = 0.0;    // s, positive
+  int step_count = 0;     // number of fixed steps, non-negative
+  int sample_stride = 1;  // steps between recorded samples
 
   // FIXED, not a budget, and not a tolerance. Every implicit step performs
   // exactly this many Newton iterations whatever the residual, because an exit

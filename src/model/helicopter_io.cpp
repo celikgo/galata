@@ -11,9 +11,9 @@
 // those units is converted in the model's PROVENANCE.md, by hand, with the
 // conversion recorded, and the YAML carries the SI result.
 
-#include "../io/strict_yaml.hpp"
 #include "galata/model/helicopter.hpp"
 
+#include "../io/strict_yaml.hpp"
 #include <yaml-cpp/yaml.h>
 
 #include <fstream>
@@ -88,14 +88,28 @@ std::string optional_text(const YAML::Node& node, const std::string& key) {
 rotor::RotorGeometry parse_rotor(const YAML::Node& node,
                                  const std::string& path,
                                  const std::string& name) {
-  io::yaml_keys(node, path,
-                {"radius_m", "chord_m", "blade_count", "lift_curve_slope",
-                 "profile_drag_coefficient", "induced_power_factor", "blade_twist_rad",
-                 "tip_loss_factor", "hinge_offset_m", "flap_stiffness_n_m_rad",
-                 "blade_flap_inertia_kg_m2", "polar_inertia_kg_m2", "inflow_time_constant_s",
-                 "position_cg_to_hub_body_m", "spin_about_shaft", "shaft_tilt_forward_rad",
-                 "shaft_tilt_lateral_rad", "thrust_towards_starboard",
-                 "maximum_thrust_coefficient_solidity", "maximum_advance_ratio"});
+  io::yaml_keys(node,
+                path,
+                {"radius_m",
+                 "chord_m",
+                 "blade_count",
+                 "lift_curve_slope",
+                 "profile_drag_coefficient",
+                 "induced_power_factor",
+                 "blade_twist_rad",
+                 "tip_loss_factor",
+                 "hinge_offset_m",
+                 "flap_stiffness_n_m_rad",
+                 "blade_flap_inertia_kg_m2",
+                 "polar_inertia_kg_m2",
+                 "inflow_time_constant_s",
+                 "position_cg_to_hub_body_m",
+                 "spin_about_shaft",
+                 "shaft_tilt_forward_rad",
+                 "shaft_tilt_lateral_rad",
+                 "thrust_towards_starboard",
+                 "maximum_thrust_coefficient_solidity",
+                 "maximum_advance_ratio"});
 
   rotor::RotorGeometry geometry;
   geometry.name = name;
@@ -109,8 +123,7 @@ rotor::RotorGeometry parse_rotor(const YAML::Node& node,
   geometry.tip_loss_factor = optional_scalar(node, path, "tip_loss_factor", 0.97);
   geometry.hinge_offset_m = optional_scalar(node, path, "hinge_offset_m", 0.0);
   geometry.flap_stiffness_n_m_rad = optional_scalar(node, path, "flap_stiffness_n_m_rad", 0.0);
-  geometry.blade_flap_inertia_kg_m2 =
-      optional_scalar(node, path, "blade_flap_inertia_kg_m2", 0.0);
+  geometry.blade_flap_inertia_kg_m2 = optional_scalar(node, path, "blade_flap_inertia_kg_m2", 0.0);
   geometry.polar_inertia_kg_m2 = scalar(node, path, "polar_inertia_kg_m2");
   geometry.inflow_time_constant_s = optional_scalar(node, path, "inflow_time_constant_s", 0.0);
   geometry.position_cg_to_hub_body_m = vector3(node, path, "position_cg_to_hub_body_m");
@@ -182,12 +195,10 @@ std::optional<numerics::Table1D> parse_optional_table(const YAML::Node& parent,
 
   // BOTH RULES ARE REQUIRED, NOT DEFAULTED. There is no rule that is right for
   // every table, and a study that has not said which it wants has not decided.
-  const auto interpolation_text = node["interpolation"]
-                                      ? node["interpolation"].as<std::string>()
-                                      : std::string();
-  const auto extrapolation_text = node["extrapolation"]
-                                      ? node["extrapolation"].as<std::string>()
-                                      : std::string();
+  const auto interpolation_text =
+      node["interpolation"] ? node["interpolation"].as<std::string>() : std::string();
+  const auto extrapolation_text =
+      node["extrapolation"] ? node["extrapolation"].as<std::string>() : std::string();
   if (interpolation_text.empty() || extrapolation_text.empty()) {
     throw std::invalid_argument(
         table_path
@@ -214,17 +225,25 @@ std::optional<numerics::Table1D> parse_optional_table(const YAML::Node& parent,
     throw std::invalid_argument(table_path
                                 + ".extrapolation: expected 'hold', 'refuse' or 'linear'");
   }
-  return numerics::Table1D(table_name, read_axis("breakpoints"), read_axis("values"),
-                           interpolation, extrapolation);
+  return numerics::Table1D(
+      table_name, read_axis("breakpoints"), read_axis("values"), interpolation, extrapolation);
 }
 
 }  // namespace
 
 HelicopterModel parse_helicopter(const std::string& bytes, const std::string& origin) {
   const YAML::Node root = io::load_yaml(bytes, origin);
-  io::yaml_keys(root, origin,
-                {"description", "citation", "mass", "main_rotor", "tail_rotor", "airframe",
-                 "drivetrain", "actuators", "tail_rotor_blockage_factor",
+  io::yaml_keys(root,
+                origin,
+                {"description",
+                 "citation",
+                 "mass",
+                 "main_rotor",
+                 "tail_rotor",
+                 "airframe",
+                 "drivetrain",
+                 "actuators",
+                 "tail_rotor_blockage_factor",
                  "pedal_to_tail_collective"});
 
   HelicopterModel model;
@@ -244,9 +263,14 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
   if (!mass_node) {
     throw std::invalid_argument(origin + ": missing required key 'mass'");
   }
-  io::yaml_keys(mass_node, mass_path,
-                {"mass_kg", "inertia_xx_kg_m2", "inertia_yy_kg_m2", "inertia_zz_kg_m2",
-                 "product_of_inertia_xy_kg_m2", "product_of_inertia_xz_kg_m2",
+  io::yaml_keys(mass_node,
+                mass_path,
+                {"mass_kg",
+                 "inertia_xx_kg_m2",
+                 "inertia_yy_kg_m2",
+                 "inertia_zz_kg_m2",
+                 "product_of_inertia_xy_kg_m2",
+                 "product_of_inertia_xz_kg_m2",
                  "product_of_inertia_yz_kg_m2"});
   model.mass.mass_kg = scalar(mass_node, mass_path, "mass_kg");
   const double ixx = scalar(mass_node, mass_path, "inertia_xx_kg_m2");
@@ -284,14 +308,22 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
   if (!airframe_node) {
     throw std::invalid_argument(origin + ": missing required key 'airframe'");
   }
-  io::yaml_keys(airframe_node, airframe_path,
-                {"flat_plate_area_m2", "cg_to_fuselage_reference_body_m",
-                 "fuselage_lift_vs_alpha", "fuselage_pitching_moment_vs_alpha",
-                 "horizontal_tail_area_m2", "horizontal_tail_lift_slope",
-                 "horizontal_tail_incidence_rad", "cg_to_horizontal_tail_body_m",
-                 "horizontal_tail_downwash_factor", "vertical_tail_area_m2",
-                 "vertical_tail_side_slope", "vertical_tail_incidence_rad",
-                 "cg_to_vertical_tail_body_m", "surface_stall_angle_rad"});
+  io::yaml_keys(airframe_node,
+                airframe_path,
+                {"flat_plate_area_m2",
+                 "cg_to_fuselage_reference_body_m",
+                 "fuselage_lift_vs_alpha",
+                 "fuselage_pitching_moment_vs_alpha",
+                 "horizontal_tail_area_m2",
+                 "horizontal_tail_lift_slope",
+                 "horizontal_tail_incidence_rad",
+                 "cg_to_horizontal_tail_body_m",
+                 "horizontal_tail_downwash_factor",
+                 "vertical_tail_area_m2",
+                 "vertical_tail_side_slope",
+                 "vertical_tail_incidence_rad",
+                 "cg_to_vertical_tail_body_m",
+                 "surface_stall_angle_rad"});
   auto& airframe = model.airframe;
   airframe.flat_plate_area_m2 = scalar(airframe_node, airframe_path, "flat_plate_area_m2");
   airframe.cg_to_fuselage_reference_body_m =
@@ -301,7 +333,9 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
   airframe.fuselage_lift_vs_alpha = parse_optional_table(
       airframe_node, airframe_path, "fuselage_lift_vs_alpha", "fuselage_lift_vs_alpha");
   airframe.fuselage_pitching_moment_vs_alpha =
-      parse_optional_table(airframe_node, airframe_path, "fuselage_pitching_moment_vs_alpha",
+      parse_optional_table(airframe_node,
+                           airframe_path,
+                           "fuselage_pitching_moment_vs_alpha",
                            "fuselage_pitching_moment_vs_alpha");
   airframe.horizontal_tail_area_m2 =
       optional_scalar(airframe_node, airframe_path, "horizontal_tail_area_m2", 0.0);
@@ -334,11 +368,18 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
   if (!drive_node) {
     throw std::invalid_argument(origin + ": missing required key 'drivetrain'");
   }
-  io::yaml_keys(drive_node, drive_path,
-                {"reference_rotor_speed_rad_s", "tail_gear_ratio", "governor_proportional_n_m_s",
-                 "governor_time_constant_s", "maximum_engine_torque_n_m",
-                 "minimum_engine_torque_n_m", "transmission_efficiency", "accessory_torque_n_m",
-                 "minimum_rotor_speed_rad_s", "maximum_rotor_speed_rad_s"});
+  io::yaml_keys(drive_node,
+                drive_path,
+                {"reference_rotor_speed_rad_s",
+                 "tail_gear_ratio",
+                 "governor_proportional_n_m_s",
+                 "governor_time_constant_s",
+                 "maximum_engine_torque_n_m",
+                 "minimum_engine_torque_n_m",
+                 "transmission_efficiency",
+                 "accessory_torque_n_m",
+                 "minimum_rotor_speed_rad_s",
+                 "maximum_rotor_speed_rad_s"});
   auto& drive = model.drivetrain;
   drive.reference_rotor_speed_rad_s = scalar(drive_node, drive_path, "reference_rotor_speed_rad_s");
   drive.tail_gear_ratio = scalar(drive_node, drive_path, "tail_gear_ratio");
@@ -363,7 +404,8 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
   if (!actuator_node) {
     throw std::invalid_argument(origin + ": missing required key 'actuators'");
   }
-  io::yaml_keys(actuator_node, actuator_path,
+  io::yaml_keys(actuator_node,
+                actuator_path,
                 {"collective", "longitudinal_cyclic", "lateral_cyclic", "pedal"});
   const std::array<const char*, kHelicopterControlCount> actuator_keys{
       "collective", "longitudinal_cyclic", "lateral_cyclic", "pedal"};
@@ -373,8 +415,8 @@ HelicopterModel parse_helicopter(const std::string& bytes, const std::string& or
       throw std::invalid_argument(actuator_path + ": missing required key '"
                                   + actuator_keys[static_cast<std::size_t>(i)] + "'");
     }
-    model.actuators[static_cast<std::size_t>(i)] = parse_actuator(
-        entry, actuator_path + "." + actuator_keys[static_cast<std::size_t>(i)]);
+    model.actuators[static_cast<std::size_t>(i)] =
+        parse_actuator(entry, actuator_path + "." + actuator_keys[static_cast<std::size_t>(i)]);
   }
 
   model.tail_rotor_blockage_factor =

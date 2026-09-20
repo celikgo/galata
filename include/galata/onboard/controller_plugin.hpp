@@ -29,9 +29,11 @@ class ControllerPlugin final {
   ControllerPlugin& operator=(ControllerPlugin&& other) noexcept;
 
   [[nodiscard]] hardware::Frame step(const hardware::Frame& sensor);
+
   [[nodiscard]] const std::filesystem::path& library() const noexcept {
     return library_;
   }
+
   [[nodiscard]] const std::filesystem::path& model() const noexcept {
     return model_;
   }

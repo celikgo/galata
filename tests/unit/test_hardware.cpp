@@ -148,14 +148,11 @@ TEST(HardwareInterface, UdpTransportFixedLocalPortReceivesBeforeFirstActuatorFra
   server_address.sin_family = AF_INET;
   server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   server_address.sin_port = htons(0);
-  ASSERT_EQ(::bind(server,
-                   reinterpret_cast<const sockaddr*>(&server_address),
-                   sizeof(server_address)),
-            0);
+  ASSERT_EQ(
+      ::bind(server, reinterpret_cast<const sockaddr*>(&server_address), sizeof(server_address)),
+      0);
   socklen_t address_length = sizeof(server_address);
-  ASSERT_EQ(::getsockname(server,
-                          reinterpret_cast<sockaddr*>(&server_address),
-                          &address_length),
+  ASSERT_EQ(::getsockname(server, reinterpret_cast<sockaddr*>(&server_address), &address_length),
             0);
 
   const int local_port_probe = ::socket(AF_INET, SOCK_DGRAM, 0);
@@ -169,10 +166,9 @@ TEST(HardwareInterface, UdpTransportFixedLocalPortReceivesBeforeFirstActuatorFra
                    sizeof(local_address)),
             0);
   address_length = sizeof(local_address);
-  ASSERT_EQ(::getsockname(local_port_probe,
-                          reinterpret_cast<sockaddr*>(&local_address),
-                          &address_length),
-            0);
+  ASSERT_EQ(
+      ::getsockname(local_port_probe, reinterpret_cast<sockaddr*>(&local_address), &address_length),
+      0);
   const auto local_port = ntohs(local_address.sin_port);
   ::close(local_port_probe);
 
@@ -234,17 +230,19 @@ TEST(HardwareInterface, CanFdEndpointRequiresAConcreteBoundedSocketCanContract) 
 
   galata::hardware::InterfaceSpec oversized = specification();
   oversized.sensor_channels = {
-      {"sensor_0", "m/s", "body"}, {"sensor_1", "m/s", "body"},
-      {"sensor_2", "m/s", "body"}, {"sensor_3", "m/s", "body"},
-      {"sensor_4", "m/s", "body"}, {"sensor_5", "m/s", "body"},
+      {"sensor_0", "m/s", "body"},
+      {"sensor_1", "m/s", "body"},
+      {"sensor_2", "m/s", "body"},
+      {"sensor_3", "m/s", "body"},
+      {"sensor_4", "m/s", "body"},
+      {"sensor_5", "m/s", "body"},
   };
   galata::hardware::CanFdTransport width_checked(
       {"__galata_missing_can__", 0x120, 0x121, 100, 100});
   EXPECT_THROW(width_checked.connect(oversized), std::invalid_argument);
   EXPECT_EQ(width_checked.state(), galata::hardware::LinkState::Disconnected);
 
-  galata::hardware::CanFdTransport unavailable(
-      {"__galata_missing_can__", 0x120, 0x121, 100, 100});
+  galata::hardware::CanFdTransport unavailable({"__galata_missing_can__", 0x120, 0x121, 100, 100});
   EXPECT_THROW(unavailable.connect(specification()), std::runtime_error);
   EXPECT_EQ(unavailable.state(), galata::hardware::LinkState::Faulted);
 }
@@ -432,8 +430,8 @@ TEST(HardwareInterface, GuardedTransportBlocksOutputUntilArmedAndDisarmsOnDiscon
 TEST(OnboardDeployment, ManifestIsDeterministicAndExplicitlyNotQualified) {
   galata::onboard::DeploymentSpec deployment;
   deployment.target_platform = "example-flight-computer";
-  deployment.target_identity = {"airframe-01", "fcu-example-v1", "firmware-build-001",
-                                "estop-chain-01"};
+  deployment.target_identity = {
+      "airframe-01", "fcu-example-v1", "firmware-build-001", "estop-chain-01"};
   deployment.model_description = "vehicle model sha";
   deployment.controller_description = "controller sha";
   deployment.failsafe_action = "hold last safe command and disarm";
@@ -516,8 +514,8 @@ TEST(OnboardDeployment, StagesOnlyVerifiedArtifactsIntoANewAtomicDirectory) {
 
   galata::onboard::DeploymentSpec deployment;
   deployment.target_platform = "example-flight-computer";
-  deployment.target_identity = {"airframe-01", "fcu-example-v1", "firmware-build-001",
-                                "estop-chain-01"};
+  deployment.target_identity = {
+      "airframe-01", "fcu-example-v1", "firmware-build-001", "estop-chain-01"};
   deployment.model_description = "vehicle model sha";
   deployment.controller_description = "controller sha";
   deployment.failsafe_action = "hold last safe command and disarm";

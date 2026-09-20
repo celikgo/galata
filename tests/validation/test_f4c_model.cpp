@@ -56,8 +56,8 @@ void expect_near_source(double actual,
 
 TEST(F4CModel, PublishedConditionLoadsWithDeclaredUnitsAndAxes) {
   const Aircraft aircraft = f4c();
-  const auto table = galata::testing::load_reference(GALATA_VALIDATION_REFERENCE_DIR,
-                                                     "f4c_power_approach.csv");
+  const auto table =
+      galata::testing::load_reference(GALATA_VALIDATION_REFERENCE_DIR, "f4c_power_approach.csv");
   const auto published = table.as_lookup("quantity", "value");
   EXPECT_NEAR(aircraft.aero.reference_alpha_rad,
               galata::units::degrees_to_radians(source(published, "reference_alpha")),
@@ -66,15 +66,13 @@ TEST(F4CModel, PublishedConditionLoadsWithDeclaredUnitsAndAxes) {
   EXPECT_NEAR(aircraft.geometry.wing_area_m2,
               source(published, "wing_area") * kMetresPerFoot * kMetresPerFoot,
               1.0e-10);
-  EXPECT_NEAR(aircraft.geometry.wing_span_m,
-              source(published, "wing_span") * kMetresPerFoot,
-              1.0e-10);
+  EXPECT_NEAR(
+      aircraft.geometry.wing_span_m, source(published, "wing_span") * kMetresPerFoot, 1.0e-10);
   EXPECT_NEAR(aircraft.geometry.mean_aerodynamic_chord_m,
               source(published, "mean_aerodynamic_chord") * kMetresPerFoot,
               1.0e-10);
-  EXPECT_NEAR(aircraft.mass.mass_kg,
-              source(published, "weight") * kPoundForceToNewton / kGravity,
-              1.0e-8);
+  EXPECT_NEAR(
+      aircraft.mass.mass_kg, source(published, "weight") * kPoundForceToNewton / kGravity, 1.0e-8);
   EXPECT_NEAR(aircraft.mass.inertia_cg_body_kg_m2(0, 0),
               source(published, "inertia_xx") * kSlugToKg * kMetresPerFoot * kMetresPerFoot,
               1.0e-8);
@@ -93,17 +91,13 @@ TEST(F4CModel, PublishedConditionLoadsWithDeclaredUnitsAndAxes) {
   expect_near_source(aircraft.aero.lift_alpha, published, "lift_alpha");
   expect_near_source(aircraft.aero.drag_alpha, published, "drag_alpha");
   expect_near_source(aircraft.aero.pitching_moment_alpha, published, "pitching_moment_alpha");
-  expect_near_source(aircraft.aero.pitching_moment_alpha_dot,
-                     published,
-                     "pitching_moment_alpha_dot");
-  expect_near_source(aircraft.aero.pitching_moment_pitch_rate,
-                     published,
-                     "pitching_moment_pitch_rate");
+  expect_near_source(
+      aircraft.aero.pitching_moment_alpha_dot, published, "pitching_moment_alpha_dot");
+  expect_near_source(
+      aircraft.aero.pitching_moment_pitch_rate, published, "pitching_moment_pitch_rate");
   expect_near_source(aircraft.aero.lift_elevator, published, "lift_elevator");
   expect_near_source(aircraft.aero.drag_elevator, published, "drag_elevator");
-  expect_near_source(aircraft.aero.pitching_moment_elevator,
-                     published,
-                     "pitching_moment_elevator");
+  expect_near_source(aircraft.aero.pitching_moment_elevator, published, "pitching_moment_elevator");
   expect_near_source(aircraft.aero.side_force_beta, published, "side_force_beta");
   expect_near_source(aircraft.aero.side_force_aileron, published, "side_force_aileron");
   expect_near_source(aircraft.aero.side_force_rudder, published, "side_force_rudder");
@@ -125,36 +119,23 @@ TEST(F4CModel, PublishedConditionLoadsWithDeclaredUnitsAndAxes) {
       galata::model::lateral_stability_to_body(source_axes, aircraft.aero.reference_alpha_rad);
   EXPECT_NEAR(aircraft.aero.rolling_moment_beta, expected_body.rolling_moment_beta, 1.0e-11);
   EXPECT_NEAR(aircraft.aero.yawing_moment_beta, expected_body.yawing_moment_beta, 1.0e-11);
-  EXPECT_NEAR(aircraft.aero.rolling_moment_roll_rate,
-              expected_body.rolling_moment_roll_rate,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.yawing_moment_roll_rate,
-              expected_body.yawing_moment_roll_rate,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.rolling_moment_yaw_rate,
-              expected_body.rolling_moment_yaw_rate,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.yawing_moment_yaw_rate,
-              expected_body.yawing_moment_yaw_rate,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.rolling_moment_aileron,
-              expected_body.rolling_moment_aileron,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.yawing_moment_aileron,
-              expected_body.yawing_moment_aileron,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.rolling_moment_rudder,
-              expected_body.rolling_moment_rudder,
-              1.0e-11);
-  EXPECT_NEAR(aircraft.aero.yawing_moment_rudder,
-              expected_body.yawing_moment_rudder,
-              1.0e-12);
+  EXPECT_NEAR(
+      aircraft.aero.rolling_moment_roll_rate, expected_body.rolling_moment_roll_rate, 1.0e-11);
+  EXPECT_NEAR(
+      aircraft.aero.yawing_moment_roll_rate, expected_body.yawing_moment_roll_rate, 1.0e-11);
+  EXPECT_NEAR(
+      aircraft.aero.rolling_moment_yaw_rate, expected_body.rolling_moment_yaw_rate, 1.0e-11);
+  EXPECT_NEAR(aircraft.aero.yawing_moment_yaw_rate, expected_body.yawing_moment_yaw_rate, 1.0e-11);
+  EXPECT_NEAR(aircraft.aero.rolling_moment_aileron, expected_body.rolling_moment_aileron, 1.0e-11);
+  EXPECT_NEAR(aircraft.aero.yawing_moment_aileron, expected_body.yawing_moment_aileron, 1.0e-11);
+  EXPECT_NEAR(aircraft.aero.rolling_moment_rudder, expected_body.rolling_moment_rudder, 1.0e-11);
+  EXPECT_NEAR(aircraft.aero.yawing_moment_rudder, expected_body.yawing_moment_rudder, 1.0e-12);
 }
 
 TEST(F4CModel, NonlinearTrimAndLinearisationAreFiniteAtThePublishedSpeed) {
   const Aircraft aircraft = f4c();
-  const auto table = galata::testing::load_reference(GALATA_VALIDATION_REFERENCE_DIR,
-                                                     "f4c_power_approach.csv");
+  const auto table =
+      galata::testing::load_reference(GALATA_VALIDATION_REFERENCE_DIR, "f4c_power_approach.csv");
   const auto published = table.as_lookup("quantity", "value");
   const auto trim = trim_f4c(aircraft);
 

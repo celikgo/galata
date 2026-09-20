@@ -21,8 +21,7 @@ using galata::model::Aircraft;
 using galata::trim::LevelTrimRequest;
 
 Aircraft gtm() {
-  return galata::model::load_aircraft(std::string(GALATA_MODELS_DIR)
-                                      + "/gtm/gtm-t2-nominal.yaml");
+  return galata::model::load_aircraft(std::string(GALATA_MODELS_DIR) + "/gtm/gtm-t2-nominal.yaml");
 }
 
 }  // namespace
@@ -32,9 +31,7 @@ TEST(GtmModel, NASAReferenceSliceLoadsWithItsDeclaredGeometryAndMass) {
   EXPECT_NEAR(aircraft.geometry.wing_area_m2, 0.548295161472, 1.0e-12);
   EXPECT_NEAR(aircraft.geometry.wing_span_m, 2.08751424, 1.0e-12);
   EXPECT_NEAR(aircraft.mass.mass_kg, 26.1949593675, 1.0e-10);
-  EXPECT_NEAR(aircraft.aero.reference_alpha_rad,
-              galata::units::degrees_to_radians(4.0),
-              1.0e-12);
+  EXPECT_NEAR(aircraft.aero.reference_alpha_rad, galata::units::degrees_to_radians(4.0), 1.0e-12);
   EXPECT_GT(aircraft.aero.lift_alpha, 0.0);
   EXPECT_NE(aircraft.aero.pitching_moment_elevator, 0.0);
 }
@@ -79,7 +76,7 @@ TEST(GtmModel, DerivedCoefficientsMatchTheCommittedSourceBoundary) {
 TEST(GtmModel, NominalSliceTrimsAndReportsFiniteDynamics) {
   const Aircraft aircraft = gtm();
   LevelTrimRequest request;
-  request.altitude_m = 243.84;  // NASA setup: 800 ft.
+  request.altitude_m = 243.84;                       // NASA setup: 800 ft.
   request.airspeed_m_s = 75.0 * 0.5144444444444444;  // NASA setup: 75 kt.
   request.flight_path_angle_rad = 0.0;
   request.residual_tolerance = 1.0e-10;

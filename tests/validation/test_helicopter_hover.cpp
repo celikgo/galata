@@ -28,7 +28,6 @@
 #include "galata/trim/problem.hpp"
 
 #include "validation_config.hpp"
-
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -37,12 +36,12 @@
 
 namespace {
 
-using galata::core::State;
 using galata::core::identity_attitude;
+using galata::core::State;
 using galata::model::Environment;
 using galata::model::HelicopterModel;
-using galata::model::VehicleModel;
 using galata::model::load_helicopter;
+using galata::model::VehicleModel;
 using galata::trim::helicopter_trim_problem;
 using galata::trim::solve_trim;
 
@@ -102,24 +101,22 @@ constexpr double kPackageHoverDownload = 1.04;
 TEST(SouxmarHelicopterHover, InducedVelocityMatchesMomentumTheoryExactly) {
   const auto heli = souxmar();
   const auto environment = Environment::sea_level_still_air();
-  const auto trimmed = solve_trim(heli, helicopter_trim_problem(heli),
-                                  [&] {
-                                    galata::trim::TrimCondition condition;
-                                    condition.environment = environment;
-                                    condition.controls =
-                                        Eigen::VectorXd::Zero(heli.control_count());
-                                    State state;
-                                    state.attitude_body_to_ned = identity_attitude();
-                                    condition.extended_state = heli.join(
-                                        state, heli.initial_auxiliary(condition.controls,
-                                                                      environment));
-                                    return condition;
-                                  }());
+  const auto trimmed = solve_trim(heli, helicopter_trim_problem(heli), [&] {
+    galata::trim::TrimCondition condition;
+    condition.environment = environment;
+    condition.controls = Eigen::VectorXd::Zero(heli.control_count());
+    State state;
+    state.attitude_body_to_ned = identity_attitude();
+    condition.extended_state =
+        heli.join(state, heli.initial_auxiliary(condition.controls, environment));
+    return condition;
+  }());
   ASSERT_TRUE(trimmed.converged);
 
   const auto parts = heli.breakdown(VehicleModel::rigid_body_part(trimmed.extended_state),
                                     heli.auxiliary_part(trimmed.extended_state),
-                                    trimmed.controls, environment);
+                                    trimmed.controls,
+                                    environment);
 
   // v_h = sqrt(T / (2 rho A)), evaluated independently of the solver's own
   // iteration. The two agreeing says the fixed-point converged to the momentum
@@ -149,7 +146,8 @@ TEST(SouxmarHelicopterHover, MainRotorThrustCarriesTheWeight) {
   ASSERT_TRUE(trimmed.converged);
   const auto parts = heli.breakdown(VehicleModel::rigid_body_part(trimmed.extended_state),
                                     heli.auxiliary_part(trimmed.extended_state),
-                                    trimmed.controls, environment);
+                                    trimmed.controls,
+                                    environment);
 
   const double weight = heli.mass.mass_kg * kStandardGravity;
   // Not exactly the weight: the thrust vector is tilted by the shaft's 3 degrees
@@ -173,7 +171,8 @@ TEST(SouxmarHelicopterHover, TheAntiTorqueBalancesAndTheYawResidualVanishes) {
   ASSERT_TRUE(trimmed.converged);
   const auto parts = heli.breakdown(VehicleModel::rigid_body_part(trimmed.extended_state),
                                     heli.auxiliary_part(trimmed.extended_state),
-                                    trimmed.controls, environment);
+                                    trimmed.controls,
+                                    environment);
 
   // The residual vanishing IS the balance, and it is what the sixth trim
   // residual asked for.
@@ -213,10 +212,12 @@ TEST(SouxmarHelicopterHover, ThrustCoefficientAgreesWithTheDesignPackagesOwnComp
     rotor_state.speed_rad_s = heli.drivetrain.reference_rotor_speed_rad_s;
     galata::model::rotor::RotorControls controls;
     controls.collective_rad = mid;
-    const auto solution =
-        galata::model::rotor::solve_rotor(heli.main_rotor, rotor_state, controls,
-                                          Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-                                          environment.density_kg_m3);
+    const auto solution = galata::model::rotor::solve_rotor(heli.main_rotor,
+                                                            rotor_state,
+                                                            controls,
+                                                            Eigen::Vector3d::Zero(),
+                                                            Eigen::Vector3d::Zero(),
+                                                            environment.density_kg_m3);
     (solution.thrust_n < target_thrust ? low : high) = mid;
   }
 
@@ -224,10 +225,12 @@ TEST(SouxmarHelicopterHover, ThrustCoefficientAgreesWithTheDesignPackagesOwnComp
   rotor_state.speed_rad_s = heli.drivetrain.reference_rotor_speed_rad_s;
   galata::model::rotor::RotorControls controls;
   controls.collective_rad = 0.5 * (low + high);
-  const auto solution =
-      galata::model::rotor::solve_rotor(heli.main_rotor, rotor_state, controls,
-                                        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-                                        environment.density_kg_m3);
+  const auto solution = galata::model::rotor::solve_rotor(heli.main_rotor,
+                                                          rotor_state,
+                                                          controls,
+                                                          Eigen::Vector3d::Zero(),
+                                                          Eigen::Vector3d::Zero(),
+                                                          environment.density_kg_m3);
 
   const double relative =
       std::fabs(solution.thrust_coefficient_solidity - kPackageMainCtSigma) / kPackageMainCtSigma;

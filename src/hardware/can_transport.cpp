@@ -149,6 +149,10 @@ void CanFdTransport::connect(const InterfaceSpec& specification) {
   validate_can_fd_width(specification);
 
 #ifdef __linux__
+  // A valid contract followed by an OS/link failure is a faulted transport,
+  // not a cleanly disconnected one. Callers must explicitly disconnect before
+  // retrying, and GuardedTransport must disarm on the failed connection.
+  state_ = LinkState::Faulted;
   const unsigned int interface_index = ::if_nametoindex(endpoint_.interface_name.c_str());
   if (interface_index == 0) {
     throw_can_error("find interface");

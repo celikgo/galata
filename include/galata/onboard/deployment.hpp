@@ -97,8 +97,7 @@ void verify_manifest_package(const DeploymentPackage& package);
 
 // Re-check a previously staged runtime package before an operator starts it.
 // The returned receipt is still non-qualified even when every byte verifies.
-[[nodiscard]] DeploymentReceipt verify_runtime_package(
-    const std::filesystem::path& destination);
+[[nodiscard]] DeploymentReceipt verify_runtime_package(const std::filesystem::path& destination);
 
 }  // namespace galata::onboard
 

@@ -62,15 +62,19 @@ class DeterministicSensor {
   [[nodiscard]] const SensorConfiguration& configuration() const noexcept {
     return configuration_;
   }
+
   [[nodiscard]] int sample_steps() const noexcept {
     return sample_steps_;
   }
+
   [[nodiscard]] int latency_samples() const noexcept {
     return latency_samples_;
   }
+
   [[nodiscard]] const SensorReading& latest() const noexcept {
     return latest_;
   }
+
   [[nodiscard]] std::vector<std::string> stream_ids() const;
 
  private:

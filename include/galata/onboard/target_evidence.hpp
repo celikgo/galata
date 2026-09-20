@@ -63,8 +63,7 @@ struct TargetEvidencePackage {
 
 // Parse and self-check the deterministic target-evidence manifest.  This does
 // not read evidence files or decide whether a test was representative.
-[[nodiscard]] TargetEvidencePackage parse_target_evidence_package(
-    const std::string& manifest);
+[[nodiscard]] TargetEvidencePackage parse_target_evidence_package(const std::string& manifest);
 
 // Assemble a new atomic target-evidence package from externally produced
 // records. target_hil and flight_target require every pass flag from the

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Native macOS feasibility preview. Numerical work and durable project writes
 // belong to the shared CLI; this process only edits drafts and presents evidence.
+#include "galata/build_config.hpp"
+
 #include "accessible_views.hpp"
 #include "connection_editing.hpp"
 #include "diagram_editing.hpp"
 #include "diagram_routing.hpp"
 #include "dim_theme.hpp"
-#include "galata/build_config.hpp"
 #import <AppKit/AppKit.h>
 #import <CommonCrypto/CommonDigest.h>
 
@@ -1853,29 +1854,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
     @"Original Study…"
   ];
   NSArray* keys = @[
-    @"n",
-    @"o",
-    @"i",
-    @"t",
-    @"s",
-    @"r",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"",
-    @"h",
-    @""
+    @"n", @"o", @"i", @"t", @"s", @"r", @"", @"", @"", @"",  @"", @"",
+    @"",  @"",  @"",  @"",  @"",  @"",  @"", @"", @"", @"h", @""
   ];
   NSArray* actions = @[
     @"newProject:",
@@ -2252,19 +2232,19 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 - (NSString*)recoverySnapshotPathForProject:(NSString*)project {
   if (!project.length)
     return nil;
-  NSArray* directories = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
-                                                              NSUserDomainMask, YES);
+  NSArray* directories =
+      NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
   if (!directories.count)
     return nil;
   NSString* directory = [[directories.firstObject stringByAppendingPathComponent:@"Galata Preview"]
       stringByAppendingPathComponent:@"Recovery"];
   [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:nil];
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   NSString* normalized = project.stringByStandardizingPath;
-  return [directory stringByAppendingPathComponent:
-                       [NSString stringWithFormat:@"%@.json", SHA256Hex(normalized)]];
+  return [directory
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.json", SHA256Hex(normalized)]];
 }
 
 - (void)scheduleRecoverySnapshot {
@@ -2298,10 +2278,11 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   if (self.propertyDirty)
     snapshot[@"pending_properties"] = self.properties.string ? self.properties.string : @"";
   if (self.simulationDirty)
-    snapshot[@"pending_simulation"] = self.simulationEditor.string ? self.simulationEditor.string : @"";
+    snapshot[@"pending_simulation"] =
+        self.simulationEditor.string ? self.simulationEditor.string : @"";
   NSData* data = [NSJSONSerialization dataWithJSONObject:snapshot
-                                                  options:NSJSONWritingPrettyPrinted
-                                                    error:nil];
+                                                 options:NSJSONWritingPrettyPrinted
+                                                   error:nil];
   // Keep recovery bounded to one small local draft and never let a malformed or
   // unexpectedly large editor buffer turn recovery into an unbounded cache.
   if (!data || data.length > 8 * 1024 * 1024)
@@ -2320,20 +2301,19 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   if (!path)
     return;
   NSData* data = [NSData dataWithContentsOfFile:path options:0 error:nil];
-  NSDictionary* snapshot = data
-                               ? [NSJSONSerialization JSONObjectWithData:data
-                                                                  options:NSJSONReadingMutableContainers
-                                                                    error:nil]
-                               : nil;
+  NSDictionary* snapshot =
+      data ? [NSJSONSerialization JSONObjectWithData:data
+                                             options:NSJSONReadingMutableContainers
+                                               error:nil]
+           : nil;
   NSString* normalized = project.stringByStandardizingPath;
-  NSDictionary* recoveredDraft = [snapshot isKindOfClass:[NSDictionary class]]
-                                     ? snapshot[@"draft"]
-                                     : nil;
-  BOOL valid = [snapshot isKindOfClass:[NSDictionary class]]
-               && [snapshot[@"schema"] isEqual:@"galata.desktop-recovery.v1"]
-               && [snapshot[@"project"] isEqual:normalized]
-               && [snapshot[@"base_revision"] isEqual:self.revision]
-               && [recoveredDraft isKindOfClass:[NSDictionary class]];
+  NSDictionary* recoveredDraft =
+      [snapshot isKindOfClass:[NSDictionary class]] ? snapshot[@"draft"] : nil;
+  BOOL valid = [snapshot isKindOfClass:[NSDictionary class]] &&
+               [snapshot[@"schema"] isEqual:@"galata.desktop-recovery.v1"] &&
+               [snapshot[@"project"] isEqual:normalized] &&
+               [snapshot[@"base_revision"] isEqual:self.revision] &&
+               [recoveredDraft isKindOfClass:[NSDictionary class]];
   if (!valid) {
     // A snapshot based on another saved revision cannot be merged safely. The
     // saved project remains authoritative, so retire the stale local journal.
@@ -3608,7 +3588,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
         NSString* details =
             [NSString stringWithFormat:
                           @"Manifest: %@\nSHA-256: %@\nAircraft: %@\nConfiguration: %@\nTest plan: "
-                          @"%@\nEvidence class: %@\nReviewer: %@\nFiles: %@ (%@ bytes)\nRoles: %@\n\nControlled "
+                          @"%@\nEvidence class: %@\nReviewer: %@\nFiles: %@ (%@ bytes)\nRoles: "
+                          @"%@\n\nControlled "
                           @"file identities and package completeness are verified. This remains "
                           @"not_qualified and makes no airworthiness or certification claim.",
                           manifest,
@@ -3649,8 +3630,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 
   NSOpenPanel* studyChooser = [NSOpenPanel openPanel];
   studyChooser.title = @"Choose Flight-Test Validation Study";
-  studyChooser.message =
-      @"Choose a Galata study containing identify.validate.vehicle and a campaign_manifest binding.";
+  studyChooser.message = @"Choose a Galata study containing identify.validate.vehicle and a "
+                         @"campaign_manifest binding.";
   studyChooser.canChooseFiles = YES;
   studyChooser.canChooseDirectories = NO;
   studyChooser.allowsMultipleSelection = NO;
@@ -3659,8 +3640,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 
   NSSavePanel* outputChooser = [NSSavePanel savePanel];
   outputChooser.title = @"Choose Validation Output Directory";
-  outputChooser.message =
-      @"Choose a new or empty directory. The run manifest, report and validation receipt are written here.";
+  outputChooser.message = @"Choose a new or empty directory. The run manifest, report and "
+                          @"validation receipt are written here.";
   outputChooser.nameFieldStringValue =
       [studyChooser.URL.path.lastPathComponent.stringByDeletingPathExtension
           stringByAppendingString:@"-flight-validation"];
@@ -3671,14 +3652,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   NSString* campaign = campaignChooser.URL.path;
   NSString* study = studyChooser.URL.path;
   NSString* output = outputChooser.URL.path;
-  [self command:@[
-    @"flighttest",
-    @"validate",
-    campaign,
-    study,
-    @"--output-dir",
-    output
-  ]
+  [self command:@[@"flighttest", @"validate", campaign, study, @"--output-dir", output]
       completion:^(NSDictionary* result, NSString* error) {
         if (![result[@"schema"] isEqual:@"galata.flight-test-validation-receipt.v1"]
             || ![result[@"receipt"] isKindOfClass:[NSString class]]) {
@@ -3706,9 +3680,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
                                 ? @"Flight-test validation receipt created"
                                 : @"Flight-test validation is not ready";
         alert.informativeText = details;
-        alert.alertStyle = [status isEqual:@"gate_passed"]
-                               ? NSAlertStyleInformational
-                               : NSAlertStyleWarning;
+        alert.alertStyle =
+            [status isEqual:@"gate_passed"] ? NSAlertStyleInformational : NSAlertStyleWarning;
         [alert addButtonWithTitle:@"Open Receipt Folder"];
         [alert addButtonWithTitle:@"Close"];
         if ([alert runModal] == NSAlertFirstButtonReturn)
@@ -3811,8 +3784,7 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
 
   NSOpenPanel* deploymentChooser = [NSOpenPanel openPanel];
   deploymentChooser.title = @"Choose Onboard Deployment Manifest";
-  deploymentChooser.message =
-      @"Choose the exact deployment manifest bound to the target evidence.";
+  deploymentChooser.message = @"Choose the exact deployment manifest bound to the target evidence.";
   deploymentChooser.canChooseFiles = YES;
   deploymentChooser.canChooseDirectories = NO;
   deploymentChooser.allowsMultipleSelection = NO;
@@ -3875,16 +3847,17 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
                 ? result[@"qualification_eligibility"]
                 : @"not_ready";
         NSString* reasons = eligibilityReasons.count
-                                 ? [eligibilityReasons componentsJoinedByString:@"; "]
-                                 : @"none reported";
+                                ? [eligibilityReasons componentsJoinedByString:@"; "]
+                                : @"none reported";
         NSString* details = [NSString
             stringWithFormat:
                 @"Dossier: %@\nFlight-test manifest SHA-256: %@\nValidation receipt SHA-256: %@\n"
-                 "Target-evidence manifest SHA-256: %@\nDeployment manifest SHA-256: %@\nRuntime SHA-256: %@\nAircraft: %@\nConfiguration: "
-                 @"%@\nQualification eligibility: %@\nEligibility reasons: %@\n\nThe dossier, "
-                 @"complete flight campaign, target evidence and deployment binding are "
-                 @"traceability-verified. The chain remains not_qualified and makes no "
-                 @"airworthiness or certification claim.",
+                 "Target-evidence manifest SHA-256: %@\nDeployment manifest SHA-256: %@\nRuntime "
+                 "SHA-256: %@\nAircraft: %@\nConfiguration: "
+                @"%@\nQualification eligibility: %@\nEligibility reasons: %@\n\nThe dossier, "
+                @"complete flight campaign, target evidence and deployment binding are "
+                @"traceability-verified. The chain remains not_qualified and makes no "
+                @"airworthiness or certification claim.",
                 dossierChooser.URL.path,
                 result[@"flight_test_manifest_sha256"],
                 result[@"flight_validation_receipt_sha256"],
@@ -4235,14 +4208,14 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   if (!watchdogResponse)
     return;
   NSString* evidenceClass = [self promptText:@"Evidence Class"
-                                      message:@"Enter host_sil for host replay/SIL, target_hil for "
-                                              @"the intended flight computer in HIL, or "
-                                              @"flight_target for the installed target."
-                                  placeholder:@"target_hil"];
+                                     message:@"Enter host_sil for host replay/SIL, target_hil for "
+                                             @"the intended flight computer in HIL, or "
+                                             @"flight_target for the installed target."
+                                 placeholder:@"target_hil"];
   if (!evidenceClass)
     return;
-  const BOOL physicalTestsApplicable = [evidenceClass isEqual:@"target_hil"]
-                                      || [evidenceClass isEqual:@"flight_target"];
+  const BOOL physicalTestsApplicable =
+      [evidenceClass isEqual:@"target_hil"] || [evidenceClass isEqual:@"flight_target"];
   if (![evidenceClass isEqual:@"host_sil"] && !physicalTestsApplicable) {
     [self problem:@"Evidence class must be host_sil, target_hil or flight_target."];
     return;
@@ -4268,21 +4241,20 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
     @"signing_record",
     @"target_configuration"
   ];
-  NSMutableArray* arguments = [NSMutableArray arrayWithObjects:
-      @"onboard",
-      @"target",
-      @"create",
-      @"",
-      deploymentChooser.URL.path,
-      @"--evidence-class",
-      evidenceClass,
-      @"--controller-worst-case-s",
-      controllerWorstCase,
-      @"--cycle-worst-case-s",
-      cycleWorstCase,
-      @"--watchdog-response-s",
-      watchdogResponse,
-      nil];
+  NSMutableArray* arguments = [NSMutableArray arrayWithObjects:@"onboard",
+                                                               @"target",
+                                                               @"create",
+                                                               @"",
+                                                               deploymentChooser.URL.path,
+                                                               @"--evidence-class",
+                                                               evidenceClass,
+                                                               @"--controller-worst-case-s",
+                                                               controllerWorstCase,
+                                                               @"--cycle-worst-case-s",
+                                                               cycleWorstCase,
+                                                               @"--watchdog-response-s",
+                                                               watchdogResponse,
+                                                               nil];
   if (physicalTestsApplicable) {
     [arguments addObjectsFromArray:@[
       @"--emergency-stop-passed",
@@ -4330,7 +4302,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
         NSString* details = [NSString
             stringWithFormat:
                 @"Directory: %@\nManifest: %@\nManifest SHA-256: %@\nEvidence files: %@\n"
-                @"Evidence class: %@\nBytes: %@\n\nThe records were copied, hashed and contract-checked. This "
+                @"Evidence class: %@\nBytes: %@\n\nThe records were copied, hashed and "
+                @"contract-checked. This "
                 @"package remains not_qualified; it does not create or certify the underlying "
                 @"hardware results.",
                 result[@"destination"],
@@ -4386,7 +4359,8 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
         NSString* details = [NSString
             stringWithFormat:
                 @"Target: %@\nFlight computer: %@\nFirmware: %@\nController worst case: %@ s\n"
-                @"Cycle worst case: %@ s\nWatchdog response: %@ s\nEvidence class: %@\nEvidence files: %@\n\n"
+                @"Cycle worst case: %@ s\nWatchdog response: %@ s\nEvidence class: %@\nEvidence "
+                @"files: %@\n\n"
                 @"The supplied records are byte-verified and bound to the deployment contract. "
                 @"The package remains not_qualified and does not establish certification or "
                 @"airworthiness.",
@@ -4540,10 +4514,10 @@ static NSTextView* TextEditor(NSView* parent, NSRect frame, BOOL editable) {
   if (!configuration)
     return;
   NSString* evidenceClass = [self promptText:@"Evidence Class"
-                                      message:@"Enter measured_flight for controlled aircraft data, "
-                                              @"public_deidentified for public data, or "
-                                              @"synthetic_contract for software-only data."
-                                  placeholder:@"measured_flight"];
+                                     message:@"Enter measured_flight for controlled aircraft data, "
+                                             @"public_deidentified for public data, or "
+                                             @"synthetic_contract for software-only data."
+                                 placeholder:@"measured_flight"];
   if (!evidenceClass)
     return;
   NSString* testPlan = [self promptText:@"Test Plan Identifier"

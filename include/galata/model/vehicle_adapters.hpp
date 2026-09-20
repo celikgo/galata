@@ -20,13 +20,23 @@ class FixedWingVehicleModel final : public VehicleModel {
  public:
   explicit FixedWingVehicleModel(Aircraft aircraft) : aircraft_(std::move(aircraft)) {}
 
-  [[nodiscard]] const Aircraft& source_model() const noexcept { return aircraft_; }
-  [[nodiscard]] Aircraft& source_model() noexcept { return aircraft_; }
+  [[nodiscard]] const Aircraft& source_model() const noexcept {
+    return aircraft_;
+  }
+
+  [[nodiscard]] Aircraft& source_model() noexcept {
+    return aircraft_;
+  }
+
   [[nodiscard]] std::string description() const override;
   [[nodiscard]] std::vector<std::string> state_names() const override;
   [[nodiscard]] std::vector<std::string> control_names() const override;
   [[nodiscard]] std::vector<std::string> output_names() const override;
-  [[nodiscard]] int auxiliary_state_count() const override { return 0; }
+
+  [[nodiscard]] int auxiliary_state_count() const override {
+    return 0;
+  }
+
   [[nodiscard]] sim::MassProperties mass_properties(const Eigen::VectorXd&) const override;
   [[nodiscard]] sim::Wrench wrench(const core::State& state,
                                    const Eigen::VectorXd& auxiliary,
@@ -50,14 +60,21 @@ class MultirotorVehicleModel final : public VehicleModel {
  public:
   explicit MultirotorVehicleModel(Quadrotor quadrotor) : quadrotor_(std::move(quadrotor)) {}
 
-  [[nodiscard]] const Quadrotor& source_model() const noexcept { return quadrotor_; }
-  [[nodiscard]] Quadrotor& source_model() noexcept { return quadrotor_; }
+  [[nodiscard]] const Quadrotor& source_model() const noexcept {
+    return quadrotor_;
+  }
+
+  [[nodiscard]] Quadrotor& source_model() noexcept {
+    return quadrotor_;
+  }
+
   [[nodiscard]] std::string description() const override;
   [[nodiscard]] std::vector<std::string> state_names() const override;
   [[nodiscard]] std::vector<std::string> control_names() const override;
   [[nodiscard]] std::vector<std::string> output_names() const override;
   [[nodiscard]] int auxiliary_state_count() const override;
-  [[nodiscard]] sim::MassProperties mass_properties(const Eigen::VectorXd& auxiliary) const override;
+  [[nodiscard]] sim::MassProperties mass_properties(
+      const Eigen::VectorXd& auxiliary) const override;
   [[nodiscard]] sim::Wrench wrench(const core::State& state,
                                    const Eigen::VectorXd& auxiliary,
                                    const Eigen::VectorXd& controls,
@@ -85,48 +102,68 @@ class HelicopterVehicleAdapter final : public VehicleModel {
   explicit HelicopterVehicleAdapter(HelicopterModel helicopter)
       : helicopter_(std::move(helicopter)) {}
 
-  [[nodiscard]] const HelicopterModel& source_model() const noexcept { return helicopter_; }
-  [[nodiscard]] HelicopterModel& source_model() noexcept { return helicopter_; }
-  [[nodiscard]] std::string description() const override { return helicopter_.description(); }
+  [[nodiscard]] const HelicopterModel& source_model() const noexcept {
+    return helicopter_;
+  }
+
+  [[nodiscard]] HelicopterModel& source_model() noexcept {
+    return helicopter_;
+  }
+
+  [[nodiscard]] std::string description() const override {
+    return helicopter_.description();
+  }
+
   [[nodiscard]] std::vector<std::string> state_names() const override {
     return helicopter_.state_names();
   }
+
   [[nodiscard]] std::vector<std::string> control_names() const override {
     return helicopter_.control_names();
   }
+
   [[nodiscard]] std::vector<std::string> output_names() const override {
     return helicopter_.output_names();
   }
+
   [[nodiscard]] int auxiliary_state_count() const override {
     return helicopter_.auxiliary_state_count();
   }
-  [[nodiscard]] sim::MassProperties mass_properties(const Eigen::VectorXd& auxiliary) const override {
+
+  [[nodiscard]] sim::MassProperties mass_properties(
+      const Eigen::VectorXd& auxiliary) const override {
     return helicopter_.mass_properties(auxiliary);
   }
+
   [[nodiscard]] sim::Wrench wrench(const core::State& state,
                                    const Eigen::VectorXd& auxiliary,
                                    const Eigen::VectorXd& controls,
                                    const Environment& environment) const override {
     return helicopter_.wrench(state, auxiliary, controls, environment);
   }
-  [[nodiscard]] Eigen::VectorXd auxiliary_derivative(const core::State& state,
-                                                     const Eigen::VectorXd& auxiliary,
-                                                     const Eigen::VectorXd& controls,
-                                                     const Environment& environment) const override {
+
+  [[nodiscard]] Eigen::VectorXd auxiliary_derivative(
+      const core::State& state,
+      const Eigen::VectorXd& auxiliary,
+      const Eigen::VectorXd& controls,
+      const Environment& environment) const override {
     return helicopter_.auxiliary_derivative(state, auxiliary, controls, environment);
   }
+
   [[nodiscard]] EnvelopeStatus envelope(const core::State& state,
                                         const Eigen::VectorXd& auxiliary,
                                         const Eigen::VectorXd& controls,
                                         const Environment& environment) const override {
     return helicopter_.envelope(state, auxiliary, controls, environment);
   }
+
   [[nodiscard]] Eigen::VectorXd outputs(const core::State& state,
-                                         const Eigen::VectorXd& auxiliary,
-                                         const Eigen::VectorXd& controls,
-                                         const Environment& environment) const override {
+                                        const Eigen::VectorXd& auxiliary,
+                                        const Eigen::VectorXd& controls,
+                                        const Environment& environment) const override {
     return helicopter_.outputs(state, auxiliary, controls, environment);
   }
+
   [[nodiscard]] std::vector<ChannelMetadata> control_metadata() const override;
   [[nodiscard]] std::vector<std::string> supported_operations() const override;
 

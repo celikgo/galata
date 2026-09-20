@@ -19,20 +19,20 @@
 #include <numbers>
 #include <stdexcept>
 
+using galata::model::rotor::hover_induced_velocity_m_s;
+using galata::model::rotor::main_rotor_hub;
 using galata::model::rotor::RotorControls;
 using galata::model::rotor::RotorGeometry;
 using galata::model::rotor::RotorSolution;
 using galata::model::rotor::RotorState;
-using galata::model::rotor::hover_induced_velocity_m_s;
-using galata::model::rotor::main_rotor_hub;
 using galata::model::rotor::solve_rotor;
 using galata::model::rotor::tail_rotor_hub;
 
 namespace {
 
-constexpr double kSeaLevelDensity = 1.225;      // kg/m^3
-constexpr double kMainTipSpeed = 195.0;         // m/s
-constexpr double kMainRadius = 6.0;             // m
+constexpr double kSeaLevelDensity = 1.225;                  // kg/m^3
+constexpr double kMainTipSpeed = 195.0;                     // m/s
+constexpr double kMainRadius = 6.0;                         // m
 constexpr double kMainOmega = kMainTipSpeed / kMainRadius;  // 32.5 rad/s
 
 // Souxmar main rotor. Chord follows from the design's declared solidity of
@@ -100,9 +100,8 @@ double collective_for_thrust(const RotorGeometry& g, double target_n, double ome
     state.speed_rad_s = omega;
     RotorControls controls;
     controls.collective_rad = mid;
-    const auto s =
-        solve_rotor(g, state, controls, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-                    kSeaLevelDensity);
+    const auto s = solve_rotor(
+        g, state, controls, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), kSeaLevelDensity);
     (s.thrust_n < target_n ? low : high) = mid;
   }
   return 0.5 * (low + high);
@@ -160,8 +159,8 @@ TEST(Rotor, TailRotorGeneratesBodyYSideForceAndAYawMoment) {
   EXPECT_LT(s.wrench.moment_cg_body_n_m.z(), 0.0);
   // And the moment is the force times the arm, to the sign of the shaft torque.
   const double expected_yaw = -6.7 * s.wrench.force_body_n.y();
-  EXPECT_NEAR(s.wrench.moment_cg_body_n_m.z() - expected_yaw, 0.0,
-              0.05 * std::fabs(expected_yaw) + 50.0);
+  EXPECT_NEAR(
+      s.wrench.moment_cg_body_n_m.z() - expected_yaw, 0.0, 0.05 * std::fabs(expected_yaw) + 50.0);
 }
 
 TEST(Rotor, TailRotorCanBeMountedToPushEitherWay) {
@@ -250,12 +249,14 @@ TEST(Rotor, TheInflowFixedPointSatisfiesTheMomentumRelation) {
   const auto g = souxmar_main();
   // Checked in hover and in forward flight, because the Glauert relation has a
   // different character in each.
-  for (const auto& velocity : {Eigen::Vector3d(0.0, 0.0, 0.0), Eigen::Vector3d(30.0, 0.0, 0.0),
+  for (const auto& velocity : {Eigen::Vector3d(0.0, 0.0, 0.0),
+                               Eigen::Vector3d(30.0, 0.0, 0.0),
                                Eigen::Vector3d(50.0, 0.0, -3.0)}) {
     const auto s = solve_at(g, 0.20, velocity);
     const double lambda = s.axial_inflow_ratio + s.induced_inflow_ratio;
     const double momentum =
-        s.thrust_coefficient / (2.0 * std::sqrt(s.advance_ratio * s.advance_ratio + lambda * lambda));
+        s.thrust_coefficient
+        / (2.0 * std::sqrt(s.advance_ratio * s.advance_ratio + lambda * lambda));
     EXPECT_NEAR(s.induced_inflow_ratio, momentum, 1.0e-4 * std::fabs(momentum) + 1e-9)
         << "at V = " << velocity.transpose();
   }
@@ -411,10 +412,10 @@ TEST(Rotor, DynamicInflowLagMakesTheInflowStateDriveTheThrust) {
 
   RotorControls controls;
   controls.collective_rad = 0.20;
-  const auto a = solve_rotor(g, low, controls, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
-                             kSeaLevelDensity);
-  const auto b = solve_rotor(g, settled, controls, Eigen::Vector3d::Zero(),
-                             Eigen::Vector3d::Zero(), kSeaLevelDensity);
+  const auto a = solve_rotor(
+      g, low, controls, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), kSeaLevelDensity);
+  const auto b = solve_rotor(
+      g, settled, controls, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(), kSeaLevelDensity);
 
   // Less inflow means more thrust: the collective-step overshoot a lag exists
   // to represent. If the state did not drive thrust these would be equal, and

@@ -39,9 +39,8 @@ struct VehicleExecutionResult {
 // held.  Controller callbacks are intentionally evaluated at every RK stage;
 // sampled control belongs to run_sampled_loop, whose timing contract is
 // separate and explicit.
-[[nodiscard]] VehicleExecutionResult execute_vehicle(
-    const model::VehicleModel& model,
-    const VehicleExecutionOptions& options);
+[[nodiscard]] VehicleExecutionResult execute_vehicle(const model::VehicleModel& model,
+                                                     const VehicleExecutionOptions& options);
 
 }  // namespace galata::sim
 

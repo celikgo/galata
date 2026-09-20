@@ -137,12 +137,24 @@ void TrimProblem::validate(const model::VehicleModel& model) const {
   for (const auto& residual : residuals) {
     std::string key;
     switch (residual.kind) {
-      case TrimResidualKind::BodyForceX: key = "force_x"; break;
-      case TrimResidualKind::BodyForceY: key = "force_y"; break;
-      case TrimResidualKind::BodyForceZ: key = "force_z"; break;
-      case TrimResidualKind::BodyMomentX: key = "moment_x"; break;
-      case TrimResidualKind::BodyMomentY: key = "moment_y"; break;
-      case TrimResidualKind::BodyMomentZ: key = "moment_z"; break;
+      case TrimResidualKind::BodyForceX:
+        key = "force_x";
+        break;
+      case TrimResidualKind::BodyForceY:
+        key = "force_y";
+        break;
+      case TrimResidualKind::BodyForceZ:
+        key = "force_z";
+        break;
+      case TrimResidualKind::BodyMomentX:
+        key = "moment_x";
+        break;
+      case TrimResidualKind::BodyMomentY:
+        key = "moment_y";
+        break;
+      case TrimResidualKind::BodyMomentZ:
+        key = "moment_z";
+        break;
       case TrimResidualKind::AuxiliaryRate:
         key = "aux:" + residual.name;
         (void)resolve(model, residual.name);
@@ -230,12 +242,24 @@ Eigen::VectorXd evaluate_residual(const model::VehicleModel& model,
     const auto& declaration = problem.residuals[i];
     double value = 0.0;
     switch (declaration.kind) {
-      case TrimResidualKind::BodyForceX: value = rate(core::kVelocityU); break;
-      case TrimResidualKind::BodyForceY: value = rate(core::kVelocityV); break;
-      case TrimResidualKind::BodyForceZ: value = rate(core::kVelocityW); break;
-      case TrimResidualKind::BodyMomentX: value = rate(core::kRateP); break;
-      case TrimResidualKind::BodyMomentY: value = rate(core::kRateQ); break;
-      case TrimResidualKind::BodyMomentZ: value = rate(core::kRateR); break;
+      case TrimResidualKind::BodyForceX:
+        value = rate(core::kVelocityU);
+        break;
+      case TrimResidualKind::BodyForceY:
+        value = rate(core::kVelocityV);
+        break;
+      case TrimResidualKind::BodyForceZ:
+        value = rate(core::kVelocityW);
+        break;
+      case TrimResidualKind::BodyMomentX:
+        value = rate(core::kRateP);
+        break;
+      case TrimResidualKind::BodyMomentY:
+        value = rate(core::kRateQ);
+        break;
+      case TrimResidualKind::BodyMomentZ:
+        value = rate(core::kRateR);
+        break;
       case TrimResidualKind::AuxiliaryRate: {
         const Slot slot = resolve(model, declaration.name);
         value = rate(slot.index);
@@ -261,16 +285,14 @@ TrimResult solve_trim(const model::VehicleModel& model,
   condition.environment.validate();
 
   if (condition.extended_state.size() != model.extended_state_size()) {
-    throw std::invalid_argument("trim: the condition's state has "
-                                + std::to_string(condition.extended_state.size())
-                                + " entries, the model has "
-                                + std::to_string(model.extended_state_size()));
+    throw std::invalid_argument(
+        "trim: the condition's state has " + std::to_string(condition.extended_state.size())
+        + " entries, the model has " + std::to_string(model.extended_state_size()));
   }
   if (condition.controls.size() != model.control_count()) {
-    throw std::invalid_argument("trim: the condition's controls have "
-                                + std::to_string(condition.controls.size())
-                                + " entries, the model has "
-                                + std::to_string(model.control_count()));
+    throw std::invalid_argument(
+        "trim: the condition's controls have " + std::to_string(condition.controls.size())
+        + " entries, the model has " + std::to_string(model.control_count()));
   }
   if (options.iterations < 1) {
     throw std::invalid_argument("trim: iterations must be at least 1");
@@ -351,8 +373,8 @@ TrimResult solve_trim(const model::VehicleModel& model,
         Eigen::Index worst = 0;
         v.col(i).cwiseAbs().maxCoeff(&worst);
         const std::string& name = problem.unknowns[static_cast<std::size_t>(worst)].name;
-        if (std::find(result.unconstrained_unknowns.begin(),
-                      result.unconstrained_unknowns.end(), name)
+        if (std::find(
+                result.unconstrained_unknowns.begin(), result.unconstrained_unknowns.end(), name)
             == result.unconstrained_unknowns.end()) {
           result.unconstrained_unknowns.push_back(name);
         }
@@ -383,7 +405,8 @@ TrimResult solve_trim(const model::VehicleModel& model,
   result.unknown_values = values;
   apply_unknowns(model, problem, values, condition, result.extended_state, result.controls);
   result.envelope = model.envelope(model::VehicleModel::rigid_body_part(result.extended_state),
-                                   model.auxiliary_part(result.extended_state), result.controls,
+                                   model.auxiliary_part(result.extended_state),
+                                   result.controls,
                                    condition.environment);
 
   for (std::size_t i = 0; i < problem.unknowns.size(); ++i) {
@@ -399,8 +422,7 @@ TrimResult solve_trim(const model::VehicleModel& model,
 
   result.converged = result.residual_norm <= options.residual_tolerance
                      && result.jacobian_rank == static_cast<int>(n)
-                     && result.out_of_bounds_unknowns.empty()
-                     && result.extended_state.allFinite();
+                     && result.out_of_bounds_unknowns.empty() && result.extended_state.allFinite();
 
   if (!result.converged) {
     std::ostringstream message;
@@ -426,7 +448,8 @@ TrimResult solve_trim(const model::VehicleModel& model,
       message << " Outside declared bounds: ";
       for (std::size_t i = 0; i < result.out_of_bounds_unknowns.size(); ++i) {
         const std::string& name = result.out_of_bounds_unknowns[i];
-        const auto it = std::find_if(problem.unknowns.begin(), problem.unknowns.end(),
+        const auto it = std::find_if(problem.unknowns.begin(),
+                                     problem.unknowns.end(),
                                      [&](const TrimUnknown& u) { return u.name == name; });
         const auto index = static_cast<Eigen::Index>(it - problem.unknowns.begin());
         message << (i ? ", " : "") << name << " = " << plain(values(index)) << " against ["
@@ -453,8 +476,8 @@ TrimProblem helicopter_trim_problem(const model::VehicleModel& model) {
   const auto has = [&states](const std::string& name) {
     return std::find(states.begin(), states.end(), name) != states.end();
   };
-  for (const char* required : {"collective_rad", "longitudinal_cyclic_rad", "lateral_cyclic_rad",
-                               "pedal_rad"}) {
+  for (const char* required :
+       {"collective_rad", "longitudinal_cyclic_rad", "lateral_cyclic_rad", "pedal_rad"}) {
     if (!has(required)) {
       throw std::invalid_argument(
           std::string("helicopter_trim_problem: the model has no state '") + required
@@ -541,8 +564,7 @@ double rotor_speed_residual(const model::VehicleModel& model,
     throw std::invalid_argument("rotor_speed_residual: '" + rotor_speed_state_name
                                 + "' is a control, not a state");
   }
-  const Eigen::VectorXd rate =
-      model.derivative(trim.extended_state, trim.controls, environment);
+  const Eigen::VectorXd rate = model.derivative(trim.extended_state, trim.controls, environment);
   return rate(slot.index);
 }
 

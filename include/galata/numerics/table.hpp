@@ -112,17 +112,22 @@ class Table1D {
   [[nodiscard]] const std::string& name() const noexcept {
     return name_;
   }
+
   [[nodiscard]] std::size_t size() const noexcept {
     return breakpoints_.size();
   }
+
   [[nodiscard]] bool empty() const noexcept {
     return breakpoints_.empty();
   }
+
   [[nodiscard]] double first_breakpoint() const;
   [[nodiscard]] double last_breakpoint() const;
+
   [[nodiscard]] TableInterpolation interpolation() const noexcept {
     return interpolation_;
   }
+
   [[nodiscard]] TableExtrapolation extrapolation() const noexcept {
     return extrapolation_;
   }
@@ -131,10 +136,12 @@ class Table1D {
   [[nodiscard]] std::uint64_t out_of_range_count() const noexcept {
     return out_of_range_;
   }
+
   // The furthest any query strayed, in the argument's own units. Zero when none did.
   [[nodiscard]] double worst_excursion() const noexcept {
     return worst_excursion_;
   }
+
   void reset_counts() const noexcept;
 
   // True when `argument` is within `tolerance` of an interior breakpoint, so a
@@ -174,27 +181,35 @@ class Table2D {
   [[nodiscard]] const std::string& name() const noexcept {
     return name_;
   }
+
   [[nodiscard]] bool empty() const noexcept {
     return rows_.empty();
   }
+
   [[nodiscard]] std::size_t row_count() const noexcept {
     return rows_.size();
   }
+
   [[nodiscard]] std::size_t column_count() const noexcept {
     return columns_.size();
   }
+
   [[nodiscard]] TableInterpolation interpolation() const noexcept {
     return interpolation_;
   }
+
   [[nodiscard]] TableExtrapolation extrapolation() const noexcept {
     return extrapolation_;
   }
+
   [[nodiscard]] std::uint64_t out_of_range_count() const noexcept {
     return out_of_range_;
   }
+
   [[nodiscard]] double worst_excursion() const noexcept {
     return worst_excursion_;
   }
+
   void reset_counts() const noexcept;
 
  private:

@@ -20,21 +20,20 @@ VehicleExecutionResult execute_vehicle(const model::VehicleModel& model,
   }
 
   const auto control_at = [&](double time_s, const Eigen::VectorXd& state) {
-    const Eigen::VectorXd controls = options.controls ? options.controls(time_s, state)
-                                                      : options.trim_controls;
+    const Eigen::VectorXd controls =
+        options.controls ? options.controls(time_s, state) : options.trim_controls;
     if (controls.size() != model.control_count() || !controls.allFinite()) {
       throw std::runtime_error("execute_vehicle: control callback returned invalid controls");
     }
     return controls;
   };
 
-  const numerics::DerivativeFunction derivative = [&](double time_s,
-                                                       const Eigen::VectorXd& state) {
+  const numerics::DerivativeFunction derivative = [&](double time_s, const Eigen::VectorXd& state) {
     return model.derivative(state, control_at(time_s, state), options.environment);
   };
-  const numerics::ProjectionFunction projection = options.projection
-                                            ? options.projection
-                                            : [](Eigen::VectorXd& state) { model::VehicleModel::project(state); };
+  const numerics::ProjectionFunction projection =
+      options.projection ? options.projection
+                         : [](Eigen::VectorXd& state) { model::VehicleModel::project(state); };
 
   numerics::IntegrationOptions integration;
   integration.method = numerics::IntegrationMethod::Rk4Fixed;
@@ -42,12 +41,8 @@ VehicleExecutionResult execute_vehicle(const model::VehicleModel& model,
   integration.step_count = options.steps;
   integration.sample_stride = options.sample_stride;
   VehicleExecutionResult result;
-  result.integration = numerics::integrate(derivative,
-                                           options.initial_state,
-                                           0.0,
-                                           integration,
-                                           projection,
-                                           options.state_bounds);
+  result.integration = numerics::integrate(
+      derivative, options.initial_state, 0.0, integration, projection, options.state_bounds);
 
   result.controls.reserve(result.integration.trajectory.states.size());
   result.outputs.reserve(result.integration.trajectory.states.size());

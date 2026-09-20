@@ -50,11 +50,10 @@ struct ResponseMetricResult {
 // segment starts at event_time_s (the first sample at or after it) and ends at
 // the final supplied sample. A caller handling repeated reference changes
 // invokes this once per segment.
-[[nodiscard]] ResponseMetricResult analyze_response_segment(
-    const std::vector<double>& times_s,
-    const std::vector<double>& reference,
-    const std::vector<double>& measured,
-    const ResponseMetricOptions& options);
+[[nodiscard]] ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s,
+                                                            const std::vector<double>& reference,
+                                                            const std::vector<double>& measured,
+                                                            const ResponseMetricOptions& options);
 
 [[nodiscard]] const char* to_string(SettlingStatus status) noexcept;
 

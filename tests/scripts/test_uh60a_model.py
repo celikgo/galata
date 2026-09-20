@@ -10,7 +10,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI = Path(os.environ["GALATA_PROJECT_CLI"])
+CLI = Path(os.environ.get("GALATA_PROJECT_CLI", ROOT / "build/dev/src/cli/galata")).resolve()
 STUDY = ROOT / "examples" / "uh60a-hover-trim" / "study.yaml"
 
 

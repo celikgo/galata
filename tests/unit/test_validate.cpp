@@ -326,8 +326,7 @@ TEST(ValidationGate, FlightTestEvidenceMustBeCompleteBeforeCampaignCanPass) {
   EXPECT_EQ(passed.status, galata::identify::ValidationGateStatus::Pass);
 
   evidence.evidence_class = "synthetic_contract";
-  const auto synthetic =
-      galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
+  const auto synthetic = galata::identify::evaluate_flight_test_gate(result, {criterion}, evidence);
   EXPECT_EQ(synthetic.status, galata::identify::ValidationGateStatus::Unresolved);
 
   evidence = {};

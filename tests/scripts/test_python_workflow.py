@@ -32,7 +32,7 @@ from galata_workflow.plotting import (  # noqa: E402
 )
 
 
-EXECUTABLE = ROOT / "build/dev/src/cli/galata"
+EXECUTABLE = Path(os.environ.get("GALATA_PROJECT_CLI", ROOT / "build/dev/src/cli/galata")).resolve()
 MODEL = ROOT / "models/souxmar-heli/souxmar-heli.yaml"
 SHARED_MODELS = (
     ("fixed-wing", ROOT / "models/nt33a/nt33a-fc1.yaml", 69.4944, 0.0),
@@ -56,6 +56,7 @@ def _fake_run(directory: Path, files: dict[str, str]) -> Run:
     return Run(manifest_path, manifest)
 
 
+@unittest.skipUnless(EXECUTABLE.is_file(), f"requires the POSIX project CLI: {EXECUTABLE}")
 class PythonWorkflowAcceptance(unittest.TestCase):
     def test_shared_vehicle_operations_execute_for_all_families(self):
         with tempfile.TemporaryDirectory(prefix="galata-shared-python-") as directory:

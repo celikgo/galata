@@ -37,7 +37,7 @@ struct FlightTestCampaign {
 // components may be symlinks. The verifier checks completeness and byte
 // identity only; it does not create flight-test, airworthiness or certification
 // evidence.
-[[nodiscard]] std::uintmax_t verify_flight_test_campaign(
-    const FlightTestCampaign& campaign, const std::filesystem::path& package_root);
+[[nodiscard]] std::uintmax_t verify_flight_test_campaign(const FlightTestCampaign& campaign,
+                                                         const std::filesystem::path& package_root);
 
 }  // namespace galata::identify

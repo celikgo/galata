@@ -54,9 +54,19 @@ std::string FixedWingVehicleModel::description() const {
 }
 
 std::vector<std::string> FixedWingVehicleModel::state_names() const {
-  return {"position_north_m", "position_east_m", "position_down_m", "velocity_u_m_s",
-          "velocity_v_m_s", "velocity_w_m_s", "quaternion_w", "quaternion_x", "quaternion_y",
-          "quaternion_z", "roll_rate_rad_s", "pitch_rate_rad_s", "yaw_rate_rad_s"};
+  return {"position_north_m",
+          "position_east_m",
+          "position_down_m",
+          "velocity_u_m_s",
+          "velocity_v_m_s",
+          "velocity_w_m_s",
+          "quaternion_w",
+          "quaternion_x",
+          "quaternion_y",
+          "quaternion_z",
+          "roll_rate_rad_s",
+          "pitch_rate_rad_s",
+          "yaw_rate_rad_s"};
 }
 
 std::vector<std::string> FixedWingVehicleModel::control_names() const {
@@ -88,15 +98,14 @@ sim::Wrench FixedWingVehicleModel::wrench(const core::State& state,
   // acceleration is independent of alpha-dot by Aircraft::validate(), so the
   // intermediate rigid-body rate is the same rate the legacy path used.
   const sim::Wrench without_lag = aircraft_.wrench(state, converted, atmosphere, 0.0);
-  const core::StateVector first = sim::rigid_body_derivative(
-      state, aircraft_.mass, without_lag, environment.gravity_ned_m_s2);
+  const core::StateVector first =
+      sim::rigid_body_derivative(state, aircraft_.mass, without_lag, environment.gravity_ned_m_s2);
   const double u = state.velocity_body_m_s.x();
   const double w = state.velocity_body_m_s.z();
   const double denominator = u * u + w * w;
-  const double alpha_dot = denominator > 0.0
-                               ? (u * first(core::kVelocityW) - w * first(core::kVelocityU))
-                                     / denominator
-                               : 0.0;
+  const double alpha_dot =
+      denominator > 0.0 ? (u * first(core::kVelocityW) - w * first(core::kVelocityU)) / denominator
+                        : 0.0;
   return aircraft_.wrench(state, converted, atmosphere, alpha_dot);
 }
 
@@ -117,8 +126,7 @@ EnvelopeStatus FixedWingVehicleModel::envelope(const core::State& state,
   const auto warning = aircraft_.envelope(state, atmosphere_from(environment));
   EnvelopeStatus result;
   result.outside = warning.outside_advisory_envelope;
-  result.worst_departure = std::max(warning.alpha_departure_rad,
-                                    warning.mach_departure);
+  result.worst_departure = std::max(warning.alpha_departure_rad, warning.mach_departure);
   if (warning.outside_advisory_envelope) {
     result.reason = "fixed-wing alpha/Mach advisory envelope";
   }
@@ -136,11 +144,19 @@ std::string MultirotorVehicleModel::description() const {
 }
 
 std::vector<std::string> MultirotorVehicleModel::state_names() const {
-  std::vector<std::string> names = {
-      "position_north_m", "position_east_m", "position_down_m", "velocity_u_m_s",
-      "velocity_v_m_s", "velocity_w_m_s", "quaternion_w", "quaternion_x",
-      "quaternion_y", "quaternion_z", "roll_rate_rad_s", "pitch_rate_rad_s",
-      "yaw_rate_rad_s"};
+  std::vector<std::string> names = {"position_north_m",
+                                    "position_east_m",
+                                    "position_down_m",
+                                    "velocity_u_m_s",
+                                    "velocity_v_m_s",
+                                    "velocity_w_m_s",
+                                    "quaternion_w",
+                                    "quaternion_x",
+                                    "quaternion_y",
+                                    "quaternion_z",
+                                    "roll_rate_rad_s",
+                                    "pitch_rate_rad_s",
+                                    "yaw_rate_rad_s"};
   for (int index = 0; index < quadrotor_.rotor_count(); ++index) {
     names.push_back("rotor_speed_" + std::to_string(index) + "_rad_s");
   }
@@ -162,8 +178,7 @@ int MultirotorVehicleModel::auxiliary_state_count() const {
   return quadrotor_.extended_state_size() - core::kStateSize;
 }
 
-sim::MassProperties MultirotorVehicleModel::mass_properties(
-    const Eigen::VectorXd&) const {
+sim::MassProperties MultirotorVehicleModel::mass_properties(const Eigen::VectorXd&) const {
   return quadrotor_.mass;
 }
 
@@ -175,15 +190,13 @@ sim::Wrench MultirotorVehicleModel::wrench(const core::State& state,
     throw std::invalid_argument("MultirotorVehicleModel: auxiliary state has the wrong length");
   }
   (void)controls;
-  return quadrotor_.wrench(state,
-                           auxiliary.head(quadrotor_.rotor_count()));
+  return quadrotor_.wrench(state, auxiliary.head(quadrotor_.rotor_count()));
 }
 
-Eigen::VectorXd MultirotorVehicleModel::auxiliary_derivative(
-    const core::State& state,
-    const Eigen::VectorXd& auxiliary,
-    const Eigen::VectorXd& controls,
-    const Environment& environment) const {
+Eigen::VectorXd MultirotorVehicleModel::auxiliary_derivative(const core::State& state,
+                                                             const Eigen::VectorXd& auxiliary,
+                                                             const Eigen::VectorXd& controls,
+                                                             const Environment& environment) const {
   if (auxiliary.size() != auxiliary_state_count()) {
     throw std::invalid_argument("MultirotorVehicleModel: auxiliary state has the wrong length");
   }
@@ -191,18 +204,15 @@ Eigen::VectorXd MultirotorVehicleModel::auxiliary_derivative(
   (void)environment;
   Eigen::VectorXd result = Eigen::VectorXd::Zero(auxiliary_state_count());
   const Eigen::VectorXd speeds = auxiliary.head(quadrotor_.rotor_count());
-  const double state_of_charge = quadrotor_.has_battery()
-                                     ? auxiliary(quadrotor_.battery_state_index()
-                                                 - core::kStateSize)
-                                     : 1.0;
-  const double drawn_shaft_w = quadrotor_.has_battery()
-                                   ? quadrotor_.shaft_power_w(speeds)
-                                   : 0.0;
+  const double state_of_charge =
+      quadrotor_.has_battery() ? auxiliary(quadrotor_.battery_state_index() - core::kStateSize)
+                               : 1.0;
+  const double drawn_shaft_w = quadrotor_.has_battery() ? quadrotor_.shaft_power_w(speeds) : 0.0;
   for (int index = 0; index < quadrotor_.rotor_count(); ++index) {
     const Rotor& rotor = quadrotor_.rotors[static_cast<std::size_t>(index)];
-    const double ceiling = std::max(
-        quadrotor_.speed_ceiling_rad_s(index, state_of_charge, drawn_shaft_w),
-        rotor.minimum_speed_rad_s);
+    const double ceiling =
+        std::max(quadrotor_.speed_ceiling_rad_s(index, state_of_charge, drawn_shaft_w),
+                 rotor.minimum_speed_rad_s);
     const double target = std::clamp(controls(index), rotor.minimum_speed_rad_s, ceiling);
     result(index) = (target - speeds(index)) / rotor.speed_time_constant_s;
   }
@@ -246,8 +256,8 @@ std::vector<ChannelMetadata> MultirotorVehicleModel::control_metadata() const {
 }
 
 std::vector<std::string> MultirotorVehicleModel::supported_operations() const {
-  return {"inspect", "evaluate", "trim.hover", "simulate", "linearize", "synth.lqr",
-          "wind_schedule"};
+  return {
+      "inspect", "evaluate", "trim.hover", "simulate", "linearize", "synth.lqr", "wind_schedule"};
 }
 
 std::vector<ChannelMetadata> HelicopterVehicleAdapter::control_metadata() const {
@@ -261,8 +271,15 @@ std::vector<ChannelMetadata> HelicopterVehicleAdapter::control_metadata() const 
 }
 
 std::vector<std::string> HelicopterVehicleAdapter::supported_operations() const {
-  return {"inspect", "evaluate", "trim.helicopter", "simulate", "linearize", "synth.lqr",
-          "sampled_control", "wind_schedule", "failure_schedule"};
+  return {"inspect",
+          "evaluate",
+          "trim.helicopter",
+          "simulate",
+          "linearize",
+          "synth.lqr",
+          "sampled_control",
+          "wind_schedule",
+          "failure_schedule"};
 }
 
 }  // namespace galata::model

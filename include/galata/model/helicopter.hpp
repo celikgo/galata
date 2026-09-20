@@ -119,10 +119,10 @@ namespace galata::model {
 // Named indices into the helicopter's AUXILIARY state, which begins at
 // core::kStateSize in the extended vector.
 enum HelicopterAuxIndex : int {
-  kMainRotorSpeed = 0,       // rad/s
-  kMainInflowRatio = 1,      // dimensionless
-  kTailInflowRatio = 2,      // dimensionless
-  kCollectivePosition = 3,   // rad
+  kMainRotorSpeed = 0,              // rad/s
+  kMainInflowRatio = 1,             // dimensionless
+  kTailInflowRatio = 2,             // dimensionless
+  kCollectivePosition = 3,          // rad
   kLongitudinalCyclicPosition = 4,  // rad
   kLateralCyclicPosition = 5,       // rad
   kPedalPosition = 6,               // rad
@@ -134,15 +134,15 @@ enum HelicopterAuxIndex : int {
   // made rotor speed hold at exactly its reference through a collective step,
   // with no droop at all. Droop IS the governed rotor's first-order behaviour,
   // and a model that cannot show it cannot be used for a drivetrain study.
-  kEngineTorque = 7,                // N m
+  kEngineTorque = 7,  // N m
   kHelicopterAuxCount = 8,
 };
 
 enum HelicopterControlIndex : int {
-  kCollectiveCommand = 0,           // rad
-  kLongitudinalCyclicCommand = 1,   // rad
-  kLateralCyclicCommand = 2,        // rad
-  kPedalCommand = 3,                // rad
+  kCollectiveCommand = 0,          // rad
+  kLongitudinalCyclicCommand = 1,  // rad
+  kLateralCyclicCommand = 2,       // rad
+  kPedalCommand = 3,               // rad
   kHelicopterControlCount = 4,
 };
 
@@ -152,10 +152,10 @@ enum HelicopterControlIndex : int {
 // slew infinitely fast to its stop; a rate limit alone lets it sit beyond the
 // mechanical travel; a lag alone lets it do both.
 struct ActuatorLimits {
-  double minimum_rad = 0.0;        // rad
-  double maximum_rad = 0.0;        // rad
-  double rate_limit_rad_s = 0.0;   // rad/s, positive
-  double time_constant_s = 0.0;    // s, positive
+  double minimum_rad = 0.0;       // rad
+  double maximum_rad = 0.0;       // rad
+  double rate_limit_rad_s = 0.0;  // rad/s, positive
+  double time_constant_s = 0.0;   // s, positive
 };
 
 // Fuselage and empennage, as component aerodynamics.
@@ -179,9 +179,9 @@ struct HelicopterAirframe {
   Eigen::Vector3d cg_to_fuselage_reference_body_m = Eigen::Vector3d::Zero();  // m
 
   // Horizontal stabiliser: area, lift-curve slope, incidence and arm.
-  double horizontal_tail_area_m2 = 0.0;          // m^2
-  double horizontal_tail_lift_slope = 0.0;       // 1/rad
-  double horizontal_tail_incidence_rad = 0.0;    // rad, positive leading edge up
+  double horizontal_tail_area_m2 = 0.0;        // m^2
+  double horizontal_tail_lift_slope = 0.0;     // 1/rad
+  double horizontal_tail_incidence_rad = 0.0;  // rad, positive leading edge up
   Eigen::Vector3d cg_to_horizontal_tail_body_m = Eigen::Vector3d::Zero();  // m
   // Fraction of the main-rotor induced velocity seen at the horizontal tail.
   // Declared, because the real value varies strongly with advance ratio and a
@@ -189,9 +189,9 @@ struct HelicopterAirframe {
   double horizontal_tail_downwash_factor = 0.0;  // dimensionless
 
   // Vertical stabiliser: area, side-force slope, incidence and arm.
-  double vertical_tail_area_m2 = 0.0;         // m^2
-  double vertical_tail_side_slope = 0.0;      // 1/rad
-  double vertical_tail_incidence_rad = 0.0;   // rad, positive nose-left side force
+  double vertical_tail_area_m2 = 0.0;        // m^2
+  double vertical_tail_side_slope = 0.0;     // 1/rad
+  double vertical_tail_incidence_rad = 0.0;  // rad, positive nose-left side force
   Eigen::Vector3d cg_to_vertical_tail_body_m = Eigen::Vector3d::Zero();  // m
 
   // Stall angle beyond which a stabiliser's linear slope is held rather than
@@ -300,14 +300,15 @@ class HelicopterModel final : public VehicleModel {
     sim::Wrench fuselage;
     sim::Wrench horizontal_tail;
     sim::Wrench vertical_tail;
-    sim::Wrench total;  // excluding gravity, as VehicleModel::wrench returns
-    double engine_torque_n_m = 0.0;            // N m at the main shaft, DELIVERED
-    double governor_requested_torque_n_m = 0.0; // N m, what the governor asked for
-    double governor_error_rad_s = 0.0;          // rad/s, reference minus actual
-    double total_power_w = 0.0;         // W
-    double rotor_speed_rad_s = 0.0;     // rad/s
-    double anti_torque_residual_n_m = 0.0;  // N m; zero in a yaw-trimmed state
+    sim::Wrench total;               // excluding gravity, as VehicleModel::wrench returns
+    double engine_torque_n_m = 0.0;  // N m at the main shaft, DELIVERED
+    double governor_requested_torque_n_m = 0.0;  // N m, what the governor asked for
+    double governor_error_rad_s = 0.0;           // rad/s, reference minus actual
+    double total_power_w = 0.0;                  // W
+    double rotor_speed_rad_s = 0.0;              // rad/s
+    double anti_torque_residual_n_m = 0.0;       // N m; zero in a yaw-trimmed state
   };
+
   [[nodiscard]] Breakdown breakdown(const core::State& state,
                                     const Eigen::VectorXd& auxiliary,
                                     const Eigen::VectorXd& controls,
@@ -334,8 +335,7 @@ class HelicopterModel final : public VehicleModel {
 // Load from the YAML contract documented in docs/MODEL_FILES.md. Unknown keys
 // are errors, as everywhere else in this project.
 [[nodiscard]] HelicopterModel load_helicopter(const std::string& path);
-[[nodiscard]] HelicopterModel parse_helicopter(const std::string& bytes,
-                                               const std::string& origin);
+[[nodiscard]] HelicopterModel parse_helicopter(const std::string& bytes, const std::string& origin);
 
 }  // namespace galata::model
 

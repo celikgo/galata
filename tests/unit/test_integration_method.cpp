@@ -19,10 +19,10 @@
 #include <limits>
 #include <stdexcept>
 
-using galata::numerics::IntegrationMethod;
-using galata::numerics::IntegrationOptions;
 using galata::numerics::integrate;
 using galata::numerics::integration_step;
+using galata::numerics::IntegrationMethod;
+using galata::numerics::IntegrationOptions;
 using galata::numerics::StateBounds;
 using galata::numerics::TerminationReason;
 
@@ -90,7 +90,8 @@ TEST(StiffBenchmark, Rk4DivergesAboveItsStabilityLimit) {
   Eigen::VectorXd x0(1);
   x0 << 0.0;
   // h = 5 ms gives h*lambda = -5, outside RK4's real-axis stability region.
-  const auto result = integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::Rk4Fixed, 0.005, 200));
+  const auto result =
+      integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::Rk4Fixed, 0.005, 200));
   // It does not merely lose accuracy: it leaves every plausible scale. Whether
   // it ends finite or not, it is nowhere near cos(1) = 0.5403.
   const double final_value = result.trajectory.states.back()(0);
@@ -101,8 +102,8 @@ TEST(StiffBenchmark, Rk4DivergesAboveItsStabilityLimit) {
 TEST(StiffBenchmark, ImplicitEulerIsStableAtAStepWhereRk4Diverges) {
   Eigen::VectorXd x0(1);
   x0 << 0.0;
-  const auto result =
-      integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.005, 200));
+  const auto result = integrate(
+      stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.005, 200));
   ASSERT_TRUE(result.completed()) << result.detail;
   const double final_value = result.trajectory.states.back()(0);
   // First order at h = 5 ms on a signal of unit amplitude: a few parts in a
@@ -116,18 +117,17 @@ TEST(StiffBenchmark, ImplicitEulerIsStableAtAStepWhereRk4Diverges) {
 TEST(StiffBenchmark, TrapezoidalIsStableAndMoreAccurateThanImplicitEuler) {
   Eigen::VectorXd x0(1);
   x0 << 0.0;
-  const auto euler =
-      integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.005, 200));
-  const auto trapezoid =
-      integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::TrapezoidalFixed, 0.005, 200));
+  const auto euler = integrate(
+      stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.005, 200));
+  const auto trapezoid = integrate(
+      stiff_derivative, x0, 0.0, options_for(IntegrationMethod::TrapezoidalFixed, 0.005, 200));
   ASSERT_TRUE(euler.completed());
   ASSERT_TRUE(trapezoid.completed());
   const double exact = std::cos(1.0);
   const double euler_error = std::fabs(euler.trajectory.states.back()(0) - exact);
   const double trapezoid_error = std::fabs(trapezoid.trajectory.states.back()(0) - exact);
-  EXPECT_LT(trapezoid_error, euler_error)
-      << "second order should beat first order here: trapezoid " << trapezoid_error << " vs euler "
-      << euler_error;
+  EXPECT_LT(trapezoid_error, euler_error) << "second order should beat first order here: trapezoid "
+                                          << trapezoid_error << " vs euler " << euler_error;
 }
 
 TEST(StiffBenchmark, ImplicitEulerStaysStableAtAStepTwentyTimesRk4sLimit) {
@@ -135,8 +135,8 @@ TEST(StiffBenchmark, ImplicitEulerStaysStableAtAStepTwentyTimesRk4sLimit) {
   x0 << 0.0;
   // h = 50 ms is h*lambda = -50. A-stability is a statement about the whole
   // left half-plane, so the step is limited by accuracy alone.
-  const auto result =
-      integrate(stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.05, 20));
+  const auto result = integrate(
+      stiff_derivative, x0, 0.0, options_for(IntegrationMethod::ImplicitEulerFixed, 0.05, 20));
   ASSERT_TRUE(result.completed()) << result.detail;
   EXPECT_LT(std::fabs(result.trajectory.states.back()(0)), 2.0)
       << "the solution must stay bounded even where the step is far outside any explicit "
@@ -186,8 +186,8 @@ TEST(StateBounds, ADivergedFiniteTrajectoryIsRefusedAndNamesTheState) {
   limits << 1.0e3, -1.0;  // second state declared unbounded
   const StateBounds bounds({"rotor_speed_rad_s", "position_north_m"}, limits);
 
-  const auto result =
-      integrate(growth, x0, 0.0, options_for(IntegrationMethod::Rk4Fixed, 0.01, 5000), nullptr, bounds);
+  const auto result = integrate(
+      growth, x0, 0.0, options_for(IntegrationMethod::Rk4Fixed, 0.01, 5000), nullptr, bounds);
 
   EXPECT_FALSE(result.completed());
   EXPECT_EQ(result.reason, TerminationReason::BoundExceeded);
@@ -209,16 +209,23 @@ TEST(StateBounds, TheStiffDivergenceThatUsedToBeReportedAsCompletedIsNowRefused)
   limits << 10.0;  // the true solution never leaves [-1, 1]
   const StateBounds bounds({"x"}, limits);
 
-  const auto result = integrate(stiff_derivative, x0, 0.0,
-                                options_for(IntegrationMethod::Rk4Fixed, 0.005, 200), nullptr, bounds);
+  const auto result = integrate(stiff_derivative,
+                                x0,
+                                0.0,
+                                options_for(IntegrationMethod::Rk4Fixed, 0.005, 200),
+                                nullptr,
+                                bounds);
   EXPECT_FALSE(result.completed());
   EXPECT_EQ(result.reason, TerminationReason::BoundExceeded);
   EXPECT_NE(result.detail.find("'x'"), std::string::npos) << result.detail;
 
   // And the same problem with the same bound under an A-stable method completes.
-  const auto stable = integrate(stiff_derivative, x0, 0.0,
+  const auto stable = integrate(stiff_derivative,
+                                x0,
+                                0.0,
                                 options_for(IntegrationMethod::ImplicitEulerFixed, 0.005, 200),
-                                nullptr, bounds);
+                                nullptr,
+                                bounds);
   EXPECT_TRUE(stable.completed()) << stable.detail;
 }
 
@@ -233,8 +240,8 @@ TEST(StateBounds, ANonFiniteStateIsNamedEvenWithNoMagnitudeDeclared) {
 TEST(StateBounds, AnEmptyBoundsObjectPreservesTheOldFiniteOnlyBehaviour) {
   Eigen::VectorXd x0(1);
   x0 << 1.0;
-  const auto result = integrate(decay_derivative, x0, 0.0,
-                                options_for(IntegrationMethod::Rk4Fixed, 0.01, 100), nullptr, {});
+  const auto result = integrate(
+      decay_derivative, x0, 0.0, options_for(IntegrationMethod::Rk4Fixed, 0.01, 100), nullptr, {});
   EXPECT_TRUE(result.completed());
   EXPECT_EQ(result.reason, TerminationReason::Completed);
 }
@@ -255,7 +262,8 @@ TEST(IntegrationMethod, RefusesAMalformedRequest) {
 TEST(IntegrationMethod, RepeatedRunsAreBitIdenticalForEveryMethod) {
   Eigen::VectorXd x0(1);
   x0 << 0.0;
-  for (const auto method : {IntegrationMethod::Rk4Fixed, IntegrationMethod::ImplicitEulerFixed,
+  for (const auto method : {IntegrationMethod::Rk4Fixed,
+                            IntegrationMethod::ImplicitEulerFixed,
                             IntegrationMethod::TrapezoidalFixed}) {
     const auto a = integrate(stiff_derivative, x0, 0.0, options_for(method, 0.002, 100));
     const auto b = integrate(stiff_derivative, x0, 0.0, options_for(method, 0.002, 100));

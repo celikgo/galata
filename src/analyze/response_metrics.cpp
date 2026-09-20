@@ -26,7 +26,8 @@ void validate(const std::vector<double>& times_s,
       || options.settling_band < 0.0 || !std::isfinite(options.settling_dwell_s)
       || options.settling_dwell_s < 0.0 || !std::isfinite(options.reference_before)
       || !std::isfinite(options.reference_after)) {
-    throw std::invalid_argument("analyze_response_segment options must be finite and non-negative where declared");
+    throw std::invalid_argument(
+        "analyze_response_segment options must be finite and non-negative where declared");
   }
   for (std::size_t i = 0; i < times_s.size(); ++i) {
     if (!std::isfinite(times_s[i]) || !std::isfinite(reference[i]) || !std::isfinite(measured[i])) {
@@ -47,7 +48,8 @@ ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s
   validate(times_s, reference, measured, options);
   const std::size_t first = event_index(times_s, options.event_time_s);
   if (first >= times_s.size()) {
-    throw std::invalid_argument("analyze_response_segment event_time_s is after the observation window");
+    throw std::invalid_argument(
+        "analyze_response_segment event_time_s is after the observation window");
   }
 
   ResponseMetricResult result;
@@ -59,8 +61,7 @@ ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s
     squared_error += error * error;
     ++sample_count;
   }
-  result.final_tracking_error =
-      std::fabs(measured.back() - reference.back());
+  result.final_tracking_error = std::fabs(measured.back() - reference.back());
   result.rms_tracking_error = std::sqrt(squared_error / static_cast<double>(sample_count));
 
   const double initial_error = std::fabs(measured[first] - reference[first]);
@@ -73,8 +74,8 @@ ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s
         continue;
       }
       const double required_end = times_s[i] + options.settling_dwell_s;
-      const auto end = std::upper_bound(times_s.begin() + static_cast<std::ptrdiff_t>(i),
-                                        times_s.end(), required_end);
+      const auto end = std::upper_bound(
+          times_s.begin() + static_cast<std::ptrdiff_t>(i), times_s.end(), required_end);
       const std::size_t end_index = static_cast<std::size_t>(end - times_s.begin());
       if (end_index == 0 || end_index > times_s.size()) {
         continue;
@@ -86,7 +87,8 @@ ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s
           break;
         }
       }
-      if (remains_in_band && (end_index == times_s.size() || times_s[end_index - 1] >= required_end)) {
+      if (remains_in_band
+          && (end_index == times_s.size() || times_s[end_index - 1] >= required_end)) {
         result.settling_duration_s = times_s[i] - options.event_time_s;
         result.settling_status = SettlingStatus::DemonstratedRecovery;
         break;
@@ -101,8 +103,8 @@ ResponseMetricResult analyze_response_segment(const std::vector<double>& times_s
       double signed_excursion = 0.0;
       for (std::size_t i = first; i < times_s.size(); ++i) {
         const double signed_response = measured[i] - options.reference_after;
-        signed_excursion = std::max(signed_excursion,
-                                    (amplitude > 0.0 ? signed_response : -signed_response));
+        signed_excursion =
+            std::max(signed_excursion, (amplitude > 0.0 ? signed_response : -signed_response));
       }
       result.overshoot_fraction = std::max(0.0, signed_excursion) / std::fabs(amplitude);
     }

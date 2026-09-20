@@ -201,6 +201,10 @@ if(UNIX AND TARGET galata_cli)
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_onboard_deployment_fixture.py")
   set_tests_properties(OnboardDeploymentFixture PROPERTIES LABELS "integration" TIMEOUT 60)
+  add_test(NAME PythonWorkflowAcceptance
+    COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
+      "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_python_workflow.py")
+  set_tests_properties(PythonWorkflowAcceptance PROPERTIES LABELS "integration" TIMEOUT 180)
   add_test(NAME UH60AModelCLI
     COMMAND "${CMAKE_COMMAND}" -E env "GALATA_PROJECT_CLI=$<TARGET_FILE:galata_cli>"
       "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/scripts/test_uh60a_model.py")

@@ -58,7 +58,7 @@ typedef int (*GalataControllerStepFn)(void* context,
 typedef void (*GalataControllerDestroyFn)(void* context);
 
 #ifdef __cplusplus
-}  /* extern "C" */
+} /* extern "C" */
 #endif
 
-#endif  /* GALATA_ONBOARD_CONTROLLER_ABI_H */
+#endif /* GALATA_ONBOARD_CONTROLLER_ABI_H */
